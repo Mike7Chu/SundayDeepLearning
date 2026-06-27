@@ -46,6 +46,11 @@ def test_premium_math():
         assert abs(by_coin["BTC"].premium_coin_pct) < 1e-6
         # ETH 김프 = (5,700,000 / 5,520,000 - 1)*100 ≈ 3.26%
         assert abs(by_coin["ETH"].premium_coin_pct - 3.2608695) < 1e-3
+        # 심볼 충돌 이상치(±80% 초과)는 제외됨
+        await _seed(redis, "upbit", "PROS", 642, "KRW")
+        await _seed(redis, "binance", "PROS", 57.14, "USDT")  # 1000%+
+        cells2 = await compute_premium(redis, "upbit", "binance")
+        assert "PROS" not in {c.coin for c in cells2}
         await redis.aclose()
 
     asyncio.run(run())

@@ -104,6 +104,7 @@ const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString("ko-KR",{maximumFractionDigits:2});
 const fmt4 = (n) => Number(n).toLocaleString("ko-KR",{maximumFractionDigits:4});
 let activeTab = "kimp";
+let busy = false;   // 진행 중 요청 중복 폴링 방지
 const term = () => $("search").value.trim().toUpperCase();
 
 function setStatus(cls,text){ $("status").className="dot "+cls; $("statusText").textContent=text; }
@@ -130,11 +131,14 @@ function switchTab(tab){
 }
 
 async function tick(){
+  if(busy) return;
+  busy = true;
   try {
     if(activeTab==="kimp") await renderKimp();
     else if(activeTab==="arb") await renderArb();
     else await renderFunding();
   } catch(e){ setStatus("err","오류: "+e.message); }
+  finally { busy = false; }
 }
 
 function matchCoin(c){ const t=term(); return !t || c.toUpperCase().includes(t); }
@@ -165,7 +169,7 @@ function fundLine(leg){ if(!leg.funding) return "";
   return `<div class="fund">펀비 ${leg.funding.rate_pct.toFixed(4)}% ${iv}</div>`; }
 
 async function renderArb(){
-  const d = await (await fetch(`/arbitrage?min_gap=${$("minGap").value}&limit=300`)).json();
+  const d = await (await fetch(`/arbitrage?min_gap=${$("minGap").value}&limit=100`)).json();
   let rows=(d.rows||[]).filter(x=>matchCoin(x.coin));
   const box=$("arbCards");
   if(!rows.length){ box.innerHTML='<div class="empty">기회 없음 (perp 수집 후/갭 조건 완화)</div>'; setStatus("stale","데이터 대기"); return; }

@@ -1,8 +1,7 @@
 """해외 거래소 간 가격차(아비트라지) + 펀딩비(정산주기 포함) 비교.
 
-- 현물(spot)/선물(perp) 각각 해외 거래소들의 USDT 가격 → 최저-최고 스프레드.
-- 펀딩비는 거래소별 비율(%) + 정산주기(interval_h) + 다음정산시각(next_ts) + APY.
-(마진은 현물 오더북 공유 → 가격은 현물과 동일.)
+성능: 거래소별 해시를 hgetall로 한 번씩만 로드해 메모리에서 계산(N+1 제거).
+안정성: 값이 기대 스키마(dict)가 아니면(레거시 데이터 등) 해당 셀만 건너뛴다.
 """
 from __future__ import annotations
 
@@ -23,17 +22,31 @@ def _apy(rate: float, interval_h: float | None) -> float:
     return round(rate * periods_per_year * 100, 4)
 
 
-async def _union_coins(redis: aioredis.Redis, key_fn, exchanges: list[str]) -> list[str]:
-    coins: set[str] = set()
-    for ex in exchanges:
-        coins.update(await redis.hkeys(key_fn(ex)))
-    return sorted(coins)
+def _loads(raw: str):
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+async def _hash(redis: aioredis.Redis, key: str) -> dict[str, dict]:
+    """해시 전체를 한 번에 로드 → {field: parsed_dict}. 불량 값은 제외."""
+    raw = await redis.hgetall(key)
+    out: dict[str, dict] = {}
+    for field, val in raw.items():
+        d = _loads(val)
+        if isinstance(d, dict):
+            out[field] = d
+    return out
 
 
 async def all_coins(redis: aioredis.Redis) -> list[str]:
     """해외 현물에 존재하는 전 코인(검색 자동완성용)."""
     universe = load_universe()
-    return await _union_coins(redis, ticker_key, universe.overseas)
+    coins: set[str] = set()
+    for ex in universe.overseas:
+        coins.update(await redis.hkeys(ticker_key(ex)))
+    return sorted(coins)
 
 
 async def compute_cross(redis: aioredis.Redis, coin: str, market: str = "spot") -> dict:
@@ -43,10 +56,8 @@ async def compute_cross(redis: aioredis.Redis, coin: str, market: str = "spot") 
 
     rows: list[dict] = []
     for ex in universe.overseas:
-        raw = await redis.hget(key_fn(ex), coin)
-        if not raw:
-            continue
-        price = json.loads(raw).get("price")
+        d = _loads(await redis.hget(key_fn(ex), coin) or "")
+        price = d.get("price") if isinstance(d, dict) else None
         if price and price > 0:
             rows.append({"exchange": ex, "price": float(price)})
 
@@ -61,15 +72,17 @@ async def compute_cross(redis: aioredis.Redis, coin: str, market: str = "spot") 
     return result
 
 
-def _funding_cell(raw: str) -> dict:
-    d = json.loads(raw)
-    rate = float(d["rate"])
+def funding_cell(d: dict) -> dict | None:
+    """파싱된 펀비 dict → 표시용 셀. rate 없으면 None."""
+    rate = d.get("rate")
+    if rate is None:
+        return None
     interval_h = d.get("interval_h")
     return {
-        "rate_pct": round(rate * 100, 4),
+        "rate_pct": round(float(rate) * 100, 4),
         "interval_h": interval_h,
         "next_ts": d.get("next_ts"),
-        "apy": _apy(rate, interval_h),
+        "apy": _apy(float(rate), interval_h),
     }
 
 
@@ -78,10 +91,10 @@ async def compute_funding(redis: aioredis.Redis, coin: str) -> dict:
     universe = load_universe()
     rows: list[dict] = []
     for ex in universe.overseas:
-        raw = await redis.hget(funding_key(ex), coin)
-        if raw is None:
-            continue
-        rows.append({"exchange": ex, **_funding_cell(raw)})
+        d = _loads(await redis.hget(funding_key(ex), coin) or "")
+        cell = funding_cell(d) if isinstance(d, dict) else None
+        if cell:
+            rows.append({"exchange": ex, **cell})
 
     rows.sort(key=lambda r: r["rate_pct"], reverse=True)
     result = {"coin": coin, "rows": rows, "spread_pct": None,
@@ -95,18 +108,27 @@ async def compute_funding(redis: aioredis.Redis, coin: str) -> dict:
 
 
 async def compute_funding_matrix(redis: aioredis.Redis) -> dict:
-    """코인 × 거래소 펀딩비 매트릭스(더따리 실시간 펀비 화면)."""
+    """코인 × 거래소 펀딩비 매트릭스(더따리 실시간 펀비 화면).
+
+    거래소별 funding 해시를 한 번씩만 로드(N+1 제거).
+    """
     universe = load_universe()
     exchanges = universe.overseas
-    coins = await _union_coins(redis, funding_key, exchanges)
+
+    # ex -> {coin: parsed} 한 번에
+    per_ex = {ex: await _hash(redis, funding_key(ex)) for ex in exchanges}
+    coins: set[str] = set()
+    for d in per_ex.values():
+        coins.update(d.keys())
 
     rows: list[dict] = []
-    for coin in coins:
+    for coin in sorted(coins):
         by_ex: dict[str, dict] = {}
         for ex in exchanges:
-            raw = await redis.hget(funding_key(ex), coin)
-            if raw is not None:
-                by_ex[ex] = _funding_cell(raw)
+            d = per_ex[ex].get(coin)
+            cell = funding_cell(d) if d else None
+            if cell:
+                by_ex[ex] = cell
         if by_ex:
             rows.append({"coin": coin, "by_ex": by_ex})
     return {"exchanges": exchanges, "coins": rows}

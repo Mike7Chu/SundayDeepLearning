@@ -65,6 +65,10 @@ async def compute_premium(
         ref_krw_tether = _to_krw(r, tether)  # 테더 기준
         if ref_krw_coin <= 0 or ref_krw_tether <= 0:
             continue
+        premium_coin_pct = (base_krw / ref_krw_coin - 1) * 100
+        # 심볼 충돌(동일 티커·다른 코인)/오류 데이터로 의심되는 이상치 제외
+        if abs(premium_coin_pct) > settings.premium_sanity_max_pct:
+            continue
         cells.append(
             PremiumCell(
                 coin=coin,
@@ -73,7 +77,7 @@ async def compute_premium(
                 base_price_krw=round(base_krw, 4),
                 ref_price_krw=round(ref_krw_coin, 4),
                 premium_pct=round((base_krw / ref_krw_tether - 1) * 100, 4),
-                premium_coin_pct=round((base_krw / ref_krw_coin - 1) * 100, 4),
+                premium_coin_pct=round(premium_coin_pct, 4),
                 tether_rate=round(tether, 4),
                 forex_rate=round(forex, 4),
                 ts=min(b.ts, r.ts),

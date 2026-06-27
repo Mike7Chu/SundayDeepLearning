@@ -79,6 +79,22 @@ def test_funding_matrix():
     asyncio.run(run())
 
 
+def test_legacy_float_funding_ignored():
+    """구 스키마(평문 float) 값이 섞여도 500 없이 무시된다."""
+    async def run():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        await redis.hset(funding_key("binance"), "BTC", "0.0001")   # 레거시(dict 아님)
+        await _seed_funding(redis, "bybit", "BTC", 0.0002, 8.0)     # 정상
+        d = await compute_funding(redis, "BTC")
+        exs = {r["exchange"] for r in d["rows"]}
+        assert exs == {"bybit"}            # 레거시는 빠지고 정상만
+        m = await compute_funding_matrix(redis)
+        assert m["coins"][0]["by_ex"].get("binance") is None
+        await redis.aclose()
+
+    asyncio.run(run())
+
+
 def test_arbitrage_strategy():
     async def run():
         redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
