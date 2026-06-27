@@ -27,6 +27,26 @@ def wallet_key(exchange: str) -> str:
     return f"wallet:{exchange}"
 
 
+# ===== 봇 (페이퍼/실행) =====
+BOT_KILLSWITCH_KEY = "bot:killswitch"            # "1"이면 전 봇 정지
+
+
+def bot_enabled_key(name: str) -> str:
+    return f"bot:enabled:{name}"                  # "1"/"0"
+
+
+def bot_state_key(name: str) -> str:
+    return f"bot:state:{name}"                    # json 상태
+
+
+def paper_positions_key(name: str) -> str:
+    return f"paper:positions:{name}"             # hash coin->json position
+
+
+def paper_fills_key(name: str) -> str:
+    return f"paper:fills:{name}"                 # list(json fill)
+
+
 # 은행 환율 키(폴백용). value=float(USD/KRW)
 FX_USDKRW_KEY = "fx:USDKRW"
 
