@@ -13,7 +13,7 @@ import redis.asyncio as aioredis
 
 from collector.exchanges.adapter import ExchangeAdapter
 from collector.forex import fetch_usdkrw
-from shared.redis_keys import FX_USDKRW_KEY, ticker_key
+from shared.redis_keys import FX_USDKRW_KEY, tether_key, ticker_key
 from shared.settings import settings
 from shared.universe import load_universe
 
@@ -26,12 +26,20 @@ logger = logging.getLogger("collector")
 
 async def collect_exchange(redis: aioredis.Redis, adapter: ExchangeAdapter) -> None:
     snapshots = await adapter.fetch()
-    if not snapshots:
-        return
-    mapping = {coin: snap.model_dump_json() for coin, snap in snapshots.items()}
-    await redis.hset(ticker_key(adapter.cfg.name), mapping=mapping)
-    logger.info("[%s] %d/%d coins", adapter.cfg.name,
-                len(snapshots), len(adapter.coins))
+    if snapshots:
+        mapping = {coin: snap.model_dump_json() for coin, snap in snapshots.items()}
+        await redis.hset(ticker_key(adapter.cfg.name), mapping=mapping)
+
+    # 국내(KRW) 거래소는 원화 테더가(USDT/KRW)도 수집 → 김프 환산 기준
+    tether = None
+    if adapter.cfg.region == "domestic":
+        tether = await adapter.fetch_price(f"USDT/{adapter.cfg.quote}")
+        if tether:
+            await redis.set(tether_key(adapter.cfg.name), tether)
+
+    logger.info("[%s] %d/%d coins%s", adapter.cfg.name,
+                len(snapshots), len(adapter.coins),
+                f" tether={tether:.1f}" if tether else "")
 
 
 async def ticker_loop(redis: aioredis.Redis, adapters: list[ExchangeAdapter]) -> None:

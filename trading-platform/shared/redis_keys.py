@@ -7,7 +7,12 @@ def ticker_key(exchange: str) -> str:
     return f"ticker:{exchange}"
 
 
-# 환율 키. value=float(USD/KRW)
+def tether_key(exchange: str) -> str:
+    """국내 거래소의 USDT/KRW(원화 테더가). value=float(KRW). 김프 환산 기준."""
+    return f"tether:{exchange}"
+
+
+# 은행 환율 키(폴백용). value=float(USD/KRW)
 FX_USDKRW_KEY = "fx:USDKRW"
 
 # 김프 실시간 스트림 pub/sub 채널

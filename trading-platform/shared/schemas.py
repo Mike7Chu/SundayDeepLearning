@@ -41,7 +41,8 @@ class PremiumCell(BaseModel):
     base_exchange: str
     ref_exchange: str
     base_price_krw: float
-    ref_price_krw: float        # 해외가 * 환율
+    ref_price_krw: float        # 해외가 * 환산레이트
     premium_pct: float          # (base/ref - 1) * 100. 양수=김프, 음수=역프
-    usdkrw: float
+    rate: float                 # 환산에 사용한 KRW/USDT 레이트
+    basis: str                  # "tether"(원화 테더가) | "forex"(은행 환율)
     ts: float

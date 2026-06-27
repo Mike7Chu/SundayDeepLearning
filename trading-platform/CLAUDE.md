@@ -30,7 +30,7 @@
 | `collector/exchanges/adapter.py` | ccxt 거래소 어댑터(fetch_tickers/폴백) |
 | `collector/forex.py` | USD/KRW 환율(open.er-api.com, 폴백값 지원) |
 | `api/` | FastAPI. 김프 계산 + REST/WS |
-| `api/services/premium.py` | 김프식: `(국내KRW/(해외USDT×환율)−1)×100` |
+| `api/services/premium.py` | 김프식(**원화 테더가 기준**): `(국내KRW/(해외USDT×테더가KRW)−1)×100`, 테더가 없으면 환율 폴백(`basis` 필드) |
 | `api/routers/premium.py` | `/premium`, `/tickers/{ex}`, `/exchanges`, `WS /ws/premium` |
 | `web/index.html` | 김프 대시보드 단일 페이지. FastAPI `GET /`로 서빙(`api/main.py`) |
 | `notifier/` | 텔레그램 봇 묶음. 김프알림(`main.py`/`alerts.py`, `config/alerts.yaml`) + 신규상장감지(`announce_main.py`/`listings.py`, `config/announcements.yaml`) + 발송(`telegram.py`) |
@@ -39,7 +39,7 @@
 | `deploy/` | RPi 원클릭 배포 스크립트·가이드 |
 | `tests/test_premium.py` | 김프계산·유니버스·API 스모크 테스트 |
 
-데이터 흐름: `collector → Redis(ticker:{ex} 해시, fx:USDKRW) → api 계산 → REST/WS → (예정)web/notifier`.
+데이터 흐름: `collector → Redis(ticker:{ex} 해시, tether:{국내ex} USDT/KRW, fx:USDKRW 폴백) → api 계산(테더 기준) → REST/WS + web 대시보드 + notifier 알림`.
 
 ## 실행 / 검증
 ```bash

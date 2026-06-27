@@ -15,7 +15,7 @@ def _cell(coin: str, pct: float) -> PremiumCell:
     return PremiumCell(
         coin=coin, base_exchange="upbit", ref_exchange="binance",
         base_price_krw=1.0, ref_price_krw=1.0, premium_pct=pct,
-        usdkrw=1380.0, ts=0.0,
+        rate=1380.0, basis="forex", ts=0.0,
     )
 
 

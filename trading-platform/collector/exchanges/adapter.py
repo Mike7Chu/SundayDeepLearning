@@ -54,6 +54,15 @@ class ExchangeAdapter:
             logger.warning("[%s] fetch failed: %s", self.cfg.name, exc)
         return out
 
+    async def fetch_price(self, symbol: str) -> float | None:
+        """단일 심볼 최신가(예: USDT/KRW). 실패 시 None."""
+        try:
+            t = await self.client.fetch_ticker(symbol)
+            return _last_price(t)
+        except Exception as exc:
+            logger.warning("[%s] %s fetch failed: %s", self.cfg.name, symbol, exc)
+            return None
+
     async def _fetch_one(self, coin: str) -> TickerSnapshot | None:
         t = await self.client.fetch_ticker(self.symbol(coin))
         price = _last_price(t)

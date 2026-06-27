@@ -49,7 +49,7 @@
     <label>비교(해외) <select id="ref"></select></label>
     <div class="meta">
       <div><span id="status" class="dot err"></span><span id="statusText">연결 중…</span></div>
-      <div>USD/KRW <span id="fx">-</span> · <span id="updated">-</span></div>
+      <div><span id="basisLabel">환산</span> <span id="fx">-</span> · <span id="updated">-</span></div>
     </div>
   </div>
 </header>
@@ -109,7 +109,9 @@ function render(data) {
     </tr>`;
   }).join("");
   if (rows[0]) {
-    $("fx").textContent = fmt(rows[0].usdkrw);
+    $("fx").textContent = fmt(rows[0].rate);
+    $("basisLabel").textContent =
+      rows[0].basis === "tether" ? "USDT/KRW(테더)" : "USD/KRW(환율)";
     $("updated").textContent = new Date().toLocaleTimeString("ko-KR");
   }
 }
