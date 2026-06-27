@@ -95,6 +95,24 @@ def test_legacy_float_funding_ignored():
     asyncio.run(run())
 
 
+def test_arbitrage_rejects_outlier_and_zero():
+    """0/충돌(dust) 가격점은 제거되고 정상 클러스터로만 갭 산출."""
+    async def run():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        # BTC: binance 100000, bybit 100500 (정상), gate 1.0 (충돌/dust → 제거)
+        await _seed_price(redis, ticker_key("binance"), "BTC", 100_000)
+        await _seed_price(redis, ticker_key("bybit"), "BTC", 100_500)
+        await _seed_price(redis, ticker_key("gate"), "BTC", 1.0)
+        d = await compute_arbitrage(redis, min_gap_pct=0.0)
+        btc = {x["coin"]: x for x in d["rows"]}["BTC"]
+        # gate(1.0) 제거 → 100000~100500, gap ≈ 0.5% (만약 미제거였다면 1000만%)
+        assert btc["gap_pct"] < 1.0
+        assert {btc["long"]["exchange"], btc["short"]["exchange"]} == {"binance", "bybit"}
+        await redis.aclose()
+
+    asyncio.run(run())
+
+
 def test_arbitrage_strategy():
     async def run():
         redis = fakeredis.aioredis.FakeRedis(decode_responses=True)

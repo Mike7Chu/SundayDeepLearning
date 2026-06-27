@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     fx_usdkrw_fallback: float = 1380.0
     wallet_interval_sec: float = 300.0   # 입출금 상태(느린 변화)
 
+    # 아비트라지: 코인별 가격점 중앙값 대비 이 배수 밖이면 이상치(충돌/dust)로 제외
+    arb_outlier_factor: float = 3.0
+
     # 텔레그램 (Phase 2)
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""

@@ -136,7 +136,8 @@ const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString("ko-KR",{maximumFractionDigits:2});
 const fmt4 = (n) => Number(n).toLocaleString("ko-KR",{maximumFractionDigits:4});
 let activeTab="kimp", busy=false;
-let kimpSort={key:"prem", dir:-1};   // dir: -1 내림차순
+let kimpSort={key:"prem", dir:-1};       // dir: -1 내림차순
+let fundColSort={ex:null, dir:-1};       // 펀비: 특정 거래소 컬럼 정렬
 const term = () => $("search").value.trim().toUpperCase();
 const matchCoin = (c) => { const t=term(); return !t || c.toUpperCase().includes(t); };
 const numOr = (id, dflt) => { const v=parseFloat($(id).value); return isNaN(v)?dflt:v; };
@@ -159,6 +160,7 @@ async function init(){
     th.onclick=()=>{ const k=th.dataset.sort;
       kimpSort = (kimpSort.key===k)?{key:k,dir:-kimpSort.dir}:{key:k,dir:-1}; tick(); });
   document.querySelectorAll("input,select").forEach(el=> el.addEventListener("input", tick));
+  $("fundSort").addEventListener("change", ()=>{ fundColSort={ex:null,dir:-1}; });  // 드롭다운 쓰면 컬럼정렬 해제
   $("killBtn").onclick = async ()=>{ const d=await (await fetch("/bots")).json();
     await fetch(`/bots/killswitch/${d.killswitch?0:1}`,{method:"POST"}); tick(); };
   switchTab("kimp");
@@ -292,12 +294,24 @@ async function renderFunding(){
   const apy=$("apyToggle").checked, exs=d.exchanges||[];
   const fInt=$("fundInt").value, sortMode=$("fundSort").value;
   const valOf=(c)=> apy?c.apy:c.rate_pct;
-  $("fundHead").innerHTML = `<th>코인</th>` + exs.map(e=>`<th>${e}</th>`).join("");
+  $("fundHead").innerHTML = `<th>코인</th>` + exs.map(e=>{
+    const arr = fundColSort.ex===e ? ` <span class="arrow">${fundColSort.dir<0?"↓":"↑"}</span>` : "";
+    return `<th class="exh" data-ex="${e}">${e}${arr}</th>`;}).join("");
+  $("fundHead").querySelectorAll(".exh").forEach(th=> th.onclick=()=>{
+    const e=th.dataset.ex;
+    fundColSort = (fundColSort.ex===e) ? {ex:e,dir:-fundColSort.dir} : {ex:e,dir:-1};
+    tick(); });
   let coins=(d.coins||[]).filter(r=>matchCoin(r.coin));
   if(fInt) coins=coins.filter(r=> Object.values(r.by_ex).some(c=>String(ivOf(c))===fInt));
-  const repr=(r)=>{ const vs=Object.values(r.by_ex).map(valOf); if(!vs.length) return 0;
-    return sortMode==="abs"?Math.max(...vs.map(Math.abs)) : sortMode==="asc"?Math.min(...vs):Math.max(...vs); };
-  coins.sort((a,b)=> sortMode==="asc"?repr(a)-repr(b):repr(b)-repr(a));
+  if(fundColSort.ex){
+    const e=fundColSort.ex;
+    const cv=(r)=>{ const c=r.by_ex[e]; return c?valOf(c):(fundColSort.dir<0?-Infinity:Infinity); };
+    coins.sort((a,b)=> fundColSort.dir*(cv(a)-cv(b)) || 0);
+  } else {
+    const repr=(r)=>{ const vs=Object.values(r.by_ex).map(valOf); if(!vs.length) return 0;
+      return sortMode==="abs"?Math.max(...vs.map(Math.abs)):sortMode==="asc"?Math.min(...vs):Math.max(...vs); };
+    coins.sort((a,b)=> sortMode==="asc"?repr(a)-repr(b):repr(b)-repr(a));
+  }
   const tb=$("fundRows");
   if(!coins.length){ tb.innerHTML=`<tr><td class="empty">조건에 맞는 코인 없음 (perp 펀비 수집 후)</td></tr>`; setStatus("stale","-"); return; }
   tb.innerHTML = coins.map(r=>{

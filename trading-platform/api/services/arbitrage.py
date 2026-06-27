@@ -8,11 +8,24 @@ gap% = (max/min - 1) * 100 을 계산. 각 다리에 펀딩비·입출금 상태
 from __future__ import annotations
 
 import json
+from statistics import median
 
 import redis.asyncio as aioredis
 
 from shared.redis_keys import funding_key, perp_ticker_key, ticker_key, wallet_key
+from shared.settings import settings
 from shared.universe import load_universe
+
+
+def _reject_outliers(pts: list[tuple[str, str, float]], factor: float) -> list[tuple[str, str, float]]:
+    """가격점 중앙값 대비 [median/factor, median*factor] 밖(충돌/dust/stale)을 제거."""
+    if len(pts) < 2:
+        return pts
+    med = median(p[2] for p in pts)
+    if med <= 0:
+        return []
+    lo, hi = med / factor, med * factor
+    return [p for p in pts if lo <= p[2] <= hi]
 
 
 def _loads(raw: str):
@@ -75,11 +88,13 @@ async def compute_arbitrage(
         pts: list[tuple[str, str, float]] = []  # (exchange, market, price)
         for ex in overseas:
             sd = spot[ex].get(coin)
-            if isinstance(sd, dict) and sd.get("price"):
+            if isinstance(sd, dict) and sd.get("price", 0) > 0:
                 pts.append((ex, "spot", float(sd["price"])))
             pd = perp[ex].get(coin)
-            if isinstance(pd, dict) and pd.get("price"):
+            if isinstance(pd, dict) and pd.get("price", 0) > 0:
                 pts.append((ex, "perp", float(pd["price"])))
+        # 충돌/dust/stale 가격점 제거 후 갭 산출
+        pts = _reject_outliers(pts, settings.arb_outlier_factor)
         if len(pts) < 2:
             continue
         lo = min(pts, key=lambda p: p[2])
