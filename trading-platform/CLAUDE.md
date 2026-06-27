@@ -10,8 +10,9 @@
 - ✅ **Phase 2 코어**: 김프/역프 계산 + REST/WS API
 - ✅ **텔레그램 알림봇**(`notifier/main.py`): 김프/역프 임계치 → 텔레그램 발송 + 쿨다운
 - ✅ **공지알림봇=신규상장 감지**(`notifier/announce_main.py`): 업비트/빗썸 마켓목록 diff → 새 심볼 등장 시 알림(quote_filter=KRW). 공지 스크래핑 대신 마켓 diff(클라우드 IP 차단·더 안정적)
-- ✅ **김프 대시보드**(`web/index.html`): FastAPI가 `GET /`로 서빙하는 단일 페이지(노드 빌드 X). 기준/비교 거래소 선택, 김프 매트릭스 3초 폴링, 색상 구분. 폰에서 Tailscale로 접속
-- ⏭️ **다음**: ① 펀비 수집/대시보드 ② 봇 컨트롤 패널(필요 시 Next.js 확장)
+- ✅ **대시보드**(`web/index.html`, `GET /`): 탭 3종 — **김프** / **거래소간**(해외 현물·선물 가격차) / **펀비**(펀딩비). 노드 빌드 X, 폰+Tailscale 접속
+- ✅ **해외 perp 가격 + 펀딩비 수집**(`collector/exchanges/perp.py`): 해외 거래소 무기한선물 last/mark + funding rate → Redis. `/cross`(현물/선물 거래소간 스프레드), `/funding`(거래소간 펀비) API
+- ⏭️ **다음**: ① 펀비/스프레드 임계치 알림 연동 ② 봇(현선/loan/매도) 페이퍼 ③ 주식
 - ⏸️ **봇 실행(현선/loan/매도), 주식**: 페이퍼 모드부터 단계적 (Phase 3~6, 미착수)
 
 전체 로드맵·설계 근거는 [`docs/PLAN.md`](docs/PLAN.md), 무엇을 왜 했는지는 [`docs/PROGRESS.md`](docs/PROGRESS.md).
@@ -32,14 +33,16 @@
 | `api/` | FastAPI. 김프 계산 + REST/WS |
 | `api/services/premium.py` | 두 기준 동시 산출: `premium_pct`=테더(USDT/KRW) 기준→**알림용**, `premium_coin_pct`=코인/환율(USD/KRW) 기준→**화면용**. 테더가 없으면 환율 폴백 |
 | `api/routers/premium.py` | `/premium`, `/tickers/{ex}`, `/exchanges`, `WS /ws/premium` |
-| `web/index.html` | 김프 대시보드 단일 페이지. FastAPI `GET /`로 서빙(`api/main.py`) |
+| `api/services/cross.py` | 해외 거래소간 가격차(`compute_cross` spot/perp) + 펀비 비교(`compute_funding`) |
+| `collector/exchanges/perp.py` | 해외 무기한선물 perp 가격 + 펀딩비 수집(ccxt defaultType=swap, `{COIN}/USDT:USDT`) |
+| `web/index.html` | 대시보드(김프/거래소간/펀비 탭). FastAPI `GET /`로 서빙(`api/main.py`) |
 | `notifier/` | 텔레그램 봇 묶음. 김프알림(`main.py`/`alerts.py`, `config/alerts.yaml`) + 신규상장감지(`announce_main.py`/`listings.py`, `config/announcements.yaml`) + 발송(`telegram.py`) |
 | `shared/` | 유니버스 로더(`universe.py`)·스키마(`schemas.py`)·설정(`settings.py`)·Redis키(`redis_keys.py`) |
 | `config/symbols.yaml` | 거래소 + 코인 유니버스(단일 진실원) |
 | `deploy/` | RPi 원클릭 배포 스크립트·가이드 |
 | `tests/test_premium.py` | 김프계산·유니버스·API 스모크 테스트 |
 
-데이터 흐름: `collector → Redis(ticker:{ex} 해시, tether:{국내ex} USDT/KRW, fx:USDKRW 폴백) → api 계산(테더 기준) → REST/WS + web 대시보드 + notifier 알림`.
+데이터 흐름: `collector → Redis(ticker:{ex} 현물, perp_ticker:{ex} 선물, funding:{ex} 펀비, tether:{국내ex}, fx:USDKRW) → api(김프 테더기준 / cross / funding) → REST/WS + web 대시보드 + notifier 알림`.
 
 ## 실행 / 검증
 ```bash

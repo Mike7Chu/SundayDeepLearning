@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>김프 대시보드</title>
+<title>아비트라지 대시보드</title>
 <style>
   :root {
     --bg: #0e1116; --panel: #161b22; --line: #30363d;
     --text: #e6edf3; --muted: #8b949e;
-    --up: #f85149; --down: #58a6ff;
+    --up: #f85149; --down: #58a6ff; --green: #3fb950;
   }
   * { box-sizing: border-box; }
   body {
@@ -18,9 +18,15 @@
   }
   header {
     position: sticky; top: 0; background: var(--panel);
-    border-bottom: 1px solid var(--line); padding: 12px 16px;
+    border-bottom: 1px solid var(--line); padding: 12px 16px; z-index: 10;
   }
   h1 { margin: 0 0 8px; font-size: 16px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .tabs button {
+    background: var(--bg); color: var(--muted); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 14px; font-size: 14px; cursor: pointer;
+  }
+  .tabs button.active { color: var(--text); border-color: var(--green); }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   select {
     background: var(--bg); color: var(--text); border: 1px solid var(--line);
@@ -28,115 +34,201 @@
   }
   .meta { color: var(--muted); font-size: 12px; margin-left: auto; text-align: right; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
-  .live { background: #3fb950; } .stale { background: #d29922; } .err { background: var(--up); }
+  .live { background: var(--green); } .stale { background: #d29922; } .err { background: var(--up); }
+  .summary { padding: 10px 16px; color: var(--muted); border-bottom: 1px solid var(--line); }
+  .summary b { color: var(--text); }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 10px 12px; text-align: right; border-bottom: 1px solid var(--line); }
   th:first-child, td:first-child { text-align: left; }
-  th { color: var(--muted); font-weight: 600; font-size: 12px; position: sticky; top: 0; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
   tbody tr:hover { background: #1c2128; }
   .coin { font-weight: 700; }
   .prem { font-weight: 700; font-variant-numeric: tabular-nums; }
   .pos { color: var(--up); } .neg { color: var(--down); }
   .num { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .lo { color: var(--green); } .hi { color: var(--up); }
   .empty { padding: 40px; text-align: center; color: var(--muted); }
+  .panel { display: none; } .panel.active { display: block; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🥬 김프 대시보드</h1>
+  <h1>📊 아비트라지 대시보드</h1>
+  <div class="tabs">
+    <button data-tab="kimp" class="active">김프</button>
+    <button data-tab="cross">거래소간</button>
+    <button data-tab="funding">펀비</button>
+  </div>
   <div class="controls">
-    <label>기준(국내) <select id="base"></select></label>
-    <label>비교(해외) <select id="ref"></select></label>
+    <!-- 김프 탭 컨트롤 -->
+    <span class="ctl" data-for="kimp">기준 <select id="base"></select></span>
+    <span class="ctl" data-for="kimp">비교 <select id="ref"></select></span>
+    <!-- 거래소간 탭 컨트롤 -->
+    <span class="ctl" data-for="cross" style="display:none">코인 <select id="crossCoin"></select></span>
+    <span class="ctl" data-for="cross" style="display:none">
+      <select id="crossMarket"><option value="spot">현물</option><option value="perp">선물(perp)</option></select>
+    </span>
+    <!-- 펀비 탭 컨트롤 -->
+    <span class="ctl" data-for="funding" style="display:none">코인 <select id="fundCoin"></select></span>
     <div class="meta">
       <div><span id="status" class="dot err"></span><span id="statusText">연결 중…</span></div>
-      <div>환율 <span id="fx">-</span> · 테더 <span id="tether">-</span> · <span id="updated">-</span></div>
+      <div id="metaInfo">-</div>
     </div>
   </div>
 </header>
 
-<table>
-  <thead>
-    <tr>
-      <th>코인</th>
-      <th>김프 %(코인)</th>
-      <th>국내가(KRW)</th>
-      <th>해외가(KRW)</th>
-    </tr>
-  </thead>
-  <tbody id="rows"><tr><td colspan="4" class="empty">불러오는 중…</td></tr></tbody>
-</table>
+<div id="summary" class="summary" style="display:none"></div>
+
+<!-- 김프 -->
+<div id="panel-kimp" class="panel active">
+  <table>
+    <thead><tr><th>코인</th><th>김프 %(코인)</th><th>국내가(KRW)</th><th>해외가(KRW)</th></tr></thead>
+    <tbody id="kimpRows"><tr><td colspan="4" class="empty">불러오는 중…</td></tr></tbody>
+  </table>
+</div>
+
+<!-- 거래소간 -->
+<div id="panel-cross" class="panel">
+  <table>
+    <thead><tr><th>거래소</th><th>가격(USDT)</th></tr></thead>
+    <tbody id="crossRows"><tr><td colspan="2" class="empty">-</td></tr></tbody>
+  </table>
+</div>
+
+<!-- 펀비 -->
+<div id="panel-funding" class="panel">
+  <table>
+    <thead><tr><th>거래소</th><th>펀딩비 %</th></tr></thead>
+    <tbody id="fundRows"><tr><td colspan="2" class="empty">-</td></tr></tbody>
+  </table>
+</div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString("ko-KR", { maximumFractionDigits: 2 });
-
-async function loadExchanges() {
-  const r = await fetch("/exchanges");
-  const d = await r.json();
-  const fill = (sel, names, def) => {
-    sel.innerHTML = "";
-    names.forEach((n) => {
-      const o = document.createElement("option");
-      o.value = n; o.textContent = n;
-      if (n === def) o.selected = true;
-      sel.appendChild(o);
-    });
-  };
-  fill($("base"), d.domestic, "upbit");
-  fill($("ref"), d.overseas, "binance");
-}
+const fmt4 = (n) => Number(n).toLocaleString("ko-KR", { maximumFractionDigits: 4 });
+let activeTab = "kimp";
 
 function setStatus(cls, text) {
   $("status").className = "dot " + cls;
   $("statusText").textContent = text;
 }
 
-function render(data) {
-  const rows = (data.rows || []).slice().sort((a, b) => b.premium_coin_pct - a.premium_coin_pct);
-  const tbody = $("rows");
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty">데이터 없음 (수집기 동작 확인)</td></tr>';
-    return;
-  }
-  tbody.innerHTML = rows.map((c) => {
-    const cls = c.premium_coin_pct >= 0 ? "pos" : "neg";
-    const sign = c.premium_coin_pct >= 0 ? "+" : "";
-    return `<tr>
-      <td class="coin">${c.coin}</td>
-      <td class="prem ${cls}">${sign}${c.premium_coin_pct.toFixed(2)}%</td>
-      <td class="num">${fmt(c.base_price_krw)}</td>
-      <td class="num">${fmt(c.ref_price_krw)}</td>
-    </tr>`;
-  }).join("");
-  if (rows[0]) {
-    $("fx").textContent = fmt(rows[0].forex_rate);
-    $("tether").textContent = fmt(rows[0].tether_rate);
-    $("updated").textContent = new Date().toLocaleTimeString("ko-KR");
-  }
+function fillSelect(sel, names, def) {
+  sel.innerHTML = "";
+  names.forEach((n) => {
+    const o = document.createElement("option");
+    o.value = n; o.textContent = n;
+    if (n === def) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+async function init() {
+  const d = await (await fetch("/exchanges")).json();
+  fillSelect($("base"), d.domestic, "upbit");
+  fillSelect($("ref"), d.overseas, "binance");
+  fillSelect($("crossCoin"), d.coins, "BTC");
+  fillSelect($("fundCoin"), d.coins, "BTC");
+  document.querySelectorAll(".tabs button").forEach((b) => {
+    b.onclick = () => switchTab(b.dataset.tab);
+  });
+  ["base", "ref", "crossCoin", "crossMarket", "fundCoin"].forEach((id) => {
+    $(id).onchange = tick;
+  });
+  await tick();
+  setInterval(tick, 3000);
+}
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll(".tabs button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll(".panel").forEach((p) =>
+    p.classList.toggle("active", p.id === "panel-" + tab));
+  document.querySelectorAll(".ctl").forEach((c) =>
+    c.style.display = (c.dataset.for === tab) ? "" : "none");
+  $("summary").style.display = "none";
+  tick();
 }
 
 async function tick() {
-  const base = $("base").value, ref = $("ref").value;
-  if (!base || !ref) return;
   try {
-    const r = await fetch(`/premium?base=${base}&ref=${ref}`);
-    if (!r.ok) throw new Error(r.status);
-    const d = await r.json();
-    render(d);
-    setStatus((d.rows && d.rows.length) ? "live" : "stale",
-              (d.rows && d.rows.length) ? "실시간" : "데이터 대기");
+    if (activeTab === "kimp") await renderKimp();
+    else if (activeTab === "cross") await renderCross();
+    else await renderFunding();
   } catch (e) {
     setStatus("err", "오류: " + e.message);
   }
 }
 
-(async function main() {
-  await loadExchanges();
-  $("base").onchange = tick;
-  $("ref").onchange = tick;
-  await tick();
-  setInterval(tick, 3000);
-})();
+async function renderKimp() {
+  const base = $("base").value, ref = $("ref").value;
+  const d = await (await fetch(`/premium?base=${base}&ref=${ref}`)).json();
+  const rows = (d.rows || []).slice().sort((a, b) => b.premium_coin_pct - a.premium_coin_pct);
+  const tbody = $("kimpRows");
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">데이터 없음 (수집기 확인)</td></tr>';
+    setStatus("stale", "데이터 대기"); return;
+  }
+  tbody.innerHTML = rows.map((c) => {
+    const cls = c.premium_coin_pct >= 0 ? "pos" : "neg";
+    const sign = c.premium_coin_pct >= 0 ? "+" : "";
+    return `<tr><td class="coin">${c.coin}</td>
+      <td class="prem ${cls}">${sign}${c.premium_coin_pct.toFixed(2)}%</td>
+      <td class="num">${fmt(c.base_price_krw)}</td>
+      <td class="num">${fmt(c.ref_price_krw)}</td></tr>`;
+  }).join("");
+  $("metaInfo").textContent = `환율 ${fmt(rows[0].forex_rate)} · 테더 ${fmt(rows[0].tether_rate)}`;
+  setStatus("live", "실시간");
+}
+
+async function renderCross() {
+  const coin = $("crossCoin").value, market = $("crossMarket").value;
+  const d = await (await fetch(`/cross?coin=${coin}&market=${market}`)).json();
+  const tbody = $("crossRows");
+  if (!d.rows || !d.rows.length) {
+    tbody.innerHTML = '<tr><td colspan="2" class="empty">데이터 없음 (perp는 수집 후 표시)</td></tr>';
+    $("summary").style.display = "none"; setStatus("stale", "데이터 대기"); return;
+  }
+  tbody.innerHTML = d.rows.map((r) => {
+    const tag = r.exchange === d.cheapest ? "lo" : (r.exchange === d.priciest ? "hi" : "");
+    return `<tr><td class="coin ${tag}">${r.exchange}</td>
+      <td class="num">${fmt4(r.price)}</td></tr>`;
+  }).join("");
+  if (d.spread_pct != null) {
+    $("summary").style.display = "block";
+    $("summary").innerHTML =
+      `${coin} ${market} 스프레드 <b>${d.spread_pct.toFixed(3)}%</b> · ` +
+      `최저 <span class="lo">${d.cheapest}</span> → 최고 <span class="hi">${d.priciest}</span>`;
+  }
+  setStatus("live", "실시간");
+}
+
+async function renderFunding() {
+  const coin = $("fundCoin").value;
+  const d = await (await fetch(`/funding?coin=${coin}`)).json();
+  const tbody = $("fundRows");
+  if (!d.rows || !d.rows.length) {
+    tbody.innerHTML = '<tr><td colspan="2" class="empty">데이터 없음 (perp 펀비 수집 후 표시)</td></tr>';
+    $("summary").style.display = "none"; setStatus("stale", "데이터 대기"); return;
+  }
+  tbody.innerHTML = d.rows.map((r) => {
+    const cls = r.funding_pct >= 0 ? "pos" : "neg";
+    const sign = r.funding_pct >= 0 ? "+" : "";
+    return `<tr><td class="coin">${r.exchange}</td>
+      <td class="prem ${cls}">${sign}${r.funding_pct.toFixed(4)}%</td></tr>`;
+  }).join("");
+  if (d.spread_pct != null) {
+    $("summary").style.display = "block";
+    $("summary").innerHTML =
+      `${coin} 펀비 차 <b>${d.spread_pct.toFixed(4)}%p</b> · ` +
+      `최고 <span class="hi">${d.highest}</span> / 최저 <span class="lo">${d.lowest}</span>`;
+  }
+  setStatus("live", "실시간");
+}
+
+init();
 </script>
 </body>
 </html>

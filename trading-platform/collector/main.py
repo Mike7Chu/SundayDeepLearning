@@ -12,8 +12,15 @@ import logging
 import redis.asyncio as aioredis
 
 from collector.exchanges.adapter import ExchangeAdapter
+from collector.exchanges.perp import PerpAdapter
 from collector.forex import fetch_usdkrw
-from shared.redis_keys import FX_USDKRW_KEY, tether_key, ticker_key
+from shared.redis_keys import (
+    FX_USDKRW_KEY,
+    funding_key,
+    perp_ticker_key,
+    tether_key,
+    ticker_key,
+)
 from shared.settings import settings
 from shared.universe import load_universe
 
@@ -48,6 +55,26 @@ async def ticker_loop(redis: aioredis.Redis, adapters: list[ExchangeAdapter]) ->
         await asyncio.sleep(settings.collect_interval_sec)
 
 
+async def collect_perp(redis: aioredis.Redis, adapter: PerpAdapter) -> None:
+    snaps = await adapter.fetch_tickers()
+    if snaps:
+        mapping = {c: s.model_dump_json() for c, s in snaps.items()}
+        await redis.hset(perp_ticker_key(adapter.cfg.name), mapping=mapping)
+    funding = await adapter.fetch_funding()
+    if funding:
+        await redis.hset(funding_key(adapter.cfg.name),
+                         mapping={c: str(r) for c, r in funding.items()})
+    if snaps or funding:
+        logger.info("[%s perp] %d tickers, %d funding",
+                    adapter.cfg.name, len(snaps), len(funding))
+
+
+async def perp_loop(redis: aioredis.Redis, adapters: list[PerpAdapter]) -> None:
+    while True:
+        await asyncio.gather(*[collect_perp(redis, a) for a in adapters])
+        await asyncio.sleep(settings.collect_interval_sec)
+
+
 async def fx_loop(redis: aioredis.Redis) -> None:
     while True:
         rate = await fetch_usdkrw()
@@ -69,16 +96,32 @@ async def main() -> None:
                          cfg.name, cfg.ccxt_id, exc)
     if not adapters:
         raise RuntimeError("초기화된 거래소가 없습니다. config/symbols.yaml 확인")
-    logger.info("collector start: %d/%d exchanges, %d coins",
-                len(adapters), len(universe.exchanges), len(universe.coins))
+
+    # 해외 거래소는 무기한선물(perp) 가격 + 펀딩비도 수집
+    perp_adapters: list[PerpAdapter] = []
+    for name in universe.overseas:
+        cfg = universe.exchanges[name]
+        try:
+            perp_adapters.append(PerpAdapter(cfg, universe.coins))
+        except Exception as exc:
+            logger.error("perp 초기화 실패(건너뜀) %s(ccxt_id=%s): %s",
+                         name, cfg.ccxt_id, exc)
+
+    logger.info("collector start: %d/%d spot, %d perp, %d coins",
+                len(adapters), len(universe.exchanges),
+                len(perp_adapters), len(universe.coins))
     try:
         await asyncio.gather(
             ticker_loop(redis, adapters),
+            perp_loop(redis, perp_adapters),
             fx_loop(redis),
         )
     finally:
-        await asyncio.gather(*[a.close() for a in adapters],
-                             return_exceptions=True)
+        await asyncio.gather(
+            *[a.close() for a in adapters],
+            *[a.close() for a in perp_adapters],
+            return_exceptions=True,
+        )
         await redis.aclose()
 
 

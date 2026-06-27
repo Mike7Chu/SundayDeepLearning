@@ -83,4 +83,4 @@ def test_api_health():
     # 대시보드 HTML 서빙 확인
     home = client.get("/")
     assert home.status_code == 200
-    assert "김프 대시보드" in home.text
+    assert "아비트라지 대시보드" in home.text

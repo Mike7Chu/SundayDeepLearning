@@ -7,6 +7,7 @@ import json
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from api.redis_client import get_redis
+from api.services.cross import compute_cross, compute_funding
 from api.services.premium import _load_tickers, compute_premium
 from shared.settings import settings
 from shared.universe import load_universe
@@ -38,6 +39,21 @@ async def premium(
     cells = await compute_premium(get_redis(), base, ref)
     cells.sort(key=lambda c: c.premium_coin_pct, reverse=True)
     return {"base": base, "ref": ref, "rows": [c.model_dump() for c in cells]}
+
+
+@router.get("/cross")
+async def cross(
+    coin: str = Query("BTC", description="코인 심볼"),
+    market: str = Query("spot", description="spot | perp"),
+) -> dict:
+    """해외 거래소 간 가격차(현물/선물)."""
+    return await compute_cross(get_redis(), coin.upper(), market)
+
+
+@router.get("/funding")
+async def funding(coin: str = Query("BTC", description="코인 심볼")) -> dict:
+    """해외 거래소 무기한선물 펀딩비 비교."""
+    return await compute_funding(get_redis(), coin.upper())
 
 
 @router.websocket("/ws/premium")

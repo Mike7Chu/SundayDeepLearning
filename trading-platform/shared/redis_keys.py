@@ -12,6 +12,16 @@ def tether_key(exchange: str) -> str:
     return f"tether:{exchange}"
 
 
+def perp_ticker_key(exchange: str) -> str:
+    """거래소별 무기한선물(perp) 최신 시세 해시. field=coin, value=json(TickerSnapshot)."""
+    return f"perp_ticker:{exchange}"
+
+
+def funding_key(exchange: str) -> str:
+    """거래소별 무기한선물 펀딩비 해시. field=coin, value=float(비율, 0.0001=0.01%)."""
+    return f"funding:{exchange}"
+
+
 # 은행 환율 키(폴백용). value=float(USD/KRW)
 FX_USDKRW_KEY = "fx:USDKRW"
 
