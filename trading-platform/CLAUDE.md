@@ -62,3 +62,5 @@ pytest tests/ -q
 - 현재 작업 브랜치: `claude/trading-arbitrage-dashboard-plan-q9mcmu` (레포 `Mike7Chu/SundayDeepLearning`).
 - 별도 레포(`Chu-trading`)로 분리 예정이었으나, 이전 세션 권한으로는 레포 생성 불가(403). 새 레포는 사용자가 GitHub에서 생성 후 새 세션에서 이관.
 - 비밀번호 등 자격증명은 코드/문서에 절대 커밋하지 말 것. `.env`는 git 제외.
+- 원격접속 = **Tailscale 사설 IP**(`100.x`/MagicDNS, 포트 `:8090`). 공인 DDNS(`hopto.org`)·포트포워딩 미사용. 상세 `deploy/README.md`.
+- API 호스트 포트는 `.env`의 `API_PORT`(기본 8090). 8000은 OMV 등과 충돌나서 회피.

@@ -39,13 +39,35 @@ cp -n .env.example .env          # API_PORT 등 새 항목 보강(기존 값 유
 sudo docker compose up -d --build
 ```
 
-## 외부에서 접속 (집 밖에서)
+## 외부에서 접속 (집 밖에서) — Tailscale 사설 IP
 
-공인 IP/포트포워딩 없이 안전하게 접속하려면 둘 중 하나:
+포트포워딩 없이 안전하게 접속. **공인 DDNS(`hopto.org`)가 아니라 Tailscale 주소(`100.x`)를 쓴다.**
 
-- **Tailscale (추천, 가장 쉬움)**: Pi에 `curl -fsSL https://tailscale.com/install.sh | sh` →
-  `sudo tailscale up`. 폰/랩탑에도 Tailscale 깔면 `http://<pi-tailscale-ip>:8000` 으로 접속.
-- **Cloudflare Tunnel**: 도메인이 있으면 `cloudflared`로 터널 생성 → 공개 URL 발급.
+1. Pi에 설치/기동:
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up
+   ```
+2. Pi의 Tailscale 주소 확인:
+   ```bash
+   tailscale ip -4      # → 100.x.y.z
+   tailscale status     # 폰/랩탑이 같은 tailnet에 보이는지 확인
+   ```
+3. 폰/랩탑에도 Tailscale 설치 + **같은 계정** 로그인 + ON.
+4. 그 주소로 접속:
+   ```
+   http://100.x.y.z:8090/docs
+   http://100.x.y.z:8090/premium?base=upbit&ref=binance
+   ```
+   (MagicDNS를 켰다면 `http://<pi-host>.<tailnet>.ts.net:8090` 도 가능)
+
+### ⚠️ 흔한 실수
+- ❌ `http://mike7chu.hopto.org:8090` → 이건 **공인 IP(포트포워딩 방식)**. 포트를 안 열었으면
+  `ERR_CONNECTION_ABORTED`. Tailscale과 무관하니 **사용하지 말 것.**
+- ❌ 폰에서 Tailscale이 꺼져 있거나 다른 계정 → `tailscale status`에 안 보이면 연결 안 됨.
+- ✅ 주소는 항상 `100.x` (또는 `.ts.net`), 포트 `:8090`.
+
+> 도메인이 있고 공개 HTTPS 주소가 필요하면 추후 Cloudflare Tunnel/Tailscale Serve도 가능.
 
 ## 메모
 
