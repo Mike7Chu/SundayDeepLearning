@@ -1,0 +1,53 @@
+# 심볼 유니버스 + 거래소 정의
+# region: domestic(KRW 마켓) | overseas(USDT 마켓)
+# RPi 부담을 고려해 공통 상장 상위 코인부터. 점진 확대.
+
+coins:
+  - BTC
+  - ETH
+  - XRP
+  - SOL
+  - DOGE
+  - ADA
+  - TRX
+  - LINK
+  - AVAX
+  - DOT
+
+exchanges:
+  upbit:
+    ccxt_id: upbit
+    quote: KRW
+    region: domestic
+  bithumb:
+    ccxt_id: bithumb
+    quote: KRW
+    region: domestic
+  binance:
+    ccxt_id: binance
+    quote: USDT
+    region: overseas
+  bybit:
+    ccxt_id: bybit
+    quote: USDT
+    region: overseas
+  mexc:
+    ccxt_id: mexc
+    quote: USDT
+    region: overseas
+  bitget:
+    ccxt_id: bitget
+    quote: USDT
+    region: overseas
+  gate:
+    ccxt_id: gateio
+    quote: USDT
+    region: overseas
+  bingx:
+    ccxt_id: bingx
+    quote: USDT
+    region: overseas
+  okx:
+    ccxt_id: okx
+    quote: USDT
+    region: overseas
