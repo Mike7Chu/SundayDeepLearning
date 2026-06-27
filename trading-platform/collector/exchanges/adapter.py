@@ -8,7 +8,7 @@ import logging
 import time
 
 from shared.schemas import ExchangeConfig, TickerSnapshot
-from shared.symbols import is_leveraged_token, parse_symbol
+from shared.symbols import is_leveraged_token
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +26,21 @@ class ExchangeAdapter:
         return coin.upper() not in self.exclude and not is_leveraged_token(coin)
 
     async def fetch(self) -> dict[str, TickerSnapshot]:
-        """coin -> TickerSnapshot. cfg.quote 마켓의 전 코인."""
+        """coin -> TickerSnapshot. cfg.quote 의 **거래중(active)·현물** 마켓만."""
         out: dict[str, TickerSnapshot] = {}
         now = time.time()
         try:
             tickers = await self.client.fetch_tickers()
+            markets = self.client.markets or {}
             for symbol, t in tickers.items():
-                coin, quote = parse_symbol(symbol)
-                if quote != self.cfg.quote or not self._accept(coin):
+                m = markets.get(symbol)
+                # 상장폐지/거래중지(active=False) 또는 비현물 마켓은 제외(썩은 가격 차단)
+                if not m or m.get("active") is False or not m.get("spot"):
+                    continue
+                if m.get("quote") != self.cfg.quote:
+                    continue
+                coin = (m.get("base") or "").upper()
+                if not coin or not self._accept(coin):
                     continue
                 price = _last_price(t)
                 if price is not None:

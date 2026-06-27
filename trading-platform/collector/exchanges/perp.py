@@ -10,7 +10,7 @@ import re
 import time
 
 from shared.schemas import ExchangeConfig, TickerSnapshot
-from shared.symbols import is_leveraged_token, parse_symbol
+from shared.symbols import is_leveraged_token
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +42,12 @@ def _next_ts(info: dict) -> int | None:
     return None
 
 
-def _is_usdt_perp(symbol: str) -> bool:
-    # 선형 USDT 무기한: 'BTC/USDT:USDT'
-    return symbol.endswith(":USDT") and "/USDT:" in symbol
+def _is_usdt_perp(market: dict | None) -> bool:
+    """거래중(active) 선형 USDT 무기한선물 마켓만."""
+    if not market or market.get("active") is False:
+        return False
+    return bool(market.get("swap") and market.get("linear")
+                and market.get("settle") == "USDT")
 
 
 class PerpAdapter:
@@ -67,11 +70,12 @@ class PerpAdapter:
         now = time.time()
         try:
             tickers = await self.client.fetch_tickers()
+            markets = self.client.markets or {}
             for symbol, t in tickers.items():
-                if not _is_usdt_perp(symbol):
+                if not _is_usdt_perp(markets.get(symbol)):
                     continue
-                coin, _ = parse_symbol(symbol)
-                if not self._accept(coin):
+                coin = (markets[symbol].get("base") or "").upper()
+                if not coin or not self._accept(coin):
                     continue
                 price = _last_price(t)
                 if price is not None:
@@ -88,12 +92,13 @@ class PerpAdapter:
             if not self.client.has.get("fetchFundingRates"):
                 return out
             rates = await self.client.fetch_funding_rates()
+            markets = self.client.markets or {}
             for symbol, info in rates.items():
-                if not _is_usdt_perp(symbol):
+                if not _is_usdt_perp(markets.get(symbol)):
                     continue
-                coin, _ = parse_symbol(symbol)
+                coin = (markets[symbol].get("base") or "").upper()
                 rate = info.get("fundingRate")
-                if not self._accept(coin) or rate is None:
+                if not coin or not self._accept(coin) or rate is None:
                     continue
                 out[coin] = {
                     "rate": float(rate),
