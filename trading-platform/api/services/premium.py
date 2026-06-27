@@ -11,7 +11,7 @@ import json
 
 import redis.asyncio as aioredis
 
-from shared.redis_keys import FX_USDKRW_KEY, tether_key, ticker_key
+from shared.redis_keys import FX_USDKRW_KEY, perp_ticker_key, tether_key, ticker_key
 from shared.schemas import PremiumCell, TickerSnapshot
 from shared.settings import settings
 from shared.universe import load_universe
@@ -19,6 +19,11 @@ from shared.universe import load_universe
 
 async def _load_tickers(redis: aioredis.Redis, exchange: str) -> dict[str, TickerSnapshot]:
     raw = await redis.hgetall(ticker_key(exchange))
+    return {coin: TickerSnapshot(**json.loads(v)) for coin, v in raw.items()}
+
+
+async def _load_perp(redis: aioredis.Redis, exchange: str) -> dict[str, TickerSnapshot]:
+    raw = await redis.hgetall(perp_ticker_key(exchange))
     return {coin: TickerSnapshot(**json.loads(v)) for coin, v in raw.items()}
 
 
@@ -52,6 +57,7 @@ async def compute_premium(
     tether = await _tether_rate(redis, base, forex)
     base_t = await _load_tickers(redis, base)
     ref_t = await _load_tickers(redis, ref)
+    ref_perp = await _load_perp(redis, ref)   # 해외 선물(현선 비교용)
 
     cells: list[PremiumCell] = []
     # 더따리식: 기준(국내) 거래소에 상장된 전 코인 ∩ 비교 거래소 상장분
@@ -66,6 +72,18 @@ async def compute_premium(
         if ref_krw_coin <= 0 or ref_krw_tether <= 0:
             continue
         premium_coin_pct = (base_krw / ref_krw_coin - 1) * 100
+
+        # 국내현물 vs 해외선물(perp) — 현선 기회
+        perp_pct = perp_coin_pct = perp_krw = None
+        rp = ref_perp.get(coin)
+        if rp and rp.price > 0:
+            perp_krw_coin = rp.price * forex
+            perp_krw_tether = rp.price * tether
+            if perp_krw_coin > 0 and perp_krw_tether > 0:
+                perp_pct = round((base_krw / perp_krw_tether - 1) * 100, 4)
+                perp_coin_pct = round((base_krw / perp_krw_coin - 1) * 100, 4)
+                perp_krw = round(perp_krw_coin, 4)
+
         cells.append(
             PremiumCell(
                 coin=coin,
@@ -78,6 +96,9 @@ async def compute_premium(
                 tether_rate=round(tether, 4),
                 forex_rate=round(forex, 4),
                 ts=min(b.ts, r.ts),
+                premium_perp_pct=perp_pct,
+                premium_perp_coin_pct=perp_coin_pct,
+                ref_perp_price_krw=perp_krw,
             )
         )
     return cells

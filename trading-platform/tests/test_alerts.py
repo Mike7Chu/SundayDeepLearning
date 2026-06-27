@@ -11,13 +11,23 @@ from notifier.main import _should_send
 from shared.schemas import PremiumCell
 
 
-def _cell(coin: str, pct: float) -> PremiumCell:
+def _cell(coin: str, pct: float, perp: float | None = None) -> PremiumCell:
     # 알림은 테더 기준 premium_pct 를 평가한다.
     return PremiumCell(
         coin=coin, base_exchange="upbit", ref_exchange="binance",
         base_price_krw=1.0, ref_price_krw=1.0, premium_pct=pct,
         premium_coin_pct=pct, tether_rate=1380.0, forex_rate=1380.0, ts=0.0,
+        premium_perp_pct=perp,
     )
+
+
+def test_hyeonseon_alert():
+    from notifier.alerts import evaluate_hyeonseon, format_message
+    cells = [_cell("BTC", 0.5, perp=-2.0), _cell("ETH", 0.1, perp=-0.3),
+             _cell("XRP", 0.0, perp=None)]
+    evs = evaluate_hyeonseon("upbit->binance", cells, low_pct=-1.0)
+    assert {e.coin for e in evs} == {"BTC"}        # -2.0 <= -1.0
+    assert "현선" in format_message(evs[0])
 
 
 def test_evaluate_thresholds():

@@ -54,3 +54,7 @@ class PremiumCell(BaseModel):
     tether_rate: float          # 환산에 쓴 원화 테더가(USDT/KRW)
     forex_rate: float           # 환산에 쓴 은행 환율(USD/KRW)
     ts: float
+    # 국내현물 vs 해외선물(perp) — 현선(현물매수+선물숏) 기회 판단용. perp 없으면 None.
+    premium_perp_pct: float | None = None        # 테더 기준
+    premium_perp_coin_pct: float | None = None   # 코인/환율 기준
+    ref_perp_price_krw: float | None = None      # 해외 선물 환산가(코인 기준)

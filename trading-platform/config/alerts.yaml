@@ -13,6 +13,9 @@ pairs:
 premium_high_pct: 3.0    # 김프 이 % 이상이면 알림
 premium_low_pct: -1.5    # 역프 이 % 이하면 알림(음수)
 
+# 현선: 국내현물 vs 해외선물 역프가 이 % 이하면 알림(국내현물 매수 + 해외선물 숏)
+hyeonseon_low_pct: -1.0
+
 # 같은 (쌍,코인,방향) 알림 재발송 최소 간격(초) — 스팸 방지
 cooldown_sec: 600
 

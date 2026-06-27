@@ -13,7 +13,12 @@ import logging
 import redis.asyncio as aioredis
 
 from api.services.premium import compute_premium
-from notifier.alerts import AlertEvent, evaluate, format_message
+from notifier.alerts import (
+    AlertEvent,
+    evaluate,
+    evaluate_hyeonseon,
+    format_message,
+)
 from notifier.config import load_alert_config
 from notifier.telegram import TelegramSender
 from shared.settings import settings
@@ -55,6 +60,7 @@ async def run() -> None:
                 events = evaluate(
                     pair.key, cells, cfg.premium_high_pct, cfg.premium_low_pct
                 )
+                events += evaluate_hyeonseon(pair.key, cells, cfg.hyeonseon_low_pct)
                 for ev in events:
                     if await _should_send(redis, ev, cfg.cooldown_sec):
                         sent = await sender.send(format_message(ev))

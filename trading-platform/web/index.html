@@ -103,8 +103,9 @@
   <table>
     <thead><tr>
       <th data-sort="coin">코인</th><th data-sort="prem">김프 %</th>
+      <th data-sort="perp">선물김프 %</th>
       <th>국내가(KRW)</th><th>해외가(KRW)</th></tr></thead>
-    <tbody id="kimpRows"><tr><td colspan="4" class="empty">불러오는 중…</td></tr></tbody>
+    <tbody id="kimpRows"><tr><td colspan="5" class="empty">불러오는 중…</td></tr></tbody>
   </table>
 </div>
 
@@ -169,20 +170,23 @@ async function tick(){
 async function renderKimp(){
   const basis=$("kimpBasis").value;
   const pv=(c)=> basis==="tether"?c.premium_pct:c.premium_coin_pct;
+  const ppv=(c)=> basis==="tether"?c.premium_perp_pct:c.premium_perp_coin_pct;  // 선물김프(null 가능)
   const mn=numOr("kimpMin",-Infinity), mx=numOr("kimpMax",Infinity);
   const d = await (await fetch(`/premium?base=${$("base").value}&ref=${$("ref").value}`)).json();
   let rows=(d.rows||[]).filter(c=>matchCoin(c.coin)).filter(c=>pv(c)>=mn && pv(c)<=mx);
+  const skey=(c)=> kimpSort.key==="perp"?(ppv(c)??-9999):(kimpSort.key==="coin"?null:pv(c));
   rows.sort((a,b)=> kimpSort.key==="coin"
-    ? kimpSort.dir*a.coin.localeCompare(b.coin) : kimpSort.dir*(pv(a)-pv(b)));
-  // 헤더 화살표
+    ? kimpSort.dir*a.coin.localeCompare(b.coin) : kimpSort.dir*(skey(a)-skey(b)));
+  const LBL={coin:"코인",prem:"김프 %",perp:"선물김프 %"};
   document.querySelectorAll("#panel-kimp th[data-sort]").forEach(th=>{
-    const base=th.dataset.sort==="coin"?"코인":"김프 %";
-    th.innerHTML = base + (kimpSort.key===th.dataset.sort?` <span class="arrow">${kimpSort.dir<0?"↓":"↑"}</span>`:"");
+    th.innerHTML = LBL[th.dataset.sort] + (kimpSort.key===th.dataset.sort?` <span class="arrow">${kimpSort.dir<0?"↓":"↑"}</span>`:"");
   });
   const tb=$("kimpRows");
-  if(!rows.length){ tb.innerHTML='<tr><td colspan="4" class="empty">조건에 맞는 코인 없음</td></tr>'; setStatus("stale","-"); return; }
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="5" class="empty">조건에 맞는 코인 없음</td></tr>'; setStatus("stale","-"); return; }
   tb.innerHTML = rows.map(c=>{const v=pv(c),cls=v>=0?"pos":"neg",s=v>=0?"+":"";
-    return `<tr><td class="coin">${c.coin}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>
+    const p=ppv(c);
+    const pcell=(p==null)?'<td class="num">-</td>':`<td class="prem ${p>=0?"pos":"neg"}">${p>=0?"+":""}${p.toFixed(2)}%</td>`;
+    return `<tr><td class="coin">${c.coin}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>${pcell}
       <td class="num">${fmt(c.base_price_krw)}</td><td class="num">${fmt(c.ref_price_krw)}</td></tr>`;}).join("");
   $("metaInfo").textContent=`${rows.length}코인 · ${basis==="tether"?"테더김프":"코인(환율)"} · 환율 ${fmt(rows[0].forex_rate)} · 테더 ${fmt(rows[0].tether_rate)}`;
   setStatus("live","실시간");

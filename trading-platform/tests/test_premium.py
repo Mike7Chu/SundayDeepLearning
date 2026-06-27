@@ -7,7 +7,7 @@ import time
 import fakeredis.aioredis
 
 from api.services.premium import compute_premium
-from shared.redis_keys import FX_USDKRW_KEY, tether_key, ticker_key
+from shared.redis_keys import FX_USDKRW_KEY, perp_ticker_key, tether_key, ticker_key
 from shared.schemas import TickerSnapshot
 from shared.universe import load_universe
 
@@ -68,6 +68,28 @@ def test_tether_and_coin_basis_differ():
         assert abs(btc.premium_pct) < 1e-6
         # 코인/환율 기준: 100000*1300=130,000,000 -> (140/130-1)*100 ≈ 7.69% (화면용)
         assert abs(btc.premium_coin_pct - 7.6923) < 1e-2
+        await redis.aclose()
+
+    asyncio.run(run())
+
+
+def test_premium_includes_futures():
+    """해외 선물(perp) 가격이 있으면 선물김프(premium_perp_pct) 산출."""
+    async def run():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        await redis.set(tether_key("upbit"), 1400.0)
+        # 국내현물 BTC 140,000,000 / 바이낸스 선물 BTC 102,000 USDT
+        await _seed(redis, "upbit", "BTC", 140_000_000, "KRW")
+        await _seed(redis, "binance", "BTC", 100_000, "USDT")        # 현물
+        snap = TickerSnapshot(coin="BTC", price=102_000, quote="USDT", ts=0.0)
+        await redis.hset(perp_ticker_key("binance"), "BTC", snap.model_dump_json())
+
+        btc = {c.coin: c for c in await compute_premium(redis, "upbit", "binance")}["BTC"]
+        # 현물김프(테더): 140M/(100000*1400)=0%
+        assert abs(btc.premium_pct) < 1e-6
+        # 선물김프(테더): 140M/(102000*1400)=140M/142.8M-1 ≈ -1.96%
+        assert btc.premium_perp_pct is not None
+        assert abs(btc.premium_perp_pct - (-1.9608)) < 1e-2
         await redis.aclose()
 
     asyncio.run(run())
