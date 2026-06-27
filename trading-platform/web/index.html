@@ -19,43 +19,41 @@
   .tabs button { background:var(--bg); color:var(--muted); border:1px solid var(--line);
     border-radius:6px; padding:6px 14px; font-size:14px; cursor:pointer; }
   .tabs button.active { color:var(--text); border-color:var(--green); }
-  .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .controls { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; }
   select, input { background:var(--bg); color:var(--text); border:1px solid var(--line);
-    border-radius:6px; padding:6px 8px; font-size:14px; }
-  input.search { width:120px; }
+    border-radius:6px; padding:5px 7px; font-size:13px; }
+  input.search { width:104px; }
+  input.rng { width:60px; }
+  label.chk { color:var(--muted); font-size:12px; display:inline-flex; align-items:center; gap:3px; }
+  .excl { display:flex; flex-wrap:wrap; gap:4px 10px; padding:6px 0 0; }
   .meta { color:var(--muted); font-size:12px; margin-left:auto; text-align:right; }
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; }
   .live{background:var(--green);} .stale{background:var(--badge);} .err{background:var(--up);}
+  .summary { padding:8px 14px; color:var(--muted); border-bottom:1px solid var(--line); font-size:12px; }
   table { width:100%; border-collapse:collapse; }
   th,td { padding:9px 10px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
   th:first-child, td:first-child { text-align:left; }
-  th { color:var(--muted); font-weight:600; font-size:12px; }
+  th { color:var(--muted); font-weight:600; font-size:12px; cursor:pointer; user-select:none; }
+  th .arrow { color:var(--green); }
   tbody tr:hover { background:#1c2128; }
   .coin{font-weight:700;} .pos{color:var(--up);} .neg{color:var(--down);}
   .num{font-variant-numeric:tabular-nums; color:var(--muted);}
   .prem{font-weight:700; font-variant-numeric:tabular-nums;}
   .empty{padding:40px; text-align:center; color:var(--muted);}
-  .panel{display:none;} .panel.active{display:block;}
-  .scroll{overflow-x:auto;}
-  /* 아비트라지 카드 */
+  .panel{display:none;} .panel.active{display:block;} .scroll{overflow-x:auto;}
   .card{border:1px solid var(--line); border-radius:10px; margin:10px 14px; padding:12px;
     display:flex; justify-content:space-between; align-items:center; gap:10px; }
   .legs{display:flex; flex-direction:column; gap:6px;}
   .leg{display:flex; align-items:center; gap:8px;}
   .pill{border:1px solid var(--line); border-radius:6px; padding:2px 8px; font-size:12px; color:var(--muted);}
   .pill.perp{color:#d2a8ff; border-color:#6e40c9;}
-  .side-long{color:var(--green); font-weight:700;}
-  .side-short{color:var(--up); font-weight:700;}
-  .sym{font-weight:700;}
-  .legprice{color:var(--muted); font-variant-numeric:tabular-nums;}
-  .right{text-align:right; min-width:90px;}
-  .gap{font-size:18px; font-weight:800; color:var(--green);}
+  .side-long{color:var(--green); font-weight:700;} .side-short{color:var(--up); font-weight:700;}
+  .sym{font-weight:700;} .legprice{color:var(--muted); font-variant-numeric:tabular-nums;}
+  .right{text-align:right; min-width:90px;} .gap{font-size:18px; font-weight:800; color:var(--green);}
   .fund{font-size:11px; color:var(--muted);}
   .wallet{display:inline-flex; gap:3px; margin-left:6px;}
-  .badge{display:inline-block; min-width:14px; height:14px; line-height:14px; text-align:center;
-    border-radius:50%; background:var(--badge); color:#000; font-size:10px; font-weight:700; margin-left:4px;}
-  .cell-int{font-size:10px; color:var(--badge); margin-left:3px;}
-  .cd{font-size:10px; color:var(--muted);}
+  .lo{color:var(--green);} .hi{color:var(--up);}
+  .cell-int{font-size:10px; color:var(--badge); margin-left:3px;} .cd{font-size:10px; color:var(--muted);}
 </style>
 </head>
 <body>
@@ -71,43 +69,61 @@
     <span class="ctl" data-for="kimp">비교 <select id="ref"></select></span>
     <span class="ctl" data-for="kimp"><select id="kimpBasis">
       <option value="tether">테더김프</option><option value="coin">코인(환율)</option></select></span>
-    <span class="ctl" data-for="arb">최소갭 <select id="minGap">
-      <option value="0">0%</option><option value="0.3">0.3%</option>
-      <option value="0.5" selected>0.5%</option><option value="1">1%</option></select></span>
-    <span class="ctl" data-for="funding"><label><input type="checkbox" id="apyToggle"> APY</label></span>
+    <span class="ctl" data-for="kimp">범위
+      <input class="rng" id="kimpMin" type="number" step="0.1" placeholder="최소%">~
+      <input class="rng" id="kimpMax" type="number" step="0.1" placeholder="최대%"></span>
+
+    <span class="ctl" data-for="arb">갭
+      <input class="rng" id="minGap" type="number" step="0.1" value="0.5" placeholder="최소%">~
+      <input class="rng" id="maxGap" type="number" step="0.1" placeholder="최대%"></span>
+    <span class="ctl" data-for="arb">
+      <label class="chk"><input type="checkbox" id="arbSpot" checked>현물</label>
+      <label class="chk"><input type="checkbox" id="arbPerp" checked>선물</label></span>
+
+    <span class="ctl" data-for="funding">주기 <select id="fundInt">
+      <option value="">모두</option><option value="8">8H</option><option value="4">4H</option>
+      <option value="2">2H</option><option value="1">1H</option></select></span>
+    <span class="ctl" data-for="funding">정렬 <select id="fundSort">
+      <option value="abs">|펀비|↓</option><option value="desc">펀비↓</option><option value="asc">펀비↑</option></select></span>
+    <span class="ctl" data-for="funding"><label class="chk"><input type="checkbox" id="apyToggle">APY</label></span>
+
     <input class="search" id="search" placeholder="코인 검색" />
     <div class="meta">
       <div><span id="status" class="dot err"></span><span id="statusText">연결 중…</span></div>
       <div id="metaInfo">-</div>
     </div>
   </div>
+  <!-- 아비트라지: 거래소 제외 -->
+  <div class="excl ctl" data-for="arb" id="arbExcl"></div>
 </header>
+
+<div id="summary" class="summary" style="display:none"></div>
 
 <div id="panel-kimp" class="panel active">
   <table>
-    <thead><tr><th>코인</th><th>김프 %</th><th>국내가(KRW)</th><th>해외가(KRW)</th></tr></thead>
+    <thead><tr>
+      <th data-sort="coin">코인</th><th data-sort="prem">김프 %</th>
+      <th>국내가(KRW)</th><th>해외가(KRW)</th></tr></thead>
     <tbody id="kimpRows"><tr><td colspan="4" class="empty">불러오는 중…</td></tr></tbody>
   </table>
 </div>
 
-<div id="panel-arb" class="panel">
-  <div id="arbCards"><div class="empty">불러오는 중…</div></div>
-</div>
+<div id="panel-arb" class="panel"><div id="arbCards"><div class="empty">불러오는 중…</div></div></div>
 
-<div id="panel-funding" class="panel">
-  <div class="scroll"><table>
-    <thead><tr id="fundHead"><th>코인</th></tr></thead>
-    <tbody id="fundRows"><tr><td class="empty">불러오는 중…</td></tr></tbody>
-  </table></div>
-</div>
+<div id="panel-funding" class="panel"><div class="scroll"><table>
+  <thead><tr id="fundHead"><th>코인</th></tr></thead>
+  <tbody id="fundRows"><tr><td class="empty">불러오는 중…</td></tr></tbody>
+</table></div></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString("ko-KR",{maximumFractionDigits:2});
 const fmt4 = (n) => Number(n).toLocaleString("ko-KR",{maximumFractionDigits:4});
-let activeTab = "kimp";
-let busy = false;   // 진행 중 요청 중복 폴링 방지
+let activeTab="kimp", busy=false;
+let kimpSort={key:"prem", dir:-1};   // dir: -1 내림차순
 const term = () => $("search").value.trim().toUpperCase();
+const matchCoin = (c) => { const t=term(); return !t || c.toUpperCase().includes(t); };
+const numOr = (id, dflt) => { const v=parseFloat($(id).value); return isNaN(v)?dflt:v; };
 
 function setStatus(cls,text){ $("status").className="dot "+cls; $("statusText").textContent=text; }
 function fillSelect(sel,names,def){ sel.innerHTML="";
@@ -118,45 +134,57 @@ async function init(){
   const d = await (await fetch("/exchanges")).json();
   fillSelect($("base"), d.domestic, "upbit");
   fillSelect($("ref"), d.overseas, "binance");
+  // 아비트라지 거래소 제외 체크박스
+  $("arbExcl").innerHTML = "제외: " + d.overseas.map(e=>
+    `<label class="chk"><input type="checkbox" class="exEx" value="${e}">${e}</label>`).join("");
+  $("arbExcl").querySelectorAll(".exEx").forEach(el=> el.addEventListener("change", tick));
   document.querySelectorAll(".tabs button").forEach(b=> b.onclick=()=>switchTab(b.dataset.tab));
-  ["base","ref","kimpBasis","minGap","apyToggle","search"].forEach(id=> $(id).oninput = tick);
+  document.querySelectorAll("#panel-kimp th[data-sort]").forEach(th=>
+    th.onclick=()=>{ const k=th.dataset.sort;
+      kimpSort = (kimpSort.key===k)?{key:k,dir:-kimpSort.dir}:{key:k,dir:-1}; tick(); });
+  document.querySelectorAll("input,select").forEach(el=> el.addEventListener("input", tick));
   switchTab("kimp");
   setInterval(tick, 3000);
 }
 
 function switchTab(tab){
-  activeTab = tab;
+  activeTab=tab;
   document.querySelectorAll(".tabs button").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
   document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active",p.id==="panel-"+tab));
   document.querySelectorAll(".ctl").forEach(c=>c.style.display=(c.dataset.for===tab)?"":"none");
+  $("summary").style.display="none";
   tick();
 }
 
 async function tick(){
-  if(busy) return;
-  busy = true;
+  if(busy) return; busy=true;
   try {
     if(activeTab==="kimp") await renderKimp();
     else if(activeTab==="arb") await renderArb();
     else await renderFunding();
   } catch(e){ setStatus("err","오류: "+e.message); }
-  finally { busy = false; }
+  finally { busy=false; }
 }
 
-function matchCoin(c){ const t=term(); return !t || c.toUpperCase().includes(t); }
-
 async function renderKimp(){
-  const basis = $("kimpBasis").value;             // tether | coin
-  const pv = (c)=> basis==="tether" ? c.premium_pct : c.premium_coin_pct;
+  const basis=$("kimpBasis").value;
+  const pv=(c)=> basis==="tether"?c.premium_pct:c.premium_coin_pct;
+  const mn=numOr("kimpMin",-Infinity), mx=numOr("kimpMax",Infinity);
   const d = await (await fetch(`/premium?base=${$("base").value}&ref=${$("ref").value}`)).json();
-  let rows=(d.rows||[]).filter(c=>matchCoin(c.coin)).sort((a,b)=>pv(b)-pv(a));
+  let rows=(d.rows||[]).filter(c=>matchCoin(c.coin)).filter(c=>pv(c)>=mn && pv(c)<=mx);
+  rows.sort((a,b)=> kimpSort.key==="coin"
+    ? kimpSort.dir*a.coin.localeCompare(b.coin) : kimpSort.dir*(pv(a)-pv(b)));
+  // 헤더 화살표
+  document.querySelectorAll("#panel-kimp th[data-sort]").forEach(th=>{
+    const base=th.dataset.sort==="coin"?"코인":"김프 %";
+    th.innerHTML = base + (kimpSort.key===th.dataset.sort?` <span class="arrow">${kimpSort.dir<0?"↓":"↑"}</span>`:"");
+  });
   const tb=$("kimpRows");
-  if(!rows.length){ tb.innerHTML='<tr><td colspan="4" class="empty">데이터 없음</td></tr>'; setStatus("stale","데이터 대기"); return; }
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="4" class="empty">조건에 맞는 코인 없음</td></tr>'; setStatus("stale","-"); return; }
   tb.innerHTML = rows.map(c=>{const v=pv(c),cls=v>=0?"pos":"neg",s=v>=0?"+":"";
     return `<tr><td class="coin">${c.coin}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>
       <td class="num">${fmt(c.base_price_krw)}</td><td class="num">${fmt(c.ref_price_krw)}</td></tr>`;}).join("");
-  const label = basis==="tether" ? "테더김프" : "코인(환율)";
-  $("metaInfo").textContent=`${rows.length}코인 · ${label} · 환율 ${fmt(rows[0].forex_rate)} · 테더 ${fmt(rows[0].tether_rate)}`;
+  $("metaInfo").textContent=`${rows.length}코인 · ${basis==="tether"?"테더김프":"코인(환율)"} · 환율 ${fmt(rows[0].forex_rate)} · 테더 ${fmt(rows[0].tether_rate)}`;
   setStatus("live","실시간");
 }
 
@@ -166,54 +194,64 @@ function legHtml(leg, side){
   let w="";
   if(leg.wallet){ const dot=(v)=>`<span class="dot" style="background:${v===true?'var(--green)':v===false?'var(--up)':'var(--gray)'}"></span>`;
     w=`<span class="wallet" title="입금/출금">${dot(leg.wallet.deposit)}${dot(leg.wallet.withdraw)}</span>`; }
-  return `<div class="leg">${mk}${sd}<span class="sym">${leg.exchange}</span>
-    <span class="legprice">${fmt4(leg.price)}</span>${w}</div>`;
+  return `<div class="leg">${mk}${sd}<span class="sym">${leg.exchange}</span><span class="legprice">${fmt4(leg.price)}</span>${w}</div>`;
 }
 function fundLine(leg){ if(!leg.funding) return "";
   const iv=leg.funding.interval_h?`${leg.funding.interval_h}H`:"";
   return `<div class="fund">펀비 ${leg.funding.rate_pct.toFixed(4)}% ${iv}</div>`; }
 
 async function renderArb(){
-  const d = await (await fetch(`/arbitrage?min_gap=${$("minGap").value}&limit=100`)).json();
-  let rows=(d.rows||[]).filter(x=>matchCoin(x.coin));
+  const minG=numOr("minGap",0), maxG=numOr("maxGap",Infinity);
+  const useSpot=$("arbSpot").checked, usePerp=$("arbPerp").checked;
+  const excl=new Set([...document.querySelectorAll(".exEx:checked")].map(e=>e.value));
+  const d = await (await fetch(`/arbitrage?min_gap=0&limit=400`)).json();
+  let rows=(d.rows||[]).filter(x=>matchCoin(x.coin))
+    .filter(x=>x.gap_pct>=minG && x.gap_pct<=maxG)
+    .filter(x=>{ const ms=[x.long.market,x.short.market];
+      if(!useSpot && ms.includes("spot")) return false;
+      if(!usePerp && ms.includes("perp")) return false;
+      if(excl.has(x.long.exchange)||excl.has(x.short.exchange)) return false;
+      return true; });
   const box=$("arbCards");
-  if(!rows.length){ box.innerHTML='<div class="empty">기회 없음 (perp 수집 후/갭 조건 완화)</div>'; setStatus("stale","데이터 대기"); return; }
-  box.innerHTML = rows.map(x=>`<div class="card">
-    <div class="legs">
-      <div class="coin">${x.coin}/USDT</div>
-      ${legHtml(x.long,"long")}${legHtml(x.short,"short")}
-    </div>
+  if(!rows.length){ box.innerHTML='<div class="empty">조건에 맞는 기회 없음</div>'; setStatus("stale","-"); return; }
+  box.innerHTML = rows.slice(0,100).map(x=>`<div class="card">
+    <div class="legs"><div class="coin">${x.coin}/USDT</div>
+      ${legHtml(x.long,"long")}${legHtml(x.short,"short")}</div>
     <div class="right"><div class="gap">${x.gap_pct.toFixed(2)}%</div>${fundLine(x.long)}${fundLine(x.short)}</div>
   </div>`).join("");
   $("metaInfo").textContent=`${rows.length} 전략`;
   setStatus("live","실시간");
 }
 
-function cdText(next_ts){ if(!next_ts) return "";
-  let s=Math.floor((next_ts-Date.now())/1000); if(s<0) s=0;
-  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
+function cdText(ts){ if(!ts) return ""; let s=Math.floor((ts-Date.now())/1000); if(s<0)s=0;
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
   return `${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`; }
+const ivOf = (c)=> c.interval_h || 8;
 
 async function renderFunding(){
   const d = await (await fetch(`/funding/matrix`)).json();
-  const apy = $("apyToggle").checked;
-  const exs = d.exchanges||[];
+  const apy=$("apyToggle").checked, exs=d.exchanges||[];
+  const fInt=$("fundInt").value, sortMode=$("fundSort").value;
+  const valOf=(c)=> apy?c.apy:c.rate_pct;
   $("fundHead").innerHTML = `<th>코인</th>` + exs.map(e=>`<th>${e}</th>`).join("");
   let coins=(d.coins||[]).filter(r=>matchCoin(r.coin));
+  if(fInt) coins=coins.filter(r=> Object.values(r.by_ex).some(c=>String(ivOf(c))===fInt));
+  const repr=(r)=>{ const vs=Object.values(r.by_ex).map(valOf); if(!vs.length) return 0;
+    return sortMode==="abs"?Math.max(...vs.map(Math.abs)) : sortMode==="asc"?Math.min(...vs):Math.max(...vs); };
+  coins.sort((a,b)=> sortMode==="asc"?repr(a)-repr(b):repr(b)-repr(a));
   const tb=$("fundRows");
-  if(!coins.length){ tb.innerHTML=`<tr><td class="empty">데이터 없음 (perp 펀비 수집 후)</td></tr>`; setStatus("stale","데이터 대기"); return; }
+  if(!coins.length){ tb.innerHTML=`<tr><td class="empty">조건에 맞는 코인 없음 (perp 펀비 수집 후)</td></tr>`; setStatus("stale","-"); return; }
   tb.innerHTML = coins.map(r=>{
-    const cells = exs.map(ex=>{ const c=r.by_ex[ex];
+    const cells=exs.map(ex=>{ const c=r.by_ex[ex];
       if(!c) return `<td class="num">-</td>`;
-      const val = apy ? c.apy : c.rate_pct;
-      const cls = val>=0?"pos":"neg", s=val>=0?"+":"";
-      const iv = (c.interval_h && c.interval_h!==8) ? `<span class="cell-int">${c.interval_h}H</span>` : "";
-      const cd = cdText(c.next_ts);
-      return `<td><span class="prem ${cls}">${s}${val.toFixed(apy?2:4)}${apy?'%':'%'}</span>${iv}${cd?`<div class="cd">${cd}</div>`:""}</td>`;
+      const val=valOf(c), cls=val>=0?"pos":"neg", s=val>=0?"+":"";
+      const iv=(c.interval_h && c.interval_h!==8)?`<span class="cell-int">${c.interval_h}H</span>`:"";
+      const cd=cdText(c.next_ts);
+      return `<td><span class="prem ${cls}">${s}${val.toFixed(apy?2:4)}%</span>${iv}${cd?`<div class="cd">${cd}</div>`:""}</td>`;
     }).join("");
     return `<tr><td class="coin">${r.coin}</td>${cells}</tr>`;
   }).join("");
-  $("metaInfo").textContent=`${coins.length}코인 · ${apy?"APY":"펀비"} 기준`;
+  $("metaInfo").textContent=`${coins.length}코인 · ${apy?"APY":"펀비"}${fInt?` · ${fInt}H`:""}`;
   setStatus("live","실시간");
 }
 
