@@ -51,12 +51,18 @@ async def fx_loop(redis: aioredis.Redis) -> None:
 async def main() -> None:
     universe = load_universe()
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-    adapters = [
-        ExchangeAdapter(cfg, universe.coins)
-        for cfg in universe.exchanges.values()
-    ]
-    logger.info("collector start: %d exchanges, %d coins",
-                len(adapters), len(universe.coins))
+    adapters: list[ExchangeAdapter] = []
+    for cfg in universe.exchanges.values():
+        try:
+            adapters.append(ExchangeAdapter(cfg, universe.coins))
+        except Exception as exc:
+            # 거래소 하나가 잘못된 ccxt_id 등으로 실패해도 전체 수집은 계속.
+            logger.error("거래소 초기화 실패(건너뜀) %s(ccxt_id=%s): %s",
+                         cfg.name, cfg.ccxt_id, exc)
+    if not adapters:
+        raise RuntimeError("초기화된 거래소가 없습니다. config/symbols.yaml 확인")
+    logger.info("collector start: %d/%d exchanges, %d coins",
+                len(adapters), len(universe.exchanges), len(universe.coins))
     try:
         await asyncio.gather(
             ticker_loop(redis, adapters),

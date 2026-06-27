@@ -40,7 +40,7 @@ exchanges:
     quote: USDT
     region: overseas
   gate:
-    ccxt_id: gateio
+    ccxt_id: gate
     quote: USDT
     region: overseas
   bingx:

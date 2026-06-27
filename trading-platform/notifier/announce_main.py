@@ -49,7 +49,11 @@ async def run() -> None:
         if not ex:
             logger.warning("알 수 없는 거래소(유니버스에 없음): %s", name)
             continue
-        listers[name] = MarketLister(name, ex.ccxt_id)
+        try:
+            listers[name] = MarketLister(name, ex.ccxt_id)
+        except Exception as exc:
+            logger.error("거래소 초기화 실패(건너뜀) %s(ccxt_id=%s): %s",
+                         name, ex.ccxt_id, exc)
 
     logger.info(
         "announcer start: watch=%s quote_filter=%s interval=%ds telegram=%s",
