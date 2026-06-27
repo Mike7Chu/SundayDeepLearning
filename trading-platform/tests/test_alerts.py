@@ -12,10 +12,11 @@ from shared.schemas import PremiumCell
 
 
 def _cell(coin: str, pct: float) -> PremiumCell:
+    # 알림은 테더 기준 premium_pct 를 평가한다.
     return PremiumCell(
         coin=coin, base_exchange="upbit", ref_exchange="binance",
         base_price_krw=1.0, ref_price_krw=1.0, premium_pct=pct,
-        rate=1380.0, basis="forex", ts=0.0,
+        premium_coin_pct=pct, tether_rate=1380.0, forex_rate=1380.0, ts=0.0,
     )
 
 

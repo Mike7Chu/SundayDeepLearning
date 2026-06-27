@@ -36,13 +36,19 @@ class TickerSnapshot(BaseModel):
 
 
 class PremiumCell(BaseModel):
-    """기준(국내) 거래소 대비 한 해외 거래소의 김프."""
+    """기준(국내) 거래소 대비 한 해외 거래소의 김프.
+
+    두 기준을 함께 제공:
+      - premium_pct      : 테더(USDT/KRW) 기준 — 알림용(실제 차익 신호)
+      - premium_coin_pct : 코인/환율(USD/KRW) 기준 — 화면 표출용(통상의 김프)
+    """
     coin: str
     base_exchange: str
     ref_exchange: str
     base_price_krw: float
-    ref_price_krw: float        # 해외가 * 환산레이트
-    premium_pct: float          # (base/ref - 1) * 100. 양수=김프, 음수=역프
-    rate: float                 # 환산에 사용한 KRW/USDT 레이트
-    basis: str                  # "tether"(원화 테더가) | "forex"(은행 환율)
+    ref_price_krw: float        # 코인(환율) 기준 환산 해외가 — 화면 표시용
+    premium_pct: float          # 테더 기준 (알림)
+    premium_coin_pct: float     # 코인/환율 기준 (화면)
+    tether_rate: float          # 환산에 쓴 원화 테더가(USDT/KRW)
+    forex_rate: float           # 환산에 쓴 은행 환율(USD/KRW)
     ts: float

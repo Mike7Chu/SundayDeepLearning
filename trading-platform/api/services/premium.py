@@ -1,9 +1,9 @@
 """김프/역프 계산 서비스.
 
-환산 기준(basis)은 **원화 테더가(USDT/KRW, 기준 거래소)** 를 우선 사용한다.
-  premium_pct = (국내가_KRW / (해외가_USDT * 테더가_KRW) - 1) * 100
-테더가가 없으면 은행 환율(USD/KRW)로 폴백.
-  양수 = 김프(국내가 비쌈), 음수 = 역프.
+두 기준을 함께 산출한다:
+  - 테더 기준(알림용):   premium_pct      = (국내KRW / (해외USDT * 테더가KRW)) - 1
+  - 코인/환율 기준(화면): premium_coin_pct = (국내KRW / (해외USDT * 환율KRW))   - 1
+양수 = 김프(국내가 비쌈), 음수 = 역프.
 """
 from __future__ import annotations
 
@@ -27,28 +27,29 @@ async def _usdkrw(redis: aioredis.Redis) -> float:
     return float(val) if val else settings.fx_usdkrw_fallback
 
 
-async def _conversion_rate(redis: aioredis.Redis, base: str) -> tuple[float, str]:
-    """USDT→KRW 환산 레이트와 기준(basis) 결정.
+async def _tether_rate(redis: aioredis.Redis, base: str, forex: float) -> float:
+    """기준(국내) 거래소의 원화 테더가(USDT/KRW). 없으면 환율로 폴백."""
+    val = await redis.get(tether_key(base))
+    return float(val) if val and float(val) > 0 else forex
 
-    1순위: 기준(국내) 거래소의 원화 테더가(USDT/KRW). 2순위: 은행 환율.
-    """
-    tether = await redis.get(tether_key(base))
-    if tether and float(tether) > 0:
-        return float(tether), "tether"
-    return await _usdkrw(redis), "forex"
+
+def _to_krw(snap: TickerSnapshot, rate: float) -> float:
+    """티커 가격을 KRW로 환산. KRW 마켓이면 그대로, USDT면 rate 곱."""
+    return snap.price if snap.quote == "KRW" else snap.price * rate
 
 
 async def compute_premium(
     redis: aioredis.Redis, base: str, ref: str
 ) -> list[PremiumCell]:
-    """기준 국내 거래소(base) vs 해외 거래소(ref) 코인별 김프 (테더가 기준)."""
+    """기준 국내 거래소(base) vs 해외 거래소(ref) 코인별 김프(테더·코인 기준 동시)."""
     universe = load_universe()
     if base not in universe.exchanges:
         raise ValueError(f"unknown base exchange: {base}")
     if ref not in universe.exchanges:
         raise ValueError(f"unknown ref exchange: {ref}")
 
-    rate, basis = await _conversion_rate(redis, base)
+    forex = await _usdkrw(redis)
+    tether = await _tether_rate(redis, base, forex)
     base_t = await _load_tickers(redis, base)
     ref_t = await _load_tickers(redis, ref)
 
@@ -58,21 +59,22 @@ async def compute_premium(
         r = ref_t.get(coin)
         if not b or not r or r.price <= 0:
             continue
-        base_krw = b.price if b.quote == "KRW" else b.price * rate
-        ref_krw = r.price if r.quote == "KRW" else r.price * rate
-        if ref_krw <= 0:
+        base_krw = _to_krw(b, forex)         # 국내는 KRW라 레이트 무관
+        ref_krw_coin = _to_krw(r, forex)     # 코인/환율 기준
+        ref_krw_tether = _to_krw(r, tether)  # 테더 기준
+        if ref_krw_coin <= 0 or ref_krw_tether <= 0:
             continue
-        premium_pct = (base_krw / ref_krw - 1) * 100
         cells.append(
             PremiumCell(
                 coin=coin,
                 base_exchange=base,
                 ref_exchange=ref,
                 base_price_krw=round(base_krw, 4),
-                ref_price_krw=round(ref_krw, 4),
-                premium_pct=round(premium_pct, 4),
-                rate=round(rate, 4),
-                basis=basis,
+                ref_price_krw=round(ref_krw_coin, 4),
+                premium_pct=round((base_krw / ref_krw_tether - 1) * 100, 4),
+                premium_coin_pct=round((base_krw / ref_krw_coin - 1) * 100, 4),
+                tether_rate=round(tether, 4),
+                forex_rate=round(forex, 4),
                 ts=min(b.ts, r.ts),
             )
         )

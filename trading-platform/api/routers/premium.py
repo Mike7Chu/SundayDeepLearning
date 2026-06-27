@@ -36,7 +36,7 @@ async def premium(
     ref: str = Query("binance", description="비교 해외 거래소"),
 ) -> dict:
     cells = await compute_premium(get_redis(), base, ref)
-    cells.sort(key=lambda c: c.premium_pct, reverse=True)
+    cells.sort(key=lambda c: c.premium_coin_pct, reverse=True)
     return {"base": base, "ref": ref, "rows": [c.model_dump() for c in cells]}
 
 
@@ -49,7 +49,7 @@ async def ws_premium(ws: WebSocket) -> None:
     try:
         while True:
             cells = await compute_premium(get_redis(), base, ref)
-            cells.sort(key=lambda c: c.premium_pct, reverse=True)
+            cells.sort(key=lambda c: c.premium_coin_pct, reverse=True)
             await ws.send_text(json.dumps({
                 "base": base, "ref": ref,
                 "rows": [c.model_dump() for c in cells],

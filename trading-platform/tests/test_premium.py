@@ -40,32 +40,33 @@ def test_premium_math():
 
         cells = await compute_premium(redis, "upbit", "binance")
         by_coin = {c.coin: c for c in cells}
+        # 테더가 없으면 테더 기준도 환율로 폴백 → 두 값 동일
         assert abs(by_coin["BTC"].premium_pct) < 1e-6
+        assert abs(by_coin["BTC"].premium_coin_pct) < 1e-6
         # ETH 김프 = (5,700,000 / 5,520,000 - 1)*100 ≈ 3.26%
-        assert abs(by_coin["ETH"].premium_pct - 3.2608695) < 1e-3
-        # 테더가 없으면 환율(forex) 기준으로 폴백
-        assert by_coin["BTC"].basis == "forex"
+        assert abs(by_coin["ETH"].premium_coin_pct - 3.2608695) < 1e-3
         await redis.aclose()
 
     asyncio.run(run())
 
 
-def test_premium_uses_tether_basis():
-    """원화 테더가가 있으면 환율 대신 테더가로 환산하고 basis=tether."""
+def test_tether_and_coin_basis_differ():
+    """테더가가 있으면 알림(테더)·화면(코인/환율) 값이 갈린다."""
     async def run():
         redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-        await redis.set(FX_USDKRW_KEY, 1300.0)        # 환율(폴백, 무시돼야 함)
-        await redis.set(tether_key("upbit"), 1400.0)  # 원화 테더가(우선)
+        await redis.set(FX_USDKRW_KEY, 1300.0)        # 환율 → 화면(코인) 기준
+        await redis.set(tether_key("upbit"), 1400.0)  # 원화 테더가 → 알림 기준
         # 업비트 BTC 140,000,000 / 바이낸스 100,000 USDT
-        # 테더 기준 해외가 = 100000*1400 = 140,000,000 -> 김프 0%
         await _seed(redis, "upbit", "BTC", 140_000_000, "KRW")
         await _seed(redis, "binance", "BTC", 100_000, "USDT")
 
-        cells = await compute_premium(redis, "upbit", "binance")
-        btc = {c.coin: c for c in cells}["BTC"]
-        assert btc.basis == "tether"
-        assert abs(btc.rate - 1400.0) < 1e-6
-        assert abs(btc.premium_pct) < 1e-6   # 환율(1300) 썼으면 0%가 안 나옴
+        btc = {c.coin: c for c in await compute_premium(redis, "upbit", "binance")}["BTC"]
+        assert abs(btc.tether_rate - 1400.0) < 1e-6
+        assert abs(btc.forex_rate - 1300.0) < 1e-6
+        # 테더 기준: 100000*1400=140,000,000 -> 0% (알림용)
+        assert abs(btc.premium_pct) < 1e-6
+        # 코인/환율 기준: 100000*1300=130,000,000 -> (140/130-1)*100 ≈ 7.69% (화면용)
+        assert abs(btc.premium_coin_pct - 7.6923) < 1e-2
         await redis.aclose()
 
     asyncio.run(run())

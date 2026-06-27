@@ -30,7 +30,7 @@
 | `collector/exchanges/adapter.py` | ccxt 거래소 어댑터(fetch_tickers/폴백) |
 | `collector/forex.py` | USD/KRW 환율(open.er-api.com, 폴백값 지원) |
 | `api/` | FastAPI. 김프 계산 + REST/WS |
-| `api/services/premium.py` | 김프식(**원화 테더가 기준**): `(국내KRW/(해외USDT×테더가KRW)−1)×100`, 테더가 없으면 환율 폴백(`basis` 필드) |
+| `api/services/premium.py` | 두 기준 동시 산출: `premium_pct`=테더(USDT/KRW) 기준→**알림용**, `premium_coin_pct`=코인/환율(USD/KRW) 기준→**화면용**. 테더가 없으면 환율 폴백 |
 | `api/routers/premium.py` | `/premium`, `/tickers/{ex}`, `/exchanges`, `WS /ws/premium` |
 | `web/index.html` | 김프 대시보드 단일 페이지. FastAPI `GET /`로 서빙(`api/main.py`) |
 | `notifier/` | 텔레그램 봇 묶음. 김프알림(`main.py`/`alerts.py`, `config/alerts.yaml`) + 신규상장감지(`announce_main.py`/`listings.py`, `config/announcements.yaml`) + 발송(`telegram.py`) |
