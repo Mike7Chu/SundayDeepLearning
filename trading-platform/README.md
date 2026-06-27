@@ -46,6 +46,7 @@ docker compose up -d --build
 
 ## 주요 엔드포인트
 
+- `GET /` — **김프 대시보드**(웹 UI)
 - `GET /health` — 헬스체크
 - `GET /premium?base=upbit&ref=binance` — 기준 거래소(국내) 대비 해외 거래소 김프 매트릭스
 - `GET /tickers/{exchange}` — 거래소 최신 시세 스냅샷

@@ -10,7 +10,8 @@
 - ✅ **Phase 2 코어**: 김프/역프 계산 + REST/WS API
 - ✅ **텔레그램 알림봇**(`notifier/main.py`): 김프/역프 임계치 → 텔레그램 발송 + 쿨다운
 - ✅ **공지알림봇=신규상장 감지**(`notifier/announce_main.py`): 업비트/빗썸 마켓목록 diff → 새 심볼 등장 시 알림(quote_filter=KRW). 공지 스크래핑 대신 마켓 diff(클라우드 IP 차단·더 안정적)
-- ⏭️ **다음**: ① 펀비 수집/대시보드 ② Next.js 대시보드
+- ✅ **김프 대시보드**(`web/index.html`): FastAPI가 `GET /`로 서빙하는 단일 페이지(노드 빌드 X). 기준/비교 거래소 선택, 김프 매트릭스 3초 폴링, 색상 구분. 폰에서 Tailscale로 접속
+- ⏭️ **다음**: ① 펀비 수집/대시보드 ② 봇 컨트롤 패널(필요 시 Next.js 확장)
 - ⏸️ **봇 실행(현선/loan/매도), 주식**: 페이퍼 모드부터 단계적 (Phase 3~6, 미착수)
 
 전체 로드맵·설계 근거는 [`docs/PLAN.md`](docs/PLAN.md), 무엇을 왜 했는지는 [`docs/PROGRESS.md`](docs/PROGRESS.md).
@@ -31,6 +32,7 @@
 | `api/` | FastAPI. 김프 계산 + REST/WS |
 | `api/services/premium.py` | 김프식: `(국내KRW/(해외USDT×환율)−1)×100` |
 | `api/routers/premium.py` | `/premium`, `/tickers/{ex}`, `/exchanges`, `WS /ws/premium` |
+| `web/index.html` | 김프 대시보드 단일 페이지. FastAPI `GET /`로 서빙(`api/main.py`) |
 | `notifier/` | 텔레그램 봇 묶음. 김프알림(`main.py`/`alerts.py`, `config/alerts.yaml`) + 신규상장감지(`announce_main.py`/`listings.py`, `config/announcements.yaml`) + 발송(`telegram.py`) |
 | `shared/` | 유니버스 로더(`universe.py`)·스키마(`schemas.py`)·설정(`settings.py`)·Redis키(`redis_keys.py`) |
 | `config/symbols.yaml` | 거래소 + 코인 유니버스(단일 진실원) |

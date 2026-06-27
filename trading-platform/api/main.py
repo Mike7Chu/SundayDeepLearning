@@ -5,12 +5,16 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from api.redis_client import close_redis
 from api.routers import premium
+
+_WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
 @asynccontextmanager
@@ -34,3 +38,9 @@ app.include_router(premium.router)
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/", include_in_schema=False)
+async def dashboard() -> FileResponse:
+    """김프 대시보드(단일 페이지)."""
+    return FileResponse(_WEB_DIR / "index.html")

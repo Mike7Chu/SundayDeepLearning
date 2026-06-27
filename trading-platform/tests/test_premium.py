@@ -56,3 +56,7 @@ def test_api_health():
     assert client.get("/health").json() == {"status": "ok"}
     ex = client.get("/exchanges").json()
     assert len(ex["overseas"]) == 7
+    # 대시보드 HTML 서빙 확인
+    home = client.get("/")
+    assert home.status_code == 200
+    assert "김프 대시보드" in home.text
