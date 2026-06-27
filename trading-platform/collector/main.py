@@ -9,16 +9,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
+import httpx
 import redis.asyncio as aioredis
 
 from collector.exchanges.adapter import ExchangeAdapter
 from collector.exchanges.perp import PerpAdapter
 from collector.exchanges.wallet import WalletAdapter
 from collector.forex import fetch_usdkrw
+from collector.stock.kis import KISClient, load_watchlist
 from shared.redis_store import replace_hash
 from shared.redis_keys import (
     FX_USDKRW_KEY,
+    STOCK_QUOTE_KEY,
     funding_key,
     perp_ticker_key,
     tether_key,
@@ -94,6 +98,31 @@ async def wallet_loop(redis: aioredis.Redis, adapters: list[WalletAdapter]) -> N
         await asyncio.sleep(settings.wallet_interval_sec)
 
 
+async def stock_loop(redis: aioredis.Redis) -> None:
+    """KIS 관심종목 현재가 수집. 키 미설정이면 비활성."""
+    kis = KISClient()
+    if not kis.enabled:
+        logger.info("KIS 미설정 → 주식 수집 비활성 (.env KIS_APP_KEY/SECRET)")
+        return
+    watch = load_watchlist()
+    logger.info("stock collector start: %d종목 (paper=%s)", len(watch), settings.kis_app_key and True)
+    while True:
+        out: dict[str, str] = {}
+        async with httpx.AsyncClient(timeout=10) as client:
+            for item in watch:
+                try:
+                    q = await kis.fetch_price(client, item["code"])
+                    out[item["code"]] = json.dumps(
+                        {"code": item["code"], "name": item["name"],
+                         "ts": time.time(), **q})
+                except Exception as exc:
+                    logger.warning("[stock %s] 실패: %s", item["code"], exc)
+        if out:
+            await replace_hash(redis, STOCK_QUOTE_KEY, out)
+            logger.info("[stock] %d종목 수집", len(out))
+        await asyncio.sleep(settings.stock_interval_sec)
+
+
 async def fx_loop(redis: aioredis.Redis) -> None:
     while True:
         rate = await fetch_usdkrw()
@@ -141,6 +170,7 @@ async def main() -> None:
             perp_loop(redis, perp_adapters),
             wallet_loop(redis, wallet_adapters),
             fx_loop(redis),
+            stock_loop(redis),
         )
     finally:
         await asyncio.gather(

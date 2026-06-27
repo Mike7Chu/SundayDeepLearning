@@ -17,7 +17,10 @@
 - ✅ **대시보드 3탭**(`web/index.html`, `GET /`): 김프 / 아비트라지(전략카드) / 펀비(매트릭스) + 코인 검색. 노드 빌드 X
 - ✅ **선물김프 + 현선 알림**: 김프 탭에 국내현물 vs 해외선물(perp) 비교 컬럼(`premium_perp_pct`). 선물 역프 임계치(`hyeonseon_low_pct`) 이하 시 텔레그램 현선(현물매수+선물숏) 알림
 - ✅ **정렬/필터**: 김프(컬럼정렬·범위) / 아비(갭·현물선물·거래소 제외) / 펀비(정산주기·정렬)
-- ⏭️ **다음**: ① 펀비/스프레드 임계치 알림 ② 봇(현선/loan/매도) 페이퍼 ③ 주식(KIS)
+- ✅ **펀비 알림**: 과열 |APY| + 거래소간 펀비차(%p) 텔레그램(`notifier/alerts.evaluate_funding`)
+- ✅ **봇 페이퍼**(`bots/`): 프레임워크+실행게이트웨이(dry-run)+현선봇. `/bots` 컨트롤(enable/disable/killswitch), 대시보드 봇 탭. 실거래 미오픈
+- ✅ **주식(KIS)**(`collector/stock/kis.py`): 관심종목 현재가 수집(키 없으면 idle), `/stocks` + 대시보드 주식 탭
+- ⏭️ **다음**: 봇 실거래 게이트(안전장치) / 주식 전략(시그널·가치·배당)·브리핑 / TimescaleDB 영속화
 - ⏸️ **봇 실행(현선/loan/매도), 주식**: 페이퍼 모드부터 단계적 (Phase 3~6, 미착수)
 
 전체 로드맵·설계 근거는 [`docs/PLAN.md`](docs/PLAN.md), 무엇을 왜 했는지는 [`docs/PROGRESS.md`](docs/PROGRESS.md).
@@ -44,7 +47,9 @@
 | `collector/exchanges/wallet.py` | 입출금 가능여부(`fetch_currencies`) 수집(5분 주기) |
 | `shared/symbols.py` | 심볼 파싱(`parse_symbol`)·레버리지토큰 필터(`is_leveraged_token`) |
 | `web/index.html` | 대시보드(김프/거래소간/펀비 탭). FastAPI `GET /`로 서빙(`api/main.py`) |
-| `notifier/` | 텔레그램 봇 묶음. 김프알림(`main.py`/`alerts.py`, `config/alerts.yaml`) + 신규상장감지(`announce_main.py`/`listings.py`, `config/announcements.yaml`) + 발송(`telegram.py`) |
+| `notifier/` | 텔레그램 봇 묶음. 김프/현선/펀비 알림(`main.py`/`alerts.py`, `config/alerts.yaml`) + 신규상장감지(`announce_main.py`/`listings.py`) + 발송(`telegram.py`) |
+| `bots/` | 페이퍼 봇. `framework.BotBase`(상태머신·컨트롤)·`execution_gateway`(dry-run 가상체결)·`coin/hyeonseon`(현선봇)·`main.py`. 컨트롤 API `api/routers/bots.py` |
+| `collector/stock/kis.py` | 한국투자증권 현재가(키 없으면 비활성). `config/stocks.yaml` 관심종목, `/stocks` API |
 | `shared/` | 유니버스 로더(`universe.py`)·스키마(`schemas.py`)·설정(`settings.py`)·Redis키(`redis_keys.py`) |
 | `config/symbols.yaml` | 거래소 + 코인 유니버스(단일 진실원) |
 | `deploy/` | RPi 원클릭 배포 스크립트·가이드 |

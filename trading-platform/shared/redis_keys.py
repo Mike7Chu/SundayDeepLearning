@@ -27,6 +27,10 @@ def wallet_key(exchange: str) -> str:
     return f"wallet:{exchange}"
 
 
+# 주식 시세 해시. field=종목코드, value=json{code,name,price,change_pct,ts}
+STOCK_QUOTE_KEY = "stock:quote"
+
+
 # ===== 봇 (페이퍼/실행) =====
 BOT_KILLSWITCH_KEY = "bot:killswitch"            # "1"이면 전 봇 정지
 

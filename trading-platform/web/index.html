@@ -66,6 +66,7 @@
     <button data-tab="arb">아비트라지</button>
     <button data-tab="funding">펀비</button>
     <button data-tab="bots">봇</button>
+    <button data-tab="stocks">주식</button>
   </div>
   <div class="controls">
     <span class="ctl" data-for="kimp">기준 <select id="base"></select></span>
@@ -123,6 +124,13 @@
 
 <div id="panel-bots" class="panel"><div id="botsBox"><div class="empty">불러오는 중…</div></div></div>
 
+<div id="panel-stocks" class="panel">
+  <table>
+    <thead><tr><th>종목</th><th>현재가</th><th>등락률</th></tr></thead>
+    <tbody id="stockRows"><tr><td colspan="3" class="empty">불러오는 중…</td></tr></tbody>
+  </table>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString("ko-KR",{maximumFractionDigits:2});
@@ -173,9 +181,22 @@ async function tick(){
     if(activeTab==="kimp") await renderKimp();
     else if(activeTab==="arb") await renderArb();
     else if(activeTab==="funding") await renderFunding();
-    else await renderBots();
+    else if(activeTab==="bots") await renderBots();
+    else await renderStocks();
   } catch(e){ setStatus("err","오류: "+e.message); }
   finally { busy=false; }
+}
+
+async function renderStocks(){
+  const d = await (await fetch("/stocks")).json();
+  let rows=(d.rows||[]).filter(r=>matchCoin(r.name)||matchCoin(r.code));
+  const tb=$("stockRows");
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="3" class="empty">데이터 없음 (.env에 KIS 키 설정 필요)</td></tr>'; setStatus("stale","KIS 미설정?"); return; }
+  tb.innerHTML = rows.map(r=>{const c=r.change_pct>=0?"pos":"neg",s=r.change_pct>=0?"+":"";
+    return `<tr><td class="coin">${r.name}</td><td class="num">${fmt(r.price)}</td>
+      <td class="prem ${c}">${s}${r.change_pct.toFixed(2)}%</td></tr>`;}).join("");
+  $("metaInfo").textContent=`${rows.length}종목`;
+  setStatus("live","실시간");
 }
 
 async function renderBots(){

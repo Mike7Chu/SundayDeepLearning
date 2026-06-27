@@ -20,5 +20,12 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # 한국투자증권(KIS) — 키 없으면 주식 수집 비활성
+    kis_app_key: str = ""
+    kis_app_secret: str = ""
+    kis_account: str = ""
+    kis_paper: bool = True               # True=모의투자 도메인
+    stock_interval_sec: float = 15.0
+
 
 settings = Settings()
