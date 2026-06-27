@@ -25,6 +25,8 @@ class AlertConfig(BaseModel):
     premium_high_pct: float = 3.0
     premium_low_pct: float = -1.5
     hyeonseon_low_pct: float = -1.0   # 국내현물 vs 해외선물 역프 이 % 이하면 현선 알림
+    funding_apy_pct: float = 100.0    # 펀비 |APY| 이 % 이상이면 과열 알림
+    funding_spread_pct: float = 0.1   # 거래소간 펀비차(%p) 이 이상이면 차익 알림
     cooldown_sec: int = 600
     poll_interval_sec: float = 10.0
 

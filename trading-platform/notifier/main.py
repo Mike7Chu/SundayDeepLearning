@@ -12,10 +12,12 @@ import logging
 
 import redis.asyncio as aioredis
 
+from api.services.cross import compute_funding_matrix
 from api.services.premium import compute_premium
 from notifier.alerts import (
     AlertEvent,
     evaluate,
+    evaluate_funding,
     evaluate_hyeonseon,
     format_message,
 )
@@ -66,6 +68,17 @@ async def run() -> None:
                         sent = await sender.send(format_message(ev))
                         logger.info("ALERT %s %+.2f%% (sent=%s)",
                                     ev.dedup_key, ev.premium_pct, sent)
+
+            # 펀비 알림(거래소쌍 무관, 매트릭스 1회)
+            try:
+                matrix = await compute_funding_matrix(redis)
+                for ev in evaluate_funding(matrix, cfg.funding_apy_pct, cfg.funding_spread_pct):
+                    if await _should_send(redis, ev, cfg.cooldown_sec):
+                        sent = await sender.send(format_message(ev))
+                        logger.info("ALERT %s %.4f (sent=%s)", ev.dedup_key, ev.premium_pct, sent)
+            except Exception as exc:
+                logger.warning("펀비 알림 평가 실패: %s", exc)
+
             await asyncio.sleep(cfg.poll_interval_sec)
     finally:
         await redis.aclose()

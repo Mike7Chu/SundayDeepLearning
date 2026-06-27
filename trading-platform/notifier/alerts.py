@@ -65,7 +65,41 @@ def evaluate(
     return events
 
 
+def evaluate_funding(
+    matrix: dict, apy_pct: float, spread_pct: float
+) -> list[AlertEvent]:
+    """펀비 매트릭스에서 과열(APY)·거래소간 펀비차 알림 이벤트."""
+    events: list[AlertEvent] = []
+    for row in matrix.get("coins", []):
+        coin = row["coin"]
+        cells = list(row.get("by_ex", {}).items())  # [(ex, cell)]
+        if not cells:
+            continue
+        # 과열: |APY| 최대인 거래소
+        ex_max, cell_max = max(cells, key=lambda kv: abs(kv[1]["apy"]))
+        if abs(cell_max["apy"]) >= apy_pct:
+            events.append(AlertEvent(
+                pair_key="funding", coin=coin, side="funding_apy",
+                premium_pct=cell_max["apy"], base_exchange=ex_max, ref_exchange=""))
+        # 거래소간 펀비차(차익)
+        if len(cells) >= 2:
+            hi = max(cells, key=lambda kv: kv[1]["rate_pct"])
+            lo = min(cells, key=lambda kv: kv[1]["rate_pct"])
+            spread = hi[1]["rate_pct"] - lo[1]["rate_pct"]
+            if spread >= spread_pct:
+                events.append(AlertEvent(
+                    pair_key="funding", coin=coin, side="funding_spread",
+                    premium_pct=round(spread, 4),
+                    base_exchange=hi[0], ref_exchange=lo[0]))
+    return events
+
+
 def format_message(event: AlertEvent) -> str:
+    if event.side == "funding_apy":
+        return (f"💰펀비과열 {event.coin}  {event.base_exchange} APY {event.premium_pct:+.1f}%")
+    if event.side == "funding_spread":
+        return (f"💱펀비차 {event.coin}  {event.premium_pct:.4f}%p\n"
+                f"{event.base_exchange} 숏(고) / {event.ref_exchange} 롱(저)")
     if event.side == "perp_low":
         return (
             f"🟢현선 {event.coin}  선물역프 {event.premium_pct:+.2f}%\n"

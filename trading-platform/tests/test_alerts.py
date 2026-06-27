@@ -21,6 +21,21 @@ def _cell(coin: str, pct: float, perp: float | None = None) -> PremiumCell:
     )
 
 
+def test_funding_alerts():
+    from notifier.alerts import evaluate_funding, format_message
+    matrix = {"exchanges": ["binance", "bybit"], "coins": [
+        {"coin": "BTC", "by_ex": {
+            "binance": {"rate_pct": 0.01, "apy": 10.95, "interval_h": 8, "next_ts": None},
+            "bybit":   {"rate_pct": -0.20, "apy": -219.0, "interval_h": 8, "next_ts": None}}},
+    ]}
+    evs = evaluate_funding(matrix, apy_pct=100.0, spread_pct=0.1)
+    sides = {e.side for e in evs}
+    assert "funding_apy" in sides    # bybit APY -219 → 과열
+    assert "funding_spread" in sides  # 0.01-(-0.20)=0.21%p ≥ 0.1
+    msgs = " ".join(format_message(e) for e in evs)
+    assert "펀비" in msgs
+
+
 def test_hyeonseon_alert():
     from notifier.alerts import evaluate_hyeonseon, format_message
     cells = [_cell("BTC", 0.5, perp=-2.0), _cell("ETH", 0.1, perp=-0.3),
