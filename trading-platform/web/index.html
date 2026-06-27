@@ -69,6 +69,8 @@
   <div class="controls">
     <span class="ctl" data-for="kimp">기준 <select id="base"></select></span>
     <span class="ctl" data-for="kimp">비교 <select id="ref"></select></span>
+    <span class="ctl" data-for="kimp"><select id="kimpBasis">
+      <option value="tether">테더김프</option><option value="coin">코인(환율)</option></select></span>
     <span class="ctl" data-for="arb">최소갭 <select id="minGap">
       <option value="0">0%</option><option value="0.3">0.3%</option>
       <option value="0.5" selected>0.5%</option><option value="1">1%</option></select></span>
@@ -83,7 +85,7 @@
 
 <div id="panel-kimp" class="panel active">
   <table>
-    <thead><tr><th>코인</th><th>김프 %(코인)</th><th>국내가(KRW)</th><th>해외가(KRW)</th></tr></thead>
+    <thead><tr><th>코인</th><th>김프 %</th><th>국내가(KRW)</th><th>해외가(KRW)</th></tr></thead>
     <tbody id="kimpRows"><tr><td colspan="4" class="empty">불러오는 중…</td></tr></tbody>
   </table>
 </div>
@@ -117,7 +119,7 @@ async function init(){
   fillSelect($("base"), d.domestic, "upbit");
   fillSelect($("ref"), d.overseas, "binance");
   document.querySelectorAll(".tabs button").forEach(b=> b.onclick=()=>switchTab(b.dataset.tab));
-  ["base","ref","minGap","apyToggle","search"].forEach(id=> $(id).oninput = tick);
+  ["base","ref","kimpBasis","minGap","apyToggle","search"].forEach(id=> $(id).oninput = tick);
   switchTab("kimp");
   setInterval(tick, 3000);
 }
@@ -144,14 +146,17 @@ async function tick(){
 function matchCoin(c){ const t=term(); return !t || c.toUpperCase().includes(t); }
 
 async function renderKimp(){
+  const basis = $("kimpBasis").value;             // tether | coin
+  const pv = (c)=> basis==="tether" ? c.premium_pct : c.premium_coin_pct;
   const d = await (await fetch(`/premium?base=${$("base").value}&ref=${$("ref").value}`)).json();
-  let rows=(d.rows||[]).filter(c=>matchCoin(c.coin)).sort((a,b)=>b.premium_coin_pct-a.premium_coin_pct);
+  let rows=(d.rows||[]).filter(c=>matchCoin(c.coin)).sort((a,b)=>pv(b)-pv(a));
   const tb=$("kimpRows");
   if(!rows.length){ tb.innerHTML='<tr><td colspan="4" class="empty">데이터 없음</td></tr>'; setStatus("stale","데이터 대기"); return; }
-  tb.innerHTML = rows.map(c=>{const cls=c.premium_coin_pct>=0?"pos":"neg",s=c.premium_coin_pct>=0?"+":"";
-    return `<tr><td class="coin">${c.coin}</td><td class="prem ${cls}">${s}${c.premium_coin_pct.toFixed(2)}%</td>
+  tb.innerHTML = rows.map(c=>{const v=pv(c),cls=v>=0?"pos":"neg",s=v>=0?"+":"";
+    return `<tr><td class="coin">${c.coin}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>
       <td class="num">${fmt(c.base_price_krw)}</td><td class="num">${fmt(c.ref_price_krw)}</td></tr>`;}).join("");
-  $("metaInfo").textContent=`${rows.length}코인 · 환율 ${fmt(rows[0].forex_rate)} · 테더 ${fmt(rows[0].tether_rate)}`;
+  const label = basis==="tether" ? "테더김프" : "코인(환율)";
+  $("metaInfo").textContent=`${rows.length}코인 · ${label} · 환율 ${fmt(rows[0].forex_rate)} · 테더 ${fmt(rows[0].tether_rate)}`;
   setStatus("live","실시간");
 }
 
