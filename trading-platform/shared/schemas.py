@@ -12,12 +12,14 @@ class ExchangeConfig(BaseModel):
 
 
 class Universe(BaseModel):
-    coins: list[str]
     exchanges: dict[str, ExchangeConfig]
+    exclude: set[str] = set()      # 제외할 base 코인(스테이블 등)
 
-    def symbol_for(self, exchange: str, coin: str) -> str:
-        """ccxt 심볼 문자열. 예: BTC/KRW, BTC/USDT."""
-        return f"{coin}/{self.exchanges[exchange].quote}"
+    def quote_of(self, exchange: str) -> str:
+        return self.exchanges[exchange].quote
+
+    def is_excluded(self, coin: str) -> bool:
+        return coin.upper() in self.exclude
 
     @property
     def domestic(self) -> list[str]:

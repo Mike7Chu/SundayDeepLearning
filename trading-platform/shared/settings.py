@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     collect_interval_sec: float = 5.0
     fx_interval_sec: float = 300.0
     fx_usdkrw_fallback: float = 1380.0
+    wallet_interval_sec: float = 300.0   # 입출금 상태(느린 변화)
 
     # 텔레그램 (Phase 2)
     telegram_bot_token: str = ""

@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 import redis.asyncio as aioredis
 
 from collector.exchanges.adapter import ExchangeAdapter
 from collector.exchanges.perp import PerpAdapter
+from collector.exchanges.wallet import WalletAdapter
 from collector.forex import fetch_usdkrw
 from shared.redis_keys import (
     FX_USDKRW_KEY,
@@ -20,6 +22,7 @@ from shared.redis_keys import (
     perp_ticker_key,
     tether_key,
     ticker_key,
+    wallet_key,
 )
 from shared.settings import settings
 from shared.universe import load_universe
@@ -44,8 +47,7 @@ async def collect_exchange(redis: aioredis.Redis, adapter: ExchangeAdapter) -> N
         if tether:
             await redis.set(tether_key(adapter.cfg.name), tether)
 
-    logger.info("[%s] %d/%d coins%s", adapter.cfg.name,
-                len(snapshots), len(adapter.coins),
+    logger.info("[%s] %d coins%s", adapter.cfg.name, len(snapshots),
                 f" tether={tether:.1f}" if tether else "")
 
 
@@ -63,7 +65,7 @@ async def collect_perp(redis: aioredis.Redis, adapter: PerpAdapter) -> None:
     funding = await adapter.fetch_funding()
     if funding:
         await redis.hset(funding_key(adapter.cfg.name),
-                         mapping={c: str(r) for c, r in funding.items()})
+                         mapping={c: json.dumps(v) for c, v in funding.items()})
     if snaps or funding:
         logger.info("[%s perp] %d tickers, %d funding",
                     adapter.cfg.name, len(snaps), len(funding))
@@ -73,6 +75,21 @@ async def perp_loop(redis: aioredis.Redis, adapters: list[PerpAdapter]) -> None:
     while True:
         await asyncio.gather(*[collect_perp(redis, a) for a in adapters])
         await asyncio.sleep(settings.collect_interval_sec)
+
+
+async def collect_wallet(redis: aioredis.Redis, adapter: WalletAdapter) -> None:
+    """입출금(입금/출금) 가능여부 — 느린 변화라 별도 주기."""
+    states = await adapter.fetch()
+    if states:
+        await redis.hset(wallet_key(adapter.cfg.name),
+                         mapping={c: json.dumps(s) for c, s in states.items()})
+        logger.info("[%s wallet] %d coins", adapter.cfg.name, len(states))
+
+
+async def wallet_loop(redis: aioredis.Redis, adapters: list[WalletAdapter]) -> None:
+    while True:
+        await asyncio.gather(*[collect_wallet(redis, a) for a in adapters])
+        await asyncio.sleep(settings.wallet_interval_sec)
 
 
 async def fx_loop(redis: aioredis.Redis) -> None:
@@ -89,7 +106,7 @@ async def main() -> None:
     adapters: list[ExchangeAdapter] = []
     for cfg in universe.exchanges.values():
         try:
-            adapters.append(ExchangeAdapter(cfg, universe.coins))
+            adapters.append(ExchangeAdapter(cfg, universe.exclude))
         except Exception as exc:
             # 거래소 하나가 잘못된 ccxt_id 등으로 실패해도 전체 수집은 계속.
             logger.error("거래소 초기화 실패(건너뜀) %s(ccxt_id=%s): %s",
@@ -97,29 +114,37 @@ async def main() -> None:
     if not adapters:
         raise RuntimeError("초기화된 거래소가 없습니다. config/symbols.yaml 확인")
 
-    # 해외 거래소는 무기한선물(perp) 가격 + 펀딩비도 수집
+    # 해외 거래소는 무기한선물(perp) 가격+펀비, 입출금 상태도 수집
     perp_adapters: list[PerpAdapter] = []
+    wallet_adapters: list[WalletAdapter] = []
     for name in universe.overseas:
         cfg = universe.exchanges[name]
         try:
-            perp_adapters.append(PerpAdapter(cfg, universe.coins))
+            perp_adapters.append(PerpAdapter(cfg, universe.exclude))
         except Exception as exc:
             logger.error("perp 초기화 실패(건너뜀) %s(ccxt_id=%s): %s",
                          name, cfg.ccxt_id, exc)
+        try:
+            wallet_adapters.append(WalletAdapter(cfg))
+        except Exception as exc:
+            logger.error("wallet 초기화 실패(건너뜀) %s(ccxt_id=%s): %s",
+                         name, cfg.ccxt_id, exc)
 
-    logger.info("collector start: %d/%d spot, %d perp, %d coins",
+    logger.info("collector start: %d/%d spot, %d perp, %d wallet",
                 len(adapters), len(universe.exchanges),
-                len(perp_adapters), len(universe.coins))
+                len(perp_adapters), len(wallet_adapters))
     try:
         await asyncio.gather(
             ticker_loop(redis, adapters),
             perp_loop(redis, perp_adapters),
+            wallet_loop(redis, wallet_adapters),
             fx_loop(redis),
         )
     finally:
         await asyncio.gather(
             *[a.close() for a in adapters],
             *[a.close() for a in perp_adapters],
+            *[a.close() for a in wallet_adapters],
             return_exceptions=True,
         )
         await redis.aclose()

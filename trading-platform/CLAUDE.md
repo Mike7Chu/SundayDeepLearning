@@ -10,8 +10,11 @@
 - ✅ **Phase 2 코어**: 김프/역프 계산 + REST/WS API
 - ✅ **텔레그램 알림봇**(`notifier/main.py`): 김프/역프 임계치 → 텔레그램 발송 + 쿨다운
 - ✅ **공지알림봇=신규상장 감지**(`notifier/announce_main.py`): 업비트/빗썸 마켓목록 diff → 새 심볼 등장 시 알림(quote_filter=KRW). 공지 스크래핑 대신 마켓 diff(클라우드 IP 차단·더 안정적)
-- ✅ **대시보드**(`web/index.html`, `GET /`): 탭 3종 — **김프** / **거래소간**(해외 현물·선물 가격차) / **펀비**(펀딩비). 노드 빌드 X, 폰+Tailscale 접속
-- ✅ **해외 perp 가격 + 펀딩비 수집**(`collector/exchanges/perp.py`): 해외 거래소 무기한선물 last/mark + funding rate → Redis. `/cross`(현물/선물 거래소간 스프레드), `/funding`(거래소간 펀비) API
+- ✅ **전 코인 동적화**: 고정 10개 폐기 → 거래소 마켓에서 bulk fetch로 전 코인 수집(KRW/USDT 필터, 스테이블/레버리지 제외). 김프는 "기준 거래소 코인 ∩ 비교"
+- ✅ **펀비 정산주기**: 거래소·코인별 `{rate, interval_h, next_ts}` 수집 → `/funding/matrix`(코인×거래소, APY 정규화·남은시간), 대시보드 펀비 매트릭스(APY 토글·카운트다운·정산주기 뱃지)
+- ✅ **아비트라지 전략 리스트**(더따리식): `/arbitrage` 코인별 현물/선물 최저·최고 다리 + 갭% + 펀비 + 입출금 상태. 대시보드 전략 카드
+- ✅ **입출금 상태 수집**(`collector/exchanges/wallet.py`): `fetch_currencies`로 입금/출금 가능여부(5분 주기)
+- ✅ **대시보드 3탭**(`web/index.html`, `GET /`): 김프 / 아비트라지(전략카드) / 펀비(매트릭스) + 코인 검색. 노드 빌드 X
 - ⏭️ **다음**: ① 펀비/스프레드 임계치 알림 연동 ② 봇(현선/loan/매도) 페이퍼 ③ 주식
 - ⏸️ **봇 실행(현선/loan/매도), 주식**: 페이퍼 모드부터 단계적 (Phase 3~6, 미착수)
 
@@ -33,8 +36,11 @@
 | `api/` | FastAPI. 김프 계산 + REST/WS |
 | `api/services/premium.py` | 두 기준 동시 산출: `premium_pct`=테더(USDT/KRW) 기준→**알림용**, `premium_coin_pct`=코인/환율(USD/KRW) 기준→**화면용**. 테더가 없으면 환율 폴백 |
 | `api/routers/premium.py` | `/premium`, `/tickers/{ex}`, `/exchanges`, `WS /ws/premium` |
-| `api/services/cross.py` | 해외 거래소간 가격차(`compute_cross` spot/perp) + 펀비 비교(`compute_funding`) |
-| `collector/exchanges/perp.py` | 해외 무기한선물 perp 가격 + 펀딩비 수집(ccxt defaultType=swap, `{COIN}/USDT:USDT`) |
+| `api/services/cross.py` | 거래소간 가격차(`compute_cross`) + 펀비 비교/매트릭스(`compute_funding`/`compute_funding_matrix`, APY) + `all_coins` |
+| `api/services/arbitrage.py` | 코인별 현물/선물 최저·최고 다리 전략(`compute_arbitrage`, 갭% + 펀비 + 입출금) |
+| `collector/exchanges/perp.py` | 해외 perp 가격 + 펀비(rate/interval_h/next_ts) 전체 수집(ccxt defaultType=swap) |
+| `collector/exchanges/wallet.py` | 입출금 가능여부(`fetch_currencies`) 수집(5분 주기) |
+| `shared/symbols.py` | 심볼 파싱(`parse_symbol`)·레버리지토큰 필터(`is_leveraged_token`) |
 | `web/index.html` | 대시보드(김프/거래소간/펀비 탭). FastAPI `GET /`로 서빙(`api/main.py`) |
 | `notifier/` | 텔레그램 봇 묶음. 김프알림(`main.py`/`alerts.py`, `config/alerts.yaml`) + 신규상장감지(`announce_main.py`/`listings.py`, `config/announcements.yaml`) + 발송(`telegram.py`) |
 | `shared/` | 유니버스 로더(`universe.py`)·스키마(`schemas.py`)·설정(`settings.py`)·Redis키(`redis_keys.py`) |

@@ -18,8 +18,13 @@ def perp_ticker_key(exchange: str) -> str:
 
 
 def funding_key(exchange: str) -> str:
-    """거래소별 무기한선물 펀딩비 해시. field=coin, value=float(비율, 0.0001=0.01%)."""
+    """거래소별 펀딩비 해시. field=coin, value=json{rate, interval_h, next_ts}."""
     return f"funding:{exchange}"
+
+
+def wallet_key(exchange: str) -> str:
+    """거래소별 입출금 상태 해시. field=coin, value=json{deposit, withdraw}."""
+    return f"wallet:{exchange}"
 
 
 # 은행 환율 키(폴백용). value=float(USD/KRW)

@@ -17,8 +17,9 @@ def test_universe_loads():
     assert "upbit" in u.domestic
     assert "binance" in u.overseas
     assert len(u.exchanges) == 9
-    assert u.symbol_for("upbit", "BTC") == "BTC/KRW"
-    assert u.symbol_for("binance", "BTC") == "BTC/USDT"
+    assert u.quote_of("upbit") == "KRW"
+    assert u.quote_of("binance") == "USDT"
+    assert u.is_excluded("USDT") and not u.is_excluded("BTC")
 
 
 def _seed(redis, exchange, coin, price, quote):

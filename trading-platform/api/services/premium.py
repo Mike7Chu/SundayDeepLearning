@@ -54,7 +54,8 @@ async def compute_premium(
     ref_t = await _load_tickers(redis, ref)
 
     cells: list[PremiumCell] = []
-    for coin in universe.coins:
+    # 더따리식: 기준(국내) 거래소에 상장된 전 코인 ∩ 비교 거래소 상장분
+    for coin in sorted(base_t.keys() & ref_t.keys()):
         b = base_t.get(coin)
         r = ref_t.get(coin)
         if not b or not r or r.price <= 0:

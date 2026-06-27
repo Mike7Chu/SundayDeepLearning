@@ -1,18 +1,20 @@
-# 심볼 유니버스 + 거래소 정의
-# region: domestic(KRW 마켓) | overseas(USDT 마켓)
-# RPi 부담을 고려해 공통 상장 상위 코인부터. 점진 확대.
+# 거래소 정의 + 코인 제외 규칙
+# 코인은 더 이상 고정하지 않고, 각 거래소 마켓에서 동적으로 전부 수집한다.
+#   - 국내(domestic): KRW 마켓
+#   - 해외(overseas): USDT 마켓
+# region: domestic | overseas
 
-coins:
-  - BTC
-  - ETH
-  - XRP
-  - SOL
-  - DOGE
-  - ADA
-  - TRX
-  - LINK
-  - AVAX
-  - DOT
+# 제외할 base 코인(스테이블/현금성). 김프·아비트라지 의미 없음.
+exclude:
+  - USDT
+  - USDC
+  - DAI
+  - TUSD
+  - BUSD
+  - FDUSD
+  - USDD
+  - USDP
+  - PYUSD
 
 exchanges:
   upbit:

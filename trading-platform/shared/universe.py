@@ -19,4 +19,5 @@ def load_universe(path: str | None = None) -> Universe:
         name: ExchangeConfig(name=name, **conf)
         for name, conf in raw["exchanges"].items()
     }
-    return Universe(coins=raw["coins"], exchanges=exchanges)
+    exclude = {c.upper() for c in raw.get("exclude", [])}
+    return Universe(exchanges=exchanges, exclude=exclude)

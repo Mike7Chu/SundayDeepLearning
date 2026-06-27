@@ -1,56 +1,45 @@
-"""ccxt 기반 거래소 어댑터.
+"""ccxt 기반 현물 거래소 어댑터.
 
-각 거래소에서 유니버스 코인들의 현물 최신가를 조회한다.
-가능하면 fetch_tickers(일괄)로, 미지원이면 코인별 fetch_ticker로 폴백.
+거래소의 모든 티커를 한 번에 받아(quote 필터: KRW/USDT) 전 코인을 수집한다.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 
-import ccxt.async_support as ccxt
-
 from shared.schemas import ExchangeConfig, TickerSnapshot
+from shared.symbols import is_leveraged_token, parse_symbol
 
 logger = logging.getLogger(__name__)
 
 
 class ExchangeAdapter:
-    def __init__(self, cfg: ExchangeConfig, coins: list[str]):
+    def __init__(self, cfg: ExchangeConfig, exclude: set[str] | None = None):
+        import ccxt.async_support as ccxt  # 지연 임포트
+
         self.cfg = cfg
-        self.coins = coins
+        self.exclude = exclude or set()
         klass = getattr(ccxt, cfg.ccxt_id)
-        # 공개 시세만 사용(키 불필요). rate limit 준수.
         self.client = klass({"enableRateLimit": True})
 
-    def symbol(self, coin: str) -> str:
-        return f"{coin}/{self.cfg.quote}"
+    def _accept(self, coin: str) -> bool:
+        return coin.upper() not in self.exclude and not is_leveraged_token(coin)
 
     async def fetch(self) -> dict[str, TickerSnapshot]:
-        """coin -> TickerSnapshot. 실패한 코인은 생략."""
-        symbols = [self.symbol(c) for c in self.coins]
+        """coin -> TickerSnapshot. cfg.quote 마켓의 전 코인."""
         out: dict[str, TickerSnapshot] = {}
         now = time.time()
         try:
-            if self.client.has.get("fetchTickers"):
-                tickers = await self.client.fetch_tickers(symbols)
-                for coin in self.coins:
-                    t = tickers.get(self.symbol(coin))
-                    price = _last_price(t)
-                    if price is not None:
-                        out[coin] = TickerSnapshot(
-                            coin=coin, price=price, quote=self.cfg.quote, ts=now
-                        )
-            else:
-                results = await asyncio.gather(
-                    *[self._fetch_one(c) for c in self.coins],
-                    return_exceptions=True,
-                )
-                for coin, res in zip(self.coins, results):
-                    if isinstance(res, TickerSnapshot):
-                        out[coin] = res
-        except Exception as exc:  # 거래소 전체 실패는 로깅 후 빈 결과
+            tickers = await self.client.fetch_tickers()
+            for symbol, t in tickers.items():
+                coin, quote = parse_symbol(symbol)
+                if quote != self.cfg.quote or not self._accept(coin):
+                    continue
+                price = _last_price(t)
+                if price is not None:
+                    out[coin] = TickerSnapshot(
+                        coin=coin, price=price, quote=self.cfg.quote, ts=now)
+        except Exception as exc:
             logger.warning("[%s] fetch failed: %s", self.cfg.name, exc)
         return out
 
@@ -62,15 +51,6 @@ class ExchangeAdapter:
         except Exception as exc:
             logger.warning("[%s] %s fetch failed: %s", self.cfg.name, symbol, exc)
             return None
-
-    async def _fetch_one(self, coin: str) -> TickerSnapshot | None:
-        t = await self.client.fetch_ticker(self.symbol(coin))
-        price = _last_price(t)
-        if price is None:
-            return None
-        return TickerSnapshot(
-            coin=coin, price=price, quote=self.cfg.quote, ts=time.time()
-        )
 
     async def close(self) -> None:
         await self.client.close()
