@@ -8,6 +8,7 @@ import yaml
 from pydantic import BaseModel
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "alerts.yaml"
+_ANNOUNCE_PATH = Path(__file__).resolve().parent.parent / "config" / "announcements.yaml"
 
 
 class Pair(BaseModel):
@@ -32,3 +33,16 @@ def load_alert_config(path: str | None = None) -> AlertConfig:
     cfg_path = Path(path) if path else _CONFIG_PATH
     raw = yaml.safe_load(cfg_path.read_text())
     return AlertConfig(**raw)
+
+
+class AnnounceConfig(BaseModel):
+    watched_exchanges: list[str]
+    quote_filter: list[str] = []
+    poll_interval_sec: float = 60.0
+
+
+@lru_cache(maxsize=1)
+def load_announce_config(path: str | None = None) -> AnnounceConfig:
+    cfg_path = Path(path) if path else _ANNOUNCE_PATH
+    raw = yaml.safe_load(cfg_path.read_text())
+    return AnnounceConfig(**raw)

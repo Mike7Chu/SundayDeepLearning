@@ -42,3 +42,14 @@ services:
     depends_on:
       - redis
     mem_limit: 256m
+
+  announcer:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    command: ["python", "-m", "notifier.announce_main"]
+    depends_on:
+      - redis
+    mem_limit: 256m
