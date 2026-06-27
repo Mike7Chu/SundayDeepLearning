@@ -16,6 +16,7 @@ from collector.exchanges.adapter import ExchangeAdapter
 from collector.exchanges.perp import PerpAdapter
 from collector.exchanges.wallet import WalletAdapter
 from collector.forex import fetch_usdkrw
+from shared.redis_store import replace_hash
 from shared.redis_keys import (
     FX_USDKRW_KEY,
     funding_key,
@@ -38,7 +39,8 @@ async def collect_exchange(redis: aioredis.Redis, adapter: ExchangeAdapter) -> N
     snapshots = await adapter.fetch()
     if snapshots:
         mapping = {coin: snap.model_dump_json() for coin, snap in snapshots.items()}
-        await redis.hset(ticker_key(adapter.cfg.name), mapping=mapping)
+        # 통째 교체로 상폐/사라진 코인 stale 제거
+        await replace_hash(redis, ticker_key(adapter.cfg.name), mapping)
 
     # 국내(KRW) 거래소는 원화 테더가(USDT/KRW)도 수집 → 김프 환산 기준
     tether = None
@@ -61,11 +63,11 @@ async def collect_perp(redis: aioredis.Redis, adapter: PerpAdapter) -> None:
     snaps = await adapter.fetch_tickers()
     if snaps:
         mapping = {c: s.model_dump_json() for c, s in snaps.items()}
-        await redis.hset(perp_ticker_key(adapter.cfg.name), mapping=mapping)
+        await replace_hash(redis, perp_ticker_key(adapter.cfg.name), mapping)
     funding = await adapter.fetch_funding()
     if funding:
-        await redis.hset(funding_key(adapter.cfg.name),
-                         mapping={c: json.dumps(v) for c, v in funding.items()})
+        await replace_hash(redis, funding_key(adapter.cfg.name),
+                           {c: json.dumps(v) for c, v in funding.items()})
     if snaps or funding:
         logger.info("[%s perp] %d tickers, %d funding",
                     adapter.cfg.name, len(snaps), len(funding))
@@ -81,8 +83,8 @@ async def collect_wallet(redis: aioredis.Redis, adapter: WalletAdapter) -> None:
     """입출금(입금/출금) 가능여부 — 느린 변화라 별도 주기."""
     states = await adapter.fetch()
     if states:
-        await redis.hset(wallet_key(adapter.cfg.name),
-                         mapping={c: json.dumps(s) for c, s in states.items()})
+        await replace_hash(redis, wallet_key(adapter.cfg.name),
+                           {c: json.dumps(s) for c, s in states.items()})
         logger.info("[%s wallet] %d coins", adapter.cfg.name, len(states))
 
 

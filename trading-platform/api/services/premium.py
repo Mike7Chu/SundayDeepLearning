@@ -66,9 +66,6 @@ async def compute_premium(
         if ref_krw_coin <= 0 or ref_krw_tether <= 0:
             continue
         premium_coin_pct = (base_krw / ref_krw_coin - 1) * 100
-        # 심볼 충돌(동일 티커·다른 코인)/오류 데이터로 의심되는 이상치 제외
-        if abs(premium_coin_pct) > settings.premium_sanity_max_pct:
-            continue
         cells.append(
             PremiumCell(
                 coin=coin,
