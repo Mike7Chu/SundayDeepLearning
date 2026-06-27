@@ -1,0 +1,19 @@
+# 알림(텔레그램) 규칙
+# premium_pct: (국내KRW / (해외USDT*환율) - 1) * 100. 양수=김프, 음수=역프.
+
+# 감시할 (기준 국내거래소, 비교 해외거래소) 쌍
+pairs:
+  - base: upbit
+    ref: binance
+  - base: bithumb
+    ref: binance
+
+# 임계치 (둘 중 하나라도 충족 시 알림)
+premium_high_pct: 3.0    # 김프 이 % 이상이면 알림
+premium_low_pct: -1.5    # 역프 이 % 이하면 알림(음수)
+
+# 같은 (쌍,코인,방향) 알림 재발송 최소 간격(초) — 스팸 방지
+cooldown_sec: 600
+
+# 알림 평가 주기(초)
+poll_interval_sec: 10
