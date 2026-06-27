@@ -41,7 +41,7 @@ uvicorn api.main:app --reload --port 8000
 cd trading-platform
 cp .env.example .env
 docker compose up -d --build
-# api: http://<rpi-ip>:8000/docs
+# api: http://<rpi-ip>:8090/docs  (호스트 포트는 .env 의 API_PORT, 기본 8090)
 ```
 
 ## 주요 엔드포인트

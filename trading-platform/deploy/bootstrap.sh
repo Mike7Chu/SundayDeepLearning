@@ -50,10 +50,15 @@ sleep 5
 $SUDO $COMPOSE ps
 echo
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+PORT=$(grep -E '^API_PORT=' .env 2>/dev/null | cut -d= -f2)
+PORT=${PORT:-8090}
 echo "완료. API 헬스체크:"
-echo "  curl http://localhost:8000/health"
-echo "  브라우저: http://${IP:-<pi-ip>}:8000/docs"
-echo "  김프:    http://${IP:-<pi-ip>}:8000/premium?base=upbit&ref=binance"
+echo "  curl http://localhost:${PORT}/health"
+echo "  브라우저: http://${IP:-<pi-ip>}:${PORT}/docs"
+echo "  김프:    http://${IP:-<pi-ip>}:${PORT}/premium?base=upbit&ref=binance"
+echo
+echo "* 포트 충돌(address already in use) 시: .env 의 API_PORT 를 비어있는 포트로 바꾸고"
+echo "  $SUDO $COMPOSE up -d 재실행. 점유 확인: sudo ss -ltnp | grep :${PORT}"
 echo
 echo "로그 보기:   $SUDO $COMPOSE logs -f collector"
 echo "중지:        $SUDO $COMPOSE down"

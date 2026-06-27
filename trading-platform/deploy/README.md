@@ -15,18 +15,27 @@ cd SundayDeepLearning/trading-platform
 bash deploy/bootstrap.sh
 ```
 
-확인:
+확인 (기본 포트 8090):
 ```bash
-curl http://localhost:8000/health          # {"status":"ok"}
-curl "http://localhost:8000/premium?base=upbit&ref=binance"
+curl http://localhost:8090/health          # {"status":"ok"}
+curl "http://localhost:8090/premium?base=upbit&ref=binance"
 ```
-브라우저: `http://<pi-ip>:8000/docs`
+브라우저: `http://<pi-ip>:8090/docs`
+
+### 자주 나는 문제
+- **`address already in use` (포트 충돌)**: 다른 서비스가 그 포트를 점유 중.
+  `.env`의 `API_PORT`를 빈 포트로 바꾸고 `sudo docker compose up -d` 재실행.
+  점유 확인: `sudo ss -ltnp | grep :8090`
+- **`memory limit ... discarded` 경고**: 무해(컨테이너 정상 동작). RPi에서 메모리
+  제한을 실제 적용하려면 `/boot/cmdline.txt`(또는 `/boot/firmware/cmdline.txt`)에
+  `cgroup_enable=memory cgroup_memory=1` 추가 후 재부팅. 안 해도 됨.
 
 ## 업데이트(코드 갱신 시)
 
 ```bash
 cd SundayDeepLearning/trading-platform
 git pull
+cp -n .env.example .env          # API_PORT 등 새 항목 보강(기존 값 유지)
 sudo docker compose up -d --build
 ```
 
