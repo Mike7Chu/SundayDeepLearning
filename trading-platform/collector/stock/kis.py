@@ -65,8 +65,32 @@ class KISClient:
             f"{self.base}/uapi/domestic-stock/v1/quotations/inquire-price",
             headers=headers, params=params)
         r.raise_for_status()
-        o = r.json().get("output", {})
-        return {
-            "price": float(o.get("stck_prpr") or 0),       # 현재가
-            "change_pct": float(o.get("prdy_ctrt") or 0),  # 전일대비율(%)
-        }
+        return parse_price(r.json().get("output", {}))
+
+
+def _f(v) -> float | None:
+    """문자열 숫자 → float (빈값/None은 None)."""
+    try:
+        if v in (None, "", "0"):
+            return None if v in (None, "") else 0.0
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_price(o: dict) -> dict:
+    """KIS inquire-price output → 시세 + 밸류에이션(순수 함수, 테스트 용이).
+
+    inquire-price 응답엔 현재가/전일대비 외 per/pbr/eps/bps도 포함된다.
+    """
+    return {
+        "price": float(o.get("stck_prpr") or 0),       # 현재가
+        "change_pct": float(o.get("prdy_ctrt") or 0),  # 전일대비율(%)
+        "per": _f(o.get("per")),                        # 주가수익비율
+        "pbr": _f(o.get("pbr")),                        # 주가순자산비율
+        "eps": _f(o.get("eps")),                        # 주당순이익
+        "bps": _f(o.get("bps")),                        # 주당순자산
+        "market_cap": _f(o.get("hts_avls")),            # 시가총액(억원)
+        "high_52w": _f(o.get("w52_hgpr")),              # 52주 최고
+        "low_52w": _f(o.get("w52_lwpr")),               # 52주 최저
+    }

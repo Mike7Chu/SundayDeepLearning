@@ -3,7 +3,17 @@
 > 무엇을 왜 했는지의 시간순 기록. 새 세션은 여기서 "지금까지"를 빠르게 파악.
 
 ## 현재 한 줄 상태
-Phase 2 + **더따리 패리티**(전 코인 동적화 / 펀비 정산주기·APY 매트릭스 / 아비트라지 전략 리스트 / 입출금 상태) 완료. 대시보드 3탭(김프·아비트라지·펀비)+코인검색. 테스트 17/17 통과. **펀비/스프레드 알림 연동·봇·주식 미착수.**
+Phase 2 + 더따리 패리티 + 알림설정 + 봇 페이퍼 + 주식(KIS) + **AI 가치투자 리서치(Addendum 9)** 완료. 대시보드 6탭(김프·아비트라지·펀비·봇·주식·알림설정). 테스트 36/36 통과.
+
+### Addendum 9 — AI 가치투자 리서치 (완료)
+- `research/lenses.py`: 버핏·멍거·돤융핑·리루 4대 거장 렌즈(렌즈별 focus+체크리스트) → `SYSTEM_PROMPT`(출력형식+면책).
+- `research/data.py`: Redis `stock:quote`(현재가+per/pbr/eps/bps)에서 `StockData` 수집, `format_for_prompt`(미상 처리).
+- `research/analyst.py`: `AsyncAnthropic`(지연 import) 스트리밍+적응형 사고, 모델 `claude-opus-4-8`(`settings.research_model`). **ANTHROPIC_API_KEY 없으면 enabled=False·비활성 리포트**.
+- `research/main.py`: 관심종목 `research_interval_sec`(기본 1일) 정기 분석 → `research:reports` 저장 + 텔레그램 브리핑. 키 없으면 idle.
+- `api/routers/research.py`: `/research`(목록)·`/research/{code}`(전문)·`POST /research/{code}/run`(즉시). 대시보드 주식 탭 리서치 보기/분석 버튼.
+- `collector/stock/kis.parse_price`: inquire-price에서 밸류에이션(per/pbr/eps/bps/시총/52주) 추가 추출(테스트 가능 순수 함수).
+- docker-compose `research` 서비스, `anthropic` requirement, `.env.example`(ANTHROPIC_API_KEY/RESEARCH_MODEL/RESEARCH_INTERVAL_SEC), `tests/test_research.py`(렌즈/데이터/키없는 idle).
+- 종목 추천이 아니라 분석 보조 워크플로(면책 문구 포함). LLM 호출은 키·네트워크 필요 → Pi에서 키 입력 후 동작.
 
 ## 완료된 것
 ### 1. 계획 수립 (승인됨)

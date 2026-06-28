@@ -56,6 +56,11 @@
   .cell-int{font-size:10px; color:var(--badge); margin-left:3px;} .cd{font-size:10px; color:var(--muted);}
   .btn{background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;}
   .btn:hover{border-color:var(--green);}
+  .rbox{margin:14px; border:1px solid var(--line); border-radius:8px; padding:14px; background:var(--bg);}
+  .rhead{font-weight:600; margin-bottom:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+  .rwhen{color:var(--muted); font-size:12px; font-weight:400;}
+  .rbody{white-space:pre-wrap; font-family:inherit; font-size:13px; line-height:1.6; margin:0; color:var(--text);}
+  .rdisc{margin-top:10px; color:var(--muted); font-size:11px; border-top:1px solid var(--line); padding-top:8px;}
   .aset{padding:14px; max-width:560px;}
   .aset h3{font-size:13px; color:var(--muted); margin:16px 0 6px; border-top:1px solid var(--line); padding-top:12px;}
   .arow{display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; margin-bottom:6px;}
@@ -133,9 +138,10 @@
 
 <div id="panel-stocks" class="panel">
   <table>
-    <thead><tr><th>종목</th><th>현재가</th><th>등락률</th></tr></thead>
-    <tbody id="stockRows"><tr><td colspan="3" class="empty">불러오는 중…</td></tr></tbody>
+    <thead><tr><th>종목</th><th>현재가</th><th>등락률</th><th>AI 리서치</th></tr></thead>
+    <tbody id="stockRows"><tr><td colspan="4" class="empty">불러오는 중…</td></tr></tbody>
   </table>
+  <div id="researchBox" class="rbox" style="display:none"></div>
 </div>
 
 <div id="panel-alerts" class="panel">
@@ -267,12 +273,39 @@ async function renderStocks(){
   const d = await (await fetch("/stocks")).json();
   let rows=(d.rows||[]).filter(r=>matchCoin(r.name)||matchCoin(r.code));
   const tb=$("stockRows");
-  if(!rows.length){ tb.innerHTML='<tr><td colspan="3" class="empty">데이터 없음 (.env에 KIS 키 설정 필요)</td></tr>'; setStatus("stale","KIS 미설정?"); return; }
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="4" class="empty">데이터 없음 (.env에 KIS 키 설정 필요)</td></tr>'; setStatus("stale","KIS 미설정?"); return; }
   tb.innerHTML = rows.map(r=>{const c=r.change_pct>=0?"pos":"neg",s=r.change_pct>=0?"+":"";
     return `<tr><td class="coin">${r.name}</td><td class="num">${fmt(r.price)}</td>
-      <td class="prem ${c}">${s}${r.change_pct.toFixed(2)}%</td></tr>`;}).join("");
+      <td class="prem ${c}">${s}${r.change_pct.toFixed(2)}%</td>
+      <td><button class="btn" onclick="showResearch('${r.code}','${r.name}')">📄 보기</button>
+          <button class="btn" onclick="runResearch('${r.code}','${r.name}')">🧠 분석</button></td></tr>`;}).join("");
   $("metaInfo").textContent=`${rows.length}종목`;
   setStatus("live","실시간");
+}
+
+function renderReport(rep){
+  const box=$("researchBox"); box.style.display="block";
+  const when = rep.ts ? new Date(rep.ts*1000).toLocaleString() : "";
+  const body = (rep.report||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  box.innerHTML = `<div class="rhead">🧠 ${rep.name||""} (${rep.code}) `+
+    `<span class="pill">${rep.model||""}</span> <span class="rwhen">${when}</span></div>`+
+    `<pre class="rbody">${body}</pre>`+
+    (rep.disclaimer?`<div class="rdisc">${rep.disclaimer}</div>`:"");
+}
+
+async function showResearch(code,name){
+  const box=$("researchBox"); box.style.display="block";
+  box.innerHTML=`<div class="rhead">🧠 ${name} (${code}) 불러오는 중…</div>`;
+  const r=await fetch(`/research/${code}`);
+  if(!r.ok){ box.innerHTML=`<div class="rhead">${name}(${code}) 저장된 리포트 없음 — '🧠 분석'을 눌러 생성하세요.</div>`; return; }
+  renderReport(await r.json());
+}
+
+async function runResearch(code,name){
+  const box=$("researchBox"); box.style.display="block";
+  box.innerHTML=`<div class="rhead">🧠 ${name} (${code}) 분석 중… (키 없으면 비활성)</div>`;
+  try{ const r=await fetch(`/research/${code}/run`,{method:"POST"}); renderReport(await r.json()); }
+  catch(e){ box.innerHTML=`<div class="rhead">분석 실패: ${e}</div>`; }
 }
 
 async function renderBots(){

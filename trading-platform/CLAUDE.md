@@ -21,6 +21,7 @@
 - ✅ **봇 페이퍼**(`bots/`): 프레임워크+실행게이트웨이(dry-run)+현선봇. `/bots` 컨트롤(enable/disable/killswitch), 대시보드 봇 탭. 실거래 미오픈
 - ✅ **주식(KIS)**(`collector/stock/kis.py`): 관심종목 현재가 수집(키 없으면 idle), `/stocks` + 대시보드 주식 탭
 - ✅ **알림 설정**(`shared/alert_settings.py`, `/alerts/settings`, 대시보드 알림설정 탭): 마스터/종류 on-off·임계치·쿨다운·**최소유지(디바운스)**·제외코인을 실시간 조절(Redis 오버라이드, notifier 매주기 반영)
+- ✅ **AI 가치투자 리서치**(`research/`, Addendum 9): 버핏·멍거·돤융핑·리루 4대 거장 렌즈(`lenses.py`)로 관심종목을 Claude API 분석 → 구조화 리포트(`analyst.py`, 모델 `claude-opus-4-8`). `research/main.py` 정기 분석 + 텔레그램 브리핑, `/research`·`/research/{code}`·`POST /research/{code}/run`, 대시보드 주식 탭 리서치 보기. **ANTHROPIC_API_KEY 없으면 idle**(추천 아님·분석 보조)
 - ⏭️ **다음**: 봇 실거래 게이트(안전장치) / 주식 전략(시그널·가치·배당)·브리핑 / TimescaleDB 영속화
 - ⏸️ **봇 실행(현선/loan/매도), 주식**: 페이퍼 모드부터 단계적 (Phase 3~6, 미착수)
 
@@ -50,7 +51,8 @@
 | `web/index.html` | 대시보드(김프/거래소간/펀비 탭). FastAPI `GET /`로 서빙(`api/main.py`) |
 | `notifier/` | 텔레그램 봇 묶음. 김프/현선/펀비 알림(`main.py`/`alerts.py`, `config/alerts.yaml`) + 신규상장감지(`announce_main.py`/`listings.py`) + 발송(`telegram.py`) |
 | `bots/` | 페이퍼 봇. `framework.BotBase`(상태머신·컨트롤)·`execution_gateway`(dry-run 가상체결)·`coin/hyeonseon`(현선봇)·`main.py`. 컨트롤 API `api/routers/bots.py` |
-| `collector/stock/kis.py` | 한국투자증권 현재가(키 없으면 비활성). `config/stocks.yaml` 관심종목, `/stocks` API |
+| `collector/stock/kis.py` | 한국투자증권 현재가+밸류에이션(per/pbr/eps/bps; 키 없으면 비활성). `config/stocks.yaml` 관심종목, `/stocks` API |
+| `research/` | AI 가치투자 리서치. `lenses.py`(4거장 렌즈)·`data.py`(종목데이터)·`analyst.py`(Claude API, idle if no key)·`main.py`(정기분석+텔레그램). 컨트롤 API `api/routers/research.py` |
 | `shared/` | 유니버스 로더(`universe.py`)·스키마(`schemas.py`)·설정(`settings.py`)·Redis키(`redis_keys.py`) |
 | `config/symbols.yaml` | 거래소 + 코인 유니버스(단일 진실원) |
 | `deploy/` | RPi 원클릭 배포 스크립트·가이드 |

@@ -30,5 +30,10 @@ class Settings(BaseSettings):
     kis_paper: bool = True               # True=모의투자 도메인
     stock_interval_sec: float = 15.0
 
+    # AI 가치투자 리서치 (Addendum 9) — 키 없으면 비활성(idle)
+    anthropic_api_key: str = ""
+    research_model: str = "claude-opus-4-8"
+    research_interval_sec: float = 86400.0   # 관심종목 정기 분석 주기(기본 1일)
+
 
 settings = Settings()
