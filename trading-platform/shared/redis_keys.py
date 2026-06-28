@@ -27,8 +27,16 @@ def wallet_key(exchange: str) -> str:
     return f"wallet:{exchange}"
 
 
-# 주식 시세 해시. field=종목코드, value=json{code,name,price,change_pct,ts}
+# 주식 시세 해시. field=종목코드, value=json{code,name,price,change_pct,per,pbr,...,ts}
 STOCK_QUOTE_KEY = "stock:quote"
+
+# 주식 배당 해시. field=종목코드, value=json{code, items:[{date, per_share, yield_pct}], ts}
+STOCK_DIVIDEND_KEY = "stock:dividend"
+
+
+def stock_ohlcv_key(code: str) -> str:
+    """종목 일봉 시계열. value=json[{date, close, high, low, volume}] (오래된→최신)."""
+    return f"stock:ohlcv:{code}"
 
 # 알림 설정(JSON 오버라이드). yaml 기본값 위에 머지.
 ALERT_SETTINGS_KEY = "alert:settings"

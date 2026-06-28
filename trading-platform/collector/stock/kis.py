@@ -51,21 +51,59 @@ class KISClient:
         self._exp = time.time() + int(d.get("expires_in", 86400))
         return self._token
 
-    async def fetch_price(self, client: httpx.AsyncClient, code: str) -> dict:
-        token = await self._token_value(client)
-        headers = {
+    def _headers(self, token: str, tr_id: str) -> dict:
+        return {
             "authorization": f"Bearer {token}",
             "appkey": settings.kis_app_key,
             "appsecret": settings.kis_app_secret,
-            "tr_id": "FHKST01010100",
+            "tr_id": tr_id,
             "custtype": "P",
         }
+
+    async def fetch_price(self, client: httpx.AsyncClient, code: str) -> dict:
+        token = await self._token_value(client)
         params = {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code}
         r = await client.get(
             f"{self.base}/uapi/domestic-stock/v1/quotations/inquire-price",
-            headers=headers, params=params)
+            headers=self._headers(token, "FHKST01010100"), params=params)
         r.raise_for_status()
         return parse_price(r.json().get("output", {}))
+
+    async def fetch_daily(self, client: httpx.AsyncClient, code: str,
+                          days: int = 120) -> list[dict]:
+        """일봉 시계열(최근 days영업일). 시그널 계산용. 오래된→최신 순."""
+        token = await self._token_value(client)
+        import datetime as _dt
+        end = _dt.date.today()
+        start = end - _dt.timedelta(days=int(days * 1.6) + 10)  # 영업일 여유
+        params = {
+            "fid_cond_mrkt_div_code": "J", "fid_input_iscd": code,
+            "fid_input_date_1": start.strftime("%Y%m%d"),
+            "fid_input_date_2": end.strftime("%Y%m%d"),
+            "fid_period_div_code": "D", "fid_org_adj_prc": "0",
+        }
+        r = await client.get(
+            f"{self.base}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+            headers=self._headers(token, "FHKST03010100"), params=params)
+        r.raise_for_status()
+        return parse_daily(r.json().get("output2", []))[-days:]
+
+    async def fetch_dividend(self, client: httpx.AsyncClient, code: str) -> dict:
+        """배당 일정/배당금. 실패/미지원이면 빈 items."""
+        token = await self._token_value(client)
+        import datetime as _dt
+        today = _dt.date.today()
+        params = {
+            "cts": "", "gb1": "0",
+            "f_dt": (today - _dt.timedelta(days=400)).strftime("%Y%m%d"),
+            "t_dt": (today + _dt.timedelta(days=120)).strftime("%Y%m%d"),
+            "sht_cd": code,
+        }
+        r = await client.get(
+            f"{self.base}/uapi/domestic-stock/v1/ksdinfo/dividend",
+            headers=self._headers(token, "HHKDB669102C0"), params=params)
+        r.raise_for_status()
+        return {"code": code, "items": parse_dividend(r.json().get("output1", []))}
 
 
 def _f(v) -> float | None:
@@ -76,6 +114,44 @@ def _f(v) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def parse_daily(output2: list) -> list[dict]:
+    """KIS inquire-daily-itemchartprice output2 → 일봉 리스트(오래된→최신).
+
+    응답은 최신→과거 순이라 뒤집는다. 빈/0 종가 행은 제외(휴장 등).
+    """
+    rows: list[dict] = []
+    for o in output2 or []:
+        close = _f(o.get("stck_clpr"))
+        if not close:
+            continue
+        rows.append({
+            "date": o.get("stck_bsop_date", ""),
+            "close": close,
+            "high": _f(o.get("stck_hgpr")),
+            "low": _f(o.get("stck_lwpr")),
+            "volume": _f(o.get("acml_vol")),
+        })
+    rows.sort(key=lambda r: r["date"])   # 오래된→최신
+    return rows
+
+
+def parse_dividend(output1: list) -> list[dict]:
+    """KIS ksdinfo/dividend output1 → 배당 항목 리스트."""
+    items: list[dict] = []
+    for o in output1 or []:
+        per_share = _f(o.get("per_sto_divi_amt") or o.get("divi_amt"))
+        if per_share is None:
+            continue
+        items.append({
+            "date": o.get("record_date") or o.get("divi_base_dt") or "",
+            "pay_date": o.get("divi_pay_dt") or "",
+            "per_share": per_share,
+            "kind": o.get("divi_kind") or o.get("divi_rate") or "",
+        })
+    items.sort(key=lambda r: r["date"])
+    return items
 
 
 def parse_price(o: dict) -> dict:

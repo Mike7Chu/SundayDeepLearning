@@ -23,7 +23,9 @@
 - ✅ **알림 설정**(`shared/alert_settings.py`, `/alerts/settings`, 대시보드 알림설정 탭): 마스터/종류 on-off·임계치·쿨다운·**최소유지(디바운스)**·제외코인을 실시간 조절(Redis 오버라이드, notifier 매주기 반영)
 - ✅ **AI 가치투자 리서치**(`research/`, Addendum 9): 버핏·멍거·돤융핑·리루 4대 거장 렌즈(`lenses.py`)로 관심종목 분석 → 구조화 리포트(`analyst.py`, 모델 `claude-opus-4-8`). `research/main.py` 정기 분석 + 텔레그램 브리핑, `/research`·`/research/{code}`·`POST /research/{code}/run`, 대시보드 주식 탭 리서치 보기. 백엔드 2종: **api**(`ANTHROPIC_API_KEY`, 종량과금) / **cli**(`RESEARCH_USE_CLI=true` + Claude Code 설치 시 `claude -p` 헤드리스 = **구독 무과금**, research를 호스트에서 `deploy/run-research-host.sh`로 구동). 둘 다 없으면 idle. `deploy/set-anthropic.sh`로 설정. 추천 아님·분석 보조(면책)
 - ✅ **현물 정합성·마진·펀비 보강**: 마켓 메타 주기적 reload(`markets_reload_sec`, 상폐 stale 제거) / 현물 `margin` 수집→아비 **현물숏은 마진 가능시만 표시**(대시보드 토글) / 펀비 정산주기 파싱 강화(분·시 키)+**전 거래소 시간표시** / 펀비 단건 폴백(`fetchFundingRate`)으로 **MEXC 등 bulk 미지원 거래소 펀비 수집** / 김프 탭 **거래대금(억원) 필터·컬럼**(알림은 기존 `min_volume_eokwon`)
-- ⏭️ **다음**: 봇 실거래 게이트(안전장치) / 주식 전략(시그널·가치·배당)·브리핑 / TimescaleDB 영속화
+- ✅ **주식 전략 3종**(Phase 5, 모니터링 전용): **가치 스크리너**(`api/services/stock_value.py`, 마법공식 이익수익률+ROE 랭킹·품질) / **시그널 엔진**(`stock_signal.py`, SMA 골든·데드크로스·RSI·모멘텀·볼린저, 일봉 `stock:ohlcv:{code}` 기반) / **배당**(`stock_dividend.py`, 배당수익률·캘린더·정기적립 DRIP). API `/stocks/value`·`/stocks/signals`·`/stocks/dividend`, 대시보드 주식탭 보기 전환(시세/가치/시그널/배당). 일봉·배당 수집(`collector.stock_history_loop`, 6h)
+- ✅ **주식 일일 브리핑**(`briefing/`): 시세·시그널·가치·배당 요약을 텔레그램 1일 발송(`compose.py` 순수 조립, 키 없으면 로그). docker `briefing` 서비스
+- ⏭️ **다음**: 봇 실거래 게이트(안전장치, 사용자 결정 필요) / 주식 실주문(gated) / TimescaleDB 영속화 / 백테스트
 - ⏸️ **봇 실행(현선/loan/매도), 주식**: 페이퍼 모드부터 단계적 (Phase 3~6, 미착수)
 
 전체 로드맵·설계 근거는 [`docs/PLAN.md`](docs/PLAN.md), 무엇을 왜 했는지는 [`docs/PROGRESS.md`](docs/PROGRESS.md).

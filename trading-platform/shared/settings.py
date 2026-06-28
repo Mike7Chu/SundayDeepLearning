@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     kis_account: str = ""
     kis_paper: bool = True               # True=모의투자 도메인
     stock_interval_sec: float = 15.0
+    stock_history_interval_sec: float = 21600.0   # 일봉/배당 수집 주기(기본 6시간)
+
+    # 텔레그램 일일 브리핑(주식 시세·시그널·가치·배당 요약). 키 없으면 로그만
+    briefing_interval_sec: float = 86400.0        # 브리핑 주기(기본 1일)
+    briefing_drip_budget: float = 0.0             # 배당 정기적립 월예산(원). 0=미사용
 
     # AI 가치투자 리서치 (Addendum 9) — 키 없으면 비활성(idle)
     anthropic_api_key: str = ""

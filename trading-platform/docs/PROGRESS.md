@@ -11,6 +11,14 @@ Phase 2 + 더따리 패리티 + 알림설정 + 봇 페이퍼 + 주식(KIS) + **A
 - `research/analyst.py`: 백엔드 2종 — **api**(`AsyncAnthropic` 지연 import, 스트리밍+적응형 사고, 종량과금) / **cli**(`RESEARCH_USE_CLI=true`+`claude` 설치 시 `claude -p` 헤드리스 = **구독 무과금**). 모델 `claude-opus-4-8`. 둘 다 없으면 `mode=None`·비활성. `deploy/set-anthropic.sh`로 모드 설정.
 - 결정: **Claude 구독 ≠ API 무료**(별도 결제). 추가과금 없이 구독 활용하려면 Claude Code CLI(`cli` 모드) 경유 — research를 호스트에서 `deploy/run-research-host.sh`로 구동(컨테이너는 호스트 로그인 못 봄). console API 키는 종량과금. 구독으로 무과금 API 키 발급은 불가.
 
+### 주식 전략 3종 + 일일 브리핑 (Phase 5, 완료 — 모니터링 전용/실주문 없음)
+- **가치 스크리너** `api/services/stock_value.py`: 이익수익률(1/PER)·ROE(EPS/BPS) 마법공식 랭킹 + 간이 품질점수. `/stocks/value`.
+- **시그널 엔진** `api/services/stock_signal.py`: SMA20/60 골든·데드크로스, RSI(14), 모멘텀(60), 볼린저 위치 → 종합 buy/sell/neutral. 일봉 `stock:ohlcv:{code}` 기반. `/stocks/signals`.
+- **배당** `api/services/stock_dividend.py`: 배당수익률·다음 기준일·연배당 + 월예산 DRIP 균등배분. `/stocks/dividend?monthly_budget=`.
+- **데이터 수집**: `collector.stock_history_loop`(6h) — KIS `inquire-daily-itemchartprice`(일봉)·`ksdinfo/dividend`(배당). 파서 `parse_daily`/`parse_dividend`. 키 없으면 비활성.
+- **일일 브리핑** `briefing/`: `compose.compose_brief`(순수)로 시세 TOP·시그널·가치상위·배당상위·DRIP 요약 → 텔레그램(`briefing.main`, `briefing_interval_sec`). docker `briefing` 서비스. 면책 포함.
+- 대시보드 주식탭: 보기 전환(시세/가치/시그널/배당). 테스트 52 passed.
+
 ### 정합성·마진·펀비 보강 (완료)
 - **상폐 stale 근본수정**: 수집기가 장기구동이라 ccxt 마켓 캐시가 굳어 상폐 코인(bybit 등)이 잔존 → `adapter`/`perp`에 `load_markets(reload=True)` 주기 새로고침(`markets_reload_sec`=1h).
 - **현물 마진**: spot `market['margin']` → `TickerSnapshot.margin` 수집. 아비 현물 다리에 `margin` 첨부. 대시보드 "현물숏 마진만"(기본 ON): 숏 다리가 현물인데 마진 불가/미상이면 제외(현물 숏=차입 필요). 다리에 마진O/X/? 뱃지.

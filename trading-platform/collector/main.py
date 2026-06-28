@@ -22,9 +22,11 @@ from collector.stock.kis import KISClient, load_watchlist
 from shared.redis_store import replace_hash
 from shared.redis_keys import (
     FX_USDKRW_KEY,
+    STOCK_DIVIDEND_KEY,
     STOCK_QUOTE_KEY,
     funding_key,
     perp_ticker_key,
+    stock_ohlcv_key,
     tether_key,
     ticker_key,
     wallet_key,
@@ -123,6 +125,35 @@ async def stock_loop(redis: aioredis.Redis) -> None:
         await asyncio.sleep(settings.stock_interval_sec)
 
 
+async def stock_history_loop(redis: aioredis.Redis) -> None:
+    """관심종목 일봉(시그널용) + 배당(배당주용) — 느린 주기. 키 없으면 비활성."""
+    kis = KISClient()
+    if not kis.enabled:
+        return
+    watch = load_watchlist()
+    while True:
+        async with httpx.AsyncClient(timeout=15) as client:
+            divs: dict[str, str] = {}
+            for item in watch:
+                code = item["code"]
+                try:
+                    candles = await kis.fetch_daily(client, code)
+                    if candles:
+                        await redis.set(stock_ohlcv_key(code), json.dumps(candles))
+                except Exception as exc:
+                    logger.warning("[stock daily %s] 실패: %s", code, exc)
+                try:
+                    dv = await kis.fetch_dividend(client, code)
+                    if dv.get("items"):
+                        divs[code] = json.dumps({**dv, "ts": time.time()})
+                except Exception as exc:
+                    logger.warning("[stock div %s] 실패: %s", code, exc)
+            if divs:
+                await replace_hash(redis, STOCK_DIVIDEND_KEY, divs)
+        logger.info("[stock] 일봉/배당 수집 완료(%d종목)", len(watch))
+        await asyncio.sleep(settings.stock_history_interval_sec)
+
+
 async def fx_loop(redis: aioredis.Redis) -> None:
     while True:
         rate = await fetch_usdkrw()
@@ -171,6 +202,7 @@ async def main() -> None:
             wallet_loop(redis, wallet_adapters),
             fx_loop(redis),
             stock_loop(redis),
+            stock_history_loop(redis),
         )
     finally:
         await asyncio.gather(
