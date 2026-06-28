@@ -146,6 +146,7 @@
 
 <div id="panel-stocks" class="panel">
   <div id="stockBox" class="scroll"><div class="empty">불러오는 중…</div></div>
+  <div id="btResult" class="rbox" style="display:none"></div>
   <div id="researchBox" class="rbox" style="display:none"></div>
 </div>
 
@@ -305,12 +306,13 @@ async function renderStocks(){
     } else if(view==="signal"){
       const rows=((await (await fetch("/stocks/signals")).json()).rows||[]).filter(flt);
       const sg={buy:'🟢매수',sell:'🔴매도',neutral:'⚪중립'};
-      box.innerHTML=stockTable(["종목","시그널","RSI","SMA교차","모멘텀60%","점수"],
+      box.innerHTML=stockTable(["종목","시그널","RSI","SMA교차","모멘텀60%","점수","백테스트"],
         rows.map(r=>`<tr><td class="coin">${r.name}</td><td>${sg[r.signal]||r.signal}</td>
           <td class="num">${numC(r.rsi)}</td><td>${r.sma_cross||"-"}</td>
           <td class="prem ${(r.momentum_pct||0)>=0?"pos":"neg"}">${numC(r.momentum_pct)}</td>
-          <td class="num">${r.score}</td></tr>`).join("")
-        || `<tr><td colspan="6" class="empty">일봉 수집 대기(키 입력 후 6시간 주기)</td></tr>`);
+          <td class="num">${r.score}</td>
+          <td><button class="btn" onclick="runBacktest('${r.code}','${r.name}')">📈 sma/rsi/mom</button></td></tr>`).join("")
+        || `<tr><td colspan="7" class="empty">일봉 수집 대기(키 입력 후 6시간 주기)</td></tr>`);
       $("metaInfo").textContent=`${rows.length}종목 · 시그널`;
     } else {
       const rows=((await (await fetch("/stocks/dividend")).json()).rows||[]).filter(flt);
@@ -324,6 +326,21 @@ async function renderStocks(){
     }
     setStatus("live","실시간");
   }catch(e){ box.innerHTML=`<div class="empty">불러오기 실패: ${e.message}</div>`; setStatus("err","오류"); }
+}
+
+async function runBacktest(code,name){
+  const box=$("btResult"); box.style.display="block";
+  box.innerHTML=`<div class="rhead">📈 ${name} (${code}) 백테스트 중…</div>`;
+  try{
+    const out=await Promise.all(["sma","rsi","momentum"].map(s=>
+      fetch(`/stocks/backtest/${code}?strategy=${s}`).then(r=>r.json())));
+    const head=["전략","전략수익%","매수후보유%","매매수","승률%","MDD%"];
+    const body=out.map(d=>`<tr><td>${d.strategy||"-"}</td>
+      <td class="prem ${(d.total_return_pct||0)>=0?"pos":"neg"}">${numC(d.total_return_pct)}</td>
+      <td class="num">${numC(d.buy_hold_pct)}</td><td class="num">${d.trades??"-"}</td>
+      <td class="num">${d.win_rate_pct??"-"}</td><td class="neg">${numC(d.max_drawdown_pct)}</td></tr>`).join("");
+    box.innerHTML=`<div class="rhead">📈 ${name} (${code}) 백테스트 <span class="rwhen">수수료 미반영·룰 검증용</span></div>`+stockTable(head,body);
+  }catch(e){ box.innerHTML=`<div class="rhead">백테스트 실패: ${e.message}</div>`; }
 }
 
 function renderReport(rep){

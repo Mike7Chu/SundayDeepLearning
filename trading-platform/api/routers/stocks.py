@@ -5,12 +5,16 @@ import json
 
 from fastapi import APIRouter
 
+import json as _json
+
 from api.redis_client import get_redis
 from api.services.stock_dividend import dividend_view
 from api.services.stock_signal import signals_for
 from api.services.stock_value import value_screener
+from backtest.engine import STRATEGIES, backtest
 from collector.stock.kis import load_watchlist
-from shared.redis_keys import STOCK_QUOTE_KEY
+from fastapi import HTTPException
+from shared.redis_keys import STOCK_QUOTE_KEY, stock_ohlcv_key
 
 router = APIRouter()
 
@@ -47,3 +51,16 @@ async def stocks_signals() -> dict:
 async def stocks_dividend(monthly_budget: float = 0.0) -> dict:
     """배당수익률 랭킹 + (예산 지정 시) 정기 적립(DRIP) 제안."""
     return await dividend_view(get_redis(), monthly_budget)
+
+
+@router.get("/stocks/backtest/{code}")
+async def stocks_backtest(code: str, strategy: str = "sma") -> dict:
+    """저장된 일봉으로 전략 백테스트(sma|rsi|momentum). 룰 검증용(실매매 아님)."""
+    if strategy not in STRATEGIES:
+        raise HTTPException(400, f"전략은 {', '.join(STRATEGIES)} 중 하나")
+    raw = await get_redis().get(stock_ohlcv_key(code))
+    if not raw:
+        raise HTTPException(404, "일봉 없음 — 수집 대기(KIS 키 필요)")
+    candles = _json.loads(raw)
+    closes = [c["close"] for c in candles if isinstance(c, dict) and c.get("close")]
+    return {"code": code, **backtest(closes, strategy)}

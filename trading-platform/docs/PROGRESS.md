@@ -11,6 +11,10 @@ Phase 2 + 더따리 패리티 + 알림설정 + 봇 페이퍼 + 주식(KIS) + **A
 - `research/analyst.py`: 백엔드 2종 — **api**(`AsyncAnthropic` 지연 import, 스트리밍+적응형 사고, 종량과금) / **cli**(`RESEARCH_USE_CLI=true`+`claude` 설치 시 `claude -p` 헤드리스 = **구독 무과금**). 모델 `claude-opus-4-8`. 둘 다 없으면 `mode=None`·비활성. `deploy/set-anthropic.sh`로 모드 설정.
 - 결정: **Claude 구독 ≠ API 무료**(별도 결제). 추가과금 없이 구독 활용하려면 Claude Code CLI(`cli` 모드) 경유 — research를 호스트에서 `deploy/run-research-host.sh`로 구동(컨테이너는 호스트 로그인 못 봄). console API 키는 종량과금. 구독으로 무과금 API 키 발급은 불가.
 
+### 백테스트 하버스 (완료 — 룰 검증용, 실매매 아님)
+- `backtest/engine.py`: 전략(sma 크로스·rsi 평균회귀·momentum)이 종가→포지션(0/1) 생성(룩어헤드 없음, closes[:i+1]만). `run_backtest`로 전략수익/매수후보유/매매수/승률/MDD 산출(수수료 1차 제외).
+- `/stocks/backtest/{code}?strategy=sma|rsi|momentum`, 대시보드 시그널뷰 백테스트 버튼(3전략 동시).
+
 ### 텔레그램 명령 제어 (완료 — 컨트롤 플레인 단일 진실원)
 - `notifier/commands.py`(순수 `handle`)·`command_main.py`(getUpdates 롱폴, 소유자 chat만). docker `commander`.
 - `/status /bots /bot start|stop <name> /killswitch on|off /mute /unmute /alerts /brief`. 봇 enable/killswitch는 Redis 플래그(대시보드와 동일), /mute·/unmute는 alert_settings.enabled, /brief는 briefing.run_once.

@@ -26,7 +26,8 @@
 - ✅ **주식 전략 3종**(Phase 5, 모니터링 전용): **가치 스크리너**(`api/services/stock_value.py`, 마법공식 이익수익률+ROE 랭킹·품질) / **시그널 엔진**(`stock_signal.py`, SMA 골든·데드크로스·RSI·모멘텀·볼린저, 일봉 `stock:ohlcv:{code}` 기반) / **배당**(`stock_dividend.py`, 배당수익률·캘린더·정기적립 DRIP). API `/stocks/value`·`/stocks/signals`·`/stocks/dividend`, 대시보드 주식탭 보기 전환(시세/가치/시그널/배당). 일봉·배당 수집(`collector.stock_history_loop`, 6h)
 - ✅ **주식 일일 브리핑**(`briefing/`): 시세·시그널·가치·배당 요약을 텔레그램 1일 발송(`compose.py` 순수 조립, 키 없으면 로그). docker `briefing` 서비스
 - ✅ **텔레그램 명령 제어**(`notifier/commands.py`+`command_main.py`): `/status /bots /bot start|stop /killswitch /mute /unmute /alerts /brief` — 봇·알림을 Redis 컨트롤 플레인으로(대시보드와 단일 진실원). 소유자 chat_id만 응답. docker `commander` 서비스
-- ⏭️ **다음**: 봇 실거래 게이트(안전장치, 사용자 결정 필요) / 주식 실주문(gated) / TimescaleDB 영속화 / 백테스트
+- ✅ **백테스트 하버스**(`backtest/engine.py`): 저장 일봉으로 sma·rsi·momentum 룰 검증(전략수익/매수후보유/승률/MDD, 룩어헤드 없음). `/stocks/backtest/{code}?strategy=`, 대시보드 시그널뷰 백테스트 버튼(수수료 미반영·룰 검증용)
+- ⏭️ **다음**: 봇 실거래 게이트(안전장치, 사용자 결정 필요) / 주식 실주문(gated) / TimescaleDB 영속화 / 백테스트 수수료·슬리피지 반영
 - ⏸️ **봇 실행(현선/loan/매도), 주식**: 페이퍼 모드부터 단계적 (Phase 3~6, 미착수)
 
 전체 로드맵·설계 근거는 [`docs/PLAN.md`](docs/PLAN.md), 무엇을 왜 했는지는 [`docs/PROGRESS.md`](docs/PROGRESS.md).
