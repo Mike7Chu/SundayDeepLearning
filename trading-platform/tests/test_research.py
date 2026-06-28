@@ -50,8 +50,9 @@ def test_data_gather_from_redis():
 
 def test_analyst_idle_without_key(monkeypatch):
     monkeypatch.setattr(settings, "anthropic_api_key", "")
+    monkeypatch.setattr(settings, "research_use_cli", False)
     a = Analyst()
-    assert a.enabled is False
+    assert a.mode is None and a.enabled is False
 
     async def run():
         rep = await a.analyze(StockData(code="005930", name="삼성전자"))
@@ -60,3 +61,19 @@ def test_analyst_idle_without_key(monkeypatch):
         assert rep["code"] == "005930"
 
     asyncio.run(run())
+
+
+def test_analyst_mode_resolution(monkeypatch):
+    # API 키 있으면 api 우선
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-test")
+    monkeypatch.setattr(settings, "research_use_cli", True)
+    assert Analyst().mode == "api"
+
+    # 키 없고 CLI 활성 + 바이너리 존재(python) → cli
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    monkeypatch.setattr(settings, "research_cli_bin", "python")
+    assert Analyst().mode == "cli"
+
+    # CLI 활성이지만 바이너리 없음 → None(비활성)
+    monkeypatch.setattr(settings, "research_cli_bin", "no-such-binary-xyz")
+    assert Analyst().mode is None

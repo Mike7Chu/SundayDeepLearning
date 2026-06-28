@@ -8,7 +8,8 @@ Phase 2 + 더따리 패리티 + 알림설정 + 봇 페이퍼 + 주식(KIS) + **A
 ### Addendum 9 — AI 가치투자 리서치 (완료)
 - `research/lenses.py`: 버핏·멍거·돤융핑·리루 4대 거장 렌즈(렌즈별 focus+체크리스트) → `SYSTEM_PROMPT`(출력형식+면책).
 - `research/data.py`: Redis `stock:quote`(현재가+per/pbr/eps/bps)에서 `StockData` 수집, `format_for_prompt`(미상 처리).
-- `research/analyst.py`: `AsyncAnthropic`(지연 import) 스트리밍+적응형 사고, 모델 `claude-opus-4-8`(`settings.research_model`). **ANTHROPIC_API_KEY 없으면 enabled=False·비활성 리포트**.
+- `research/analyst.py`: 백엔드 2종 — **api**(`AsyncAnthropic` 지연 import, 스트리밍+적응형 사고, 종량과금) / **cli**(`RESEARCH_USE_CLI=true`+`claude` 설치 시 `claude -p` 헤드리스 = **구독 무과금**). 모델 `claude-opus-4-8`. 둘 다 없으면 `mode=None`·비활성. `deploy/set-anthropic.sh`로 모드 설정.
+- 결정: **Claude 구독 ≠ API 무료**(별도 결제). 추가과금 없이 구독 활용하려면 Claude Code CLI(`cli` 모드) 경유. console API 키는 종량과금. 구독으로 무과금 API 키 발급은 불가.
 - `research/main.py`: 관심종목 `research_interval_sec`(기본 1일) 정기 분석 → `research:reports` 저장 + 텔레그램 브리핑. 키 없으면 idle.
 - `api/routers/research.py`: `/research`(목록)·`/research/{code}`(전문)·`POST /research/{code}/run`(즉시). 대시보드 주식 탭 리서치 보기/분석 버튼.
 - `collector/stock/kis.parse_price`: inquire-price에서 밸류에이션(per/pbr/eps/bps/시총/52주) 추가 추출(테스트 가능 순수 함수).
