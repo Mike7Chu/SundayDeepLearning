@@ -11,6 +11,11 @@ Phase 2 + 더따리 패리티 + 알림설정 + 봇 페이퍼 + 주식(KIS) + **A
 - `research/analyst.py`: 백엔드 2종 — **api**(`AsyncAnthropic` 지연 import, 스트리밍+적응형 사고, 종량과금) / **cli**(`RESEARCH_USE_CLI=true`+`claude` 설치 시 `claude -p` 헤드리스 = **구독 무과금**). 모델 `claude-opus-4-8`. 둘 다 없으면 `mode=None`·비활성. `deploy/set-anthropic.sh`로 모드 설정.
 - 결정: **Claude 구독 ≠ API 무료**(별도 결제). 추가과금 없이 구독 활용하려면 Claude Code CLI(`cli` 모드) 경유 — research를 호스트에서 `deploy/run-research-host.sh`로 구동(컨테이너는 호스트 로그인 못 봄). console API 키는 종량과금. 구독으로 무과금 API 키 발급은 불가.
 
+### 텔레그램 명령 제어 (완료 — 컨트롤 플레인 단일 진실원)
+- `notifier/commands.py`(순수 `handle`)·`command_main.py`(getUpdates 롱폴, 소유자 chat만). docker `commander`.
+- `/status /bots /bot start|stop <name> /killswitch on|off /mute /unmute /alerts /brief`. 봇 enable/killswitch는 Redis 플래그(대시보드와 동일), /mute·/unmute는 alert_settings.enabled, /brief는 briefing.run_once.
+- 실주문 없음(페이퍼봇 토글만). 봇 목록 단일화: `bots/registry.REGISTERED_BOTS`.
+
 ### 주식 전략 3종 + 일일 브리핑 (Phase 5, 완료 — 모니터링 전용/실주문 없음)
 - **가치 스크리너** `api/services/stock_value.py`: 이익수익률(1/PER)·ROE(EPS/BPS) 마법공식 랭킹 + 간이 품질점수. `/stocks/value`.
 - **시그널 엔진** `api/services/stock_signal.py`: SMA20/60 골든·데드크로스, RSI(14), 모멘텀(60), 볼린저 위치 → 종합 buy/sell/neutral. 일봉 `stock:ohlcv:{code}` 기반. `/stocks/signals`.

@@ -6,6 +6,7 @@ import json
 from fastapi import APIRouter
 
 from api.redis_client import get_redis
+from bots.registry import REGISTERED_BOTS
 from shared.redis_keys import (
     BOT_KILLSWITCH_KEY,
     bot_enabled_key,
@@ -16,7 +17,7 @@ from shared.redis_keys import (
 
 router = APIRouter()
 
-_BOTS = ["hyeonseon"]   # 등록된 봇
+_BOTS = REGISTERED_BOTS   # 등록된 봇(단일 진실원)
 
 
 async def _bot_summary(redis, name: str) -> dict:
