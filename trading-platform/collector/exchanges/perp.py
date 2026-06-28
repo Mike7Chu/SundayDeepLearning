@@ -99,6 +99,7 @@ class PerpAdapter:
         })
         self._markets_at = 0.0
         self._funding_at = 0.0
+        self._logged_caps = False
 
     def _accept(self, coin: str) -> bool:
         return coin.upper() not in self.exclude and not is_leveraged_token(coin)
@@ -127,12 +128,15 @@ class PerpAdapter:
                 if not coin or not self._accept(coin):
                     continue
                 price = _last_price(t)
-                if price is not None:
-                    qv = t.get("quoteVolume") or (
-                        float(t["baseVolume"]) * price if t.get("baseVolume") else None)
-                    out[coin] = TickerSnapshot(
-                        coin=coin, price=price, quote="USDT", ts=now,
-                        quote_volume=float(qv) if qv else None)
+                if price is None:
+                    continue
+                qv = t.get("quoteVolume") or (
+                    float(t["baseVolume"]) * price if t.get("baseVolume") else None)
+                qv = float(qv) if qv else None
+                if settings.drop_zero_volume and qv is not None and qv <= 0:
+                    continue   # 0거래량 데드 perp 제거
+                out[coin] = TickerSnapshot(
+                    coin=coin, price=price, quote="USDT", ts=now, quote_volume=qv)
         except Exception as exc:
             logger.warning("[%s perp] tickers failed: %s", self.cfg.name, exc)
         return out
@@ -152,12 +156,18 @@ class PerpAdapter:
         """
         if not self._due_funding():
             return {}   # 아직 주기 전 → 빈값(수집기는 기존값 유지)
+        has_bulk = bool(self.client.has.get("fetchFundingRates"))
+        has_single = bool(self.client.has.get("fetchFundingRate"))
+        n_perp = sum(1 for m in (self.client.markets or {}).values() if _is_usdt_perp(m))
+        if not self._logged_caps:   # 1회 진단: 거래소별 펀비 지원/market 수
+            logger.info("[%s perp] caps fundingRates=%s fundingRate=%s usdt_perp_markets=%d",
+                        self.cfg.name, has_bulk, has_single, n_perp)
+            self._logged_caps = True
         out: dict[str, dict] = {}
         try:
-            if self.client.has.get("fetchFundingRates"):
-                rates = await self.client.fetch_funding_rates()
-                out = self._parse_rates(rates)
-            if not out and self.client.has.get("fetchFundingRate"):
+            if has_bulk:
+                out = self._parse_rates(await self.client.fetch_funding_rates())
+            if not out and has_single:
                 out = await self._fetch_funding_single()   # MEXC 등 폴백
         except Exception as exc:
             logger.warning("[%s perp] funding failed: %s", self.cfg.name, exc)

@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # 아비트라지: 코인별 가격점 중앙값 대비 이 배수 밖이면 이상치(충돌/dust)로 제외
     arb_outlier_factor: float = 3.0
 
+    # 24h 거래대금 0인 데드마켓(상폐/거래중지) 즉시 제거 — active 거짓양성 방어
+    drop_zero_volume: bool = True
+
     # 아비트라지 순스프레드: 거래소간 전송/슬리피지 버퍼(%)를 수수료에 더해 차감
     arb_transfer_buffer_pct: float = 0.1
 

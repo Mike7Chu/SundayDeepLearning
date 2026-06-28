@@ -57,11 +57,15 @@ class ExchangeAdapter:
                 if not coin or not self._accept(coin):
                     continue
                 price = _last_price(t)
-                if price is not None:
-                    out[coin] = TickerSnapshot(
-                        coin=coin, price=price, quote=self.cfg.quote, ts=now,
-                        quote_volume=_quote_volume(t, price),
-                        margin=_margin_flag(m))
+                if price is None:
+                    continue
+                qv = _quote_volume(t, price)
+                # 24h 거래대금이 0이면 상폐/거래중지된 데드마켓(active 플래그가 거짓양성이어도 제거)
+                if settings.drop_zero_volume and qv is not None and qv <= 0:
+                    continue
+                out[coin] = TickerSnapshot(
+                    coin=coin, price=price, quote=self.cfg.quote, ts=now,
+                    quote_volume=qv, margin=_margin_flag(m))
         except Exception as exc:
             logger.warning("[%s] fetch failed: %s", self.cfg.name, exc)
         return out
