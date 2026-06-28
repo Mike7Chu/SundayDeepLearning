@@ -30,6 +30,14 @@ def wallet_key(exchange: str) -> str:
 # 주식 시세 해시. field=종목코드, value=json{code,name,price,change_pct,ts}
 STOCK_QUOTE_KEY = "stock:quote"
 
+# 알림 설정(JSON 오버라이드). yaml 기본값 위에 머지.
+ALERT_SETTINGS_KEY = "alert:settings"
+
+
+def alert_hold_key(dedup_key: str) -> str:
+    """최소 유지시간 디바운스용. 조건 최초 충족 시각 기록(TTL로 자동 리셋)."""
+    return f"alert:hold:{dedup_key}"
+
 
 # ===== 봇 (페이퍼/실행) =====
 BOT_KILLSWITCH_KEY = "bot:killswitch"            # "1"이면 전 봇 정지

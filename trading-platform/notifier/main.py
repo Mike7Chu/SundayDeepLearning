@@ -1,7 +1,7 @@
 """알림봇 엔트리포인트.
 
-설정된 (국내, 해외) 쌍의 김프를 주기적으로 평가해, 임계치 초과 코인을
-쿨다운을 지키며 텔레그램으로 발송한다.
+매 주기 알림 설정(Redis 오버라이드 머지)을 로드해 김프/역프/현선/펀비를 평가하고,
+마스터·종류·제외코인·임계치·쿨다운·최소유지시간(디바운스)을 적용해 텔레그램 발송.
 
 실행: python -m notifier.main
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import redis.asyncio as aioredis
 
@@ -21,8 +22,10 @@ from notifier.alerts import (
     evaluate_hyeonseon,
     format_message,
 )
-from notifier.config import load_alert_config
+from notifier.config import Pair, load_alert_config
 from notifier.telegram import TelegramSender
+from shared.alert_settings import AlertSettings, load_settings
+from shared.redis_keys import alert_hold_key
 from shared.settings import settings
 
 logging.basicConfig(
@@ -36,50 +39,73 @@ def _cooldown_key(event: AlertEvent) -> str:
     return f"alert:cooldown:{event.dedup_key}"
 
 
-async def _should_send(redis: aioredis.Redis, event: AlertEvent, cooldown: int) -> bool:
-    """쿨다운 미경과면 False. 통과 시 쿨다운 마킹(SET NX EX)."""
-    ok = await redis.set(_cooldown_key(event), "1", nx=True, ex=cooldown)
+async def _held_long_enough(redis: aioredis.Redis, ev: AlertEvent, min_hold: int) -> bool:
+    """조건이 min_hold초 이상 지속됐는지(디바운스). 0이면 항상 True."""
+    if min_hold <= 0:
+        return True
+    key = alert_hold_key(ev.dedup_key)
+    now = int(time.time())
+    # 최초 충족 시각 기록(이미 있으면 유지), 조건 풀리면 TTL로 자동 만료
+    await redis.set(key, now, nx=True, ex=min_hold + 60)
+    first = await redis.get(key)
+    return bool(first) and (now - int(first) >= min_hold)
+
+
+async def _should_send(redis: aioredis.Redis, ev: AlertEvent, cooldown: int) -> bool:
+    ok = await redis.set(_cooldown_key(ev), "1", nx=True, ex=cooldown)
     return bool(ok)
 
 
+async def _dispatch(redis, sender, s: AlertSettings, events: list[AlertEvent]) -> None:
+    for ev in events:
+        if s.excluded(ev.coin):
+            continue
+        if not await _held_long_enough(redis, ev, s.min_hold_sec):
+            continue
+        if await _should_send(redis, ev, s.cooldown_sec):
+            sent = await sender.send(format_message(ev))
+            logger.info("ALERT %s %+.4f (sent=%s)", ev.dedup_key, ev.premium_pct, sent)
+
+
 async def run() -> None:
-    cfg = load_alert_config()
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     sender = TelegramSender()
-    logger.info(
-        "alert bot start: %d pairs, high>=%.2f%% low<=%.2f%% cooldown=%ds telegram=%s",
-        len(cfg.pairs), cfg.premium_high_pct, cfg.premium_low_pct,
-        cfg.cooldown_sec, sender.enabled,
-    )
+    poll = load_alert_config().poll_interval_sec
+    logger.info("alert bot start (telegram=%s)", sender.enabled)
     try:
         while True:
-            for pair in cfg.pairs:
+            s = await load_settings(redis)
+            if not s.enabled:                      # 마스터 off
+                await asyncio.sleep(poll)
+                continue
+            t = s.types
+            for p in s.pairs:
+                pair = Pair(base=p["base"], ref=p["ref"])
                 try:
                     cells = await compute_premium(redis, pair.base, pair.ref)
                 except Exception as exc:
-                    logger.warning("[%s] premium 계산 실패: %s", pair.key, exc)
+                    logger.warning("[%s] premium 실패: %s", pair.key, exc)
                     continue
-                events = evaluate(
-                    pair.key, cells, cfg.premium_high_pct, cfg.premium_low_pct
-                )
-                events += evaluate_hyeonseon(pair.key, cells, cfg.hyeonseon_low_pct)
-                for ev in events:
-                    if await _should_send(redis, ev, cfg.cooldown_sec):
-                        sent = await sender.send(format_message(ev))
-                        logger.info("ALERT %s %+.2f%% (sent=%s)",
-                                    ev.dedup_key, ev.premium_pct, sent)
+                events: list[AlertEvent] = []
+                if t.kimp_high or t.kimp_low:
+                    for ev in evaluate(pair.key, cells, s.premium_high_pct, s.premium_low_pct):
+                        if (ev.side == "high" and t.kimp_high) or (ev.side == "low" and t.kimp_low):
+                            events.append(ev)
+                if t.hyeonseon:
+                    events += evaluate_hyeonseon(pair.key, cells, s.hyeonseon_low_pct)
+                await _dispatch(redis, sender, s, events)
 
-            # 펀비 알림(거래소쌍 무관, 매트릭스 1회)
-            try:
-                matrix = await compute_funding_matrix(redis)
-                for ev in evaluate_funding(matrix, cfg.funding_apy_pct, cfg.funding_spread_pct):
-                    if await _should_send(redis, ev, cfg.cooldown_sec):
-                        sent = await sender.send(format_message(ev))
-                        logger.info("ALERT %s %.4f (sent=%s)", ev.dedup_key, ev.premium_pct, sent)
-            except Exception as exc:
-                logger.warning("펀비 알림 평가 실패: %s", exc)
+            if t.funding_apy or t.funding_spread:
+                try:
+                    matrix = await compute_funding_matrix(redis)
+                    fev = [e for e in evaluate_funding(matrix, s.funding_apy_pct, s.funding_spread_pct)
+                           if (e.side == "funding_apy" and t.funding_apy)
+                           or (e.side == "funding_spread" and t.funding_spread)]
+                    await _dispatch(redis, sender, s, fev)
+                except Exception as exc:
+                    logger.warning("펀비 알림 실패: %s", exc)
 
-            await asyncio.sleep(cfg.poll_interval_sec)
+            await asyncio.sleep(poll)
     finally:
         await redis.aclose()
 

@@ -56,6 +56,11 @@
   .cell-int{font-size:10px; color:var(--badge); margin-left:3px;} .cd{font-size:10px; color:var(--muted);}
   .btn{background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;}
   .btn:hover{border-color:var(--green);}
+  .aset{padding:14px; max-width:560px;}
+  .aset h3{font-size:13px; color:var(--muted); margin:16px 0 6px; border-top:1px solid var(--line); padding-top:12px;}
+  .arow{display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; margin-bottom:6px;}
+  .arow label{font-size:13px; color:var(--text);}
+  .chk.big{font-size:15px; font-weight:700;}
 </style>
 </head>
 <body>
@@ -67,6 +72,7 @@
     <button data-tab="funding">펀비</button>
     <button data-tab="bots">봇</button>
     <button data-tab="stocks">주식</button>
+    <button data-tab="alerts">알림설정</button>
   </div>
   <div class="controls">
     <span class="ctl" data-for="kimp">기준 <select id="base"></select></span>
@@ -131,6 +137,39 @@
   </table>
 </div>
 
+<div id="panel-alerts" class="panel">
+  <div class="aset">
+    <label class="chk big"><input type="checkbox" id="aEnabled"> 🔔 알림 마스터 ON</label>
+    <h3>알림 종류</h3>
+    <div class="arow">
+      <label class="chk"><input type="checkbox" id="tKimpHigh"> 김프</label>
+      <label class="chk"><input type="checkbox" id="tKimpLow"> 역프</label>
+      <label class="chk"><input type="checkbox" id="tHyeonseon"> 현선</label>
+      <label class="chk"><input type="checkbox" id="tFundApy"> 펀비과열</label>
+      <label class="chk"><input type="checkbox" id="tFundSpread"> 펀비차</label>
+    </div>
+    <h3>임계치</h3>
+    <div class="arow">
+      <label>김프 ≥ <input class="rng" id="aHigh" type="number" step="0.1">%</label>
+      <label>역프 ≤ <input class="rng" id="aLow" type="number" step="0.1">%</label>
+      <label>현선 ≤ <input class="rng" id="aHyeon" type="number" step="0.1">%</label>
+    </div>
+    <div class="arow">
+      <label>펀비APY ≥ <input class="rng" id="aApy" type="number" step="1">%</label>
+      <label>펀비차 ≥ <input class="rng" id="aSpread" type="number" step="0.01">%p</label>
+    </div>
+    <h3>빈도·제외</h3>
+    <div class="arow">
+      <label>쿨다운 <input class="rng" id="aCool" type="number" step="10">초</label>
+      <label>최소유지 <input class="rng" id="aHold" type="number" step="1">초</label>
+    </div>
+    <div class="arow">
+      <label style="flex:1">제외코인(쉼표) <input id="aExcl" style="width:60%" placeholder="예: PEPE, DOGE"></label>
+    </div>
+    <div class="arow"><button id="aSave" class="btn">💾 저장</button><span id="aMsg" class="fund"></span></div>
+  </div>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString("ko-KR",{maximumFractionDigits:2});
@@ -161,6 +200,7 @@ async function init(){
       kimpSort = (kimpSort.key===k)?{key:k,dir:-kimpSort.dir}:{key:k,dir:-1}; tick(); });
   document.querySelectorAll("input,select").forEach(el=> el.addEventListener("input", tick));
   $("fundSort").addEventListener("change", ()=>{ fundColSort={ex:null,dir:-1}; });  // 드롭다운 쓰면 컬럼정렬 해제
+  $("aSave").onclick = saveAlerts;
   $("killBtn").onclick = async ()=>{ const d=await (await fetch("/bots")).json();
     await fetch(`/bots/killswitch/${d.killswitch?0:1}`,{method:"POST"}); tick(); };
   switchTab("kimp");
@@ -174,7 +214,37 @@ function switchTab(tab){
   document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active",p.id==="panel-"+tab));
   document.querySelectorAll(".ctl").forEach(c=>c.style.display=(c.dataset.for===tab)?"":"none");
   $("summary").style.display="none";
-  tick();
+  if(tab==="alerts") loadAlerts(); else tick();
+}
+
+async function loadAlerts(){
+  try{
+    const s = await (await fetch("/alerts/settings")).json();
+    $("aEnabled").checked=s.enabled;
+    $("tKimpHigh").checked=s.types.kimp_high; $("tKimpLow").checked=s.types.kimp_low;
+    $("tHyeonseon").checked=s.types.hyeonseon; $("tFundApy").checked=s.types.funding_apy;
+    $("tFundSpread").checked=s.types.funding_spread;
+    $("aHigh").value=s.premium_high_pct; $("aLow").value=s.premium_low_pct;
+    $("aHyeon").value=s.hyeonseon_low_pct; $("aApy").value=s.funding_apy_pct;
+    $("aSpread").value=s.funding_spread_pct; $("aCool").value=s.cooldown_sec;
+    $("aHold").value=s.min_hold_sec; $("aExcl").value=(s.exclude_coins||[]).join(", ");
+    setStatus("live","설정 로드됨");
+  }catch(e){ setStatus("err","오류: "+e.message); }
+}
+
+async function saveAlerts(){
+  const patch={
+    enabled:$("aEnabled").checked,
+    types:{ kimp_high:$("tKimpHigh").checked, kimp_low:$("tKimpLow").checked,
+      hyeonseon:$("tHyeonseon").checked, funding_apy:$("tFundApy").checked, funding_spread:$("tFundSpread").checked },
+    premium_high_pct:parseFloat($("aHigh").value), premium_low_pct:parseFloat($("aLow").value),
+    hyeonseon_low_pct:parseFloat($("aHyeon").value), funding_apy_pct:parseFloat($("aApy").value),
+    funding_spread_pct:parseFloat($("aSpread").value), cooldown_sec:parseInt($("aCool").value),
+    min_hold_sec:parseInt($("aHold").value),
+    exclude_coins:$("aExcl").value.split(",").map(x=>x.trim().toUpperCase()).filter(Boolean),
+  };
+  await fetch("/alerts/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});
+  $("aMsg").textContent="저장됨 ✓ "+new Date().toLocaleTimeString("ko-KR");
 }
 
 async function tick(){
@@ -184,7 +254,8 @@ async function tick(){
     else if(activeTab==="arb") await renderArb();
     else if(activeTab==="funding") await renderFunding();
     else if(activeTab==="bots") await renderBots();
-    else await renderStocks();
+    else if(activeTab==="stocks") await renderStocks();
+    // alerts 탭은 폼이라 자동 갱신 안 함(switchTab에서 1회 로드)
   } catch(e){ setStatus("err","오류: "+e.message); }
   finally { busy=false; }
 }

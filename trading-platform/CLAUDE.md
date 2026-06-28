@@ -20,6 +20,7 @@
 - ✅ **펀비 알림**: 과열 |APY| + 거래소간 펀비차(%p) 텔레그램(`notifier/alerts.evaluate_funding`)
 - ✅ **봇 페이퍼**(`bots/`): 프레임워크+실행게이트웨이(dry-run)+현선봇. `/bots` 컨트롤(enable/disable/killswitch), 대시보드 봇 탭. 실거래 미오픈
 - ✅ **주식(KIS)**(`collector/stock/kis.py`): 관심종목 현재가 수집(키 없으면 idle), `/stocks` + 대시보드 주식 탭
+- ✅ **알림 설정**(`shared/alert_settings.py`, `/alerts/settings`, 대시보드 알림설정 탭): 마스터/종류 on-off·임계치·쿨다운·**최소유지(디바운스)**·제외코인을 실시간 조절(Redis 오버라이드, notifier 매주기 반영)
 - ⏭️ **다음**: 봇 실거래 게이트(안전장치) / 주식 전략(시그널·가치·배당)·브리핑 / TimescaleDB 영속화
 - ⏸️ **봇 실행(현선/loan/매도), 주식**: 페이퍼 모드부터 단계적 (Phase 3~6, 미착수)
 
