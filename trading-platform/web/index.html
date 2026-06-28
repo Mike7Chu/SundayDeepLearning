@@ -130,9 +130,9 @@
   <table>
     <thead><tr>
       <th data-sort="coin">코인</th><th data-sort="prem">김프 %</th>
-      <th data-sort="perp">선물김프 %</th>
-      <th>국내가(KRW)</th><th>해외가(KRW)</th><th>거래대금(억)</th></tr></thead>
-    <tbody id="kimpRows"><tr><td colspan="6" class="empty">불러오는 중…</td></tr></tbody>
+      <th data-sort="perp">선물김프 %</th><th data-sort="basis">현선 %</th>
+      <th>국내가(KRW)</th><th>해외현물가</th><th>해외선물가</th><th>거래대금(억)</th></tr></thead>
+    <tbody id="kimpRows"><tr><td colspan="8" class="empty">불러오는 중…</td></tr></tbody>
   </table>
 </div>
 
@@ -396,27 +396,31 @@ async function renderKimp(){
   const basis=$("kimpBasis").value;
   const pv=(c)=> basis==="tether"?c.premium_pct:c.premium_coin_pct;
   const ppv=(c)=> basis==="tether"?c.premium_perp_pct:c.premium_perp_coin_pct;  // 선물김프(null 가능)
+  // 현선 베이시스: 해외 현물↔선물 가격차%(환산 무관, perp 없으면 null)
+  const bv=(c)=> (c.ref_perp_price_krw!=null && c.ref_price_krw>0)
+    ? (c.ref_perp_price_krw/c.ref_price_krw - 1)*100 : null;
   const mn=numOr("kimpMin",-Infinity), mx=numOr("kimpMax",Infinity);
   const minVolKrw=numOr("kimpVol",0)*1e8;   // 억원 → 원
   const d = await (await fetch(`/premium?base=${$("base").value}&ref=${$("ref").value}`)).json();
   let rows=(d.rows||[]).filter(c=>matchCoin(c.coin)).filter(c=>pv(c)>=mn && pv(c)<=mx)
     .filter(c=> minVolKrw<=0 || (c.base_volume_krw!=null && c.base_volume_krw>=minVolKrw));
-  const skey=(c)=> kimpSort.key==="perp"?(ppv(c)??-9999):(kimpSort.key==="coin"?null:pv(c));
+  const skey=(c)=> kimpSort.key==="perp"?(ppv(c)??-9999):kimpSort.key==="basis"?(bv(c)??-9999):(kimpSort.key==="coin"?null:pv(c));
   rows.sort((a,b)=> kimpSort.key==="coin"
     ? kimpSort.dir*a.coin.localeCompare(b.coin) : kimpSort.dir*(skey(a)-skey(b)));
-  const LBL={coin:"코인",prem:"김프 %",perp:"선물김프 %"};
+  const LBL={coin:"코인",prem:"김프 %",perp:"선물김프 %",basis:"현선 %"};
   document.querySelectorAll("#panel-kimp th[data-sort]").forEach(th=>{
     th.innerHTML = LBL[th.dataset.sort] + (kimpSort.key===th.dataset.sort?` <span class="arrow">${kimpSort.dir<0?"↓":"↑"}</span>`:"");
   });
   const tb=$("kimpRows");
-  if(!rows.length){ tb.innerHTML='<tr><td colspan="6" class="empty">조건에 맞는 코인 없음</td></tr>'; setStatus("stale","-"); return; }
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="8" class="empty">조건에 맞는 코인 없음</td></tr>'; setStatus("stale","-"); return; }
+  const pct=(x)=> x==null?'<td class="num">-</td>':`<td class="prem ${x>=0?"pos":"neg"}">${x>=0?"+":""}${x.toFixed(2)}%</td>`;
   tb.innerHTML = rows.map(c=>{const v=pv(c),cls=v>=0?"pos":"neg",s=v>=0?"+":"";
-    const p=ppv(c);
-    const pcell=(p==null)?'<td class="num">-</td>':`<td class="prem ${p>=0?"pos":"neg"}">${p>=0?"+":""}${p.toFixed(2)}%</td>`;
     const vol=(c.base_volume_krw!=null)?fmt(c.base_volume_krw/1e8):"-";
-    return `<tr><td class="coin">${c.coin}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>${pcell}
+    const perpPrice=(c.ref_perp_price_krw!=null)?fmt(c.ref_perp_price_krw):"-";
+    return `<tr><td class="coin">${c.coin}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>
+      ${pct(ppv(c))}${pct(bv(c))}
       <td class="num">${fmt(c.base_price_krw)}</td><td class="num">${fmt(c.ref_price_krw)}</td>
-      <td class="num">${vol}</td></tr>`;}).join("");
+      <td class="num">${perpPrice}</td><td class="num">${vol}</td></tr>`;}).join("");
   $("metaInfo").textContent=`${rows.length}코인 · ${basis==="tether"?"테더김프":"코인(환율)"} · 환율 ${fmt(rows[0].forex_rate)} · 테더 ${fmt(rows[0].tether_rate)}`;
   setStatus("live","실시간");
 }
