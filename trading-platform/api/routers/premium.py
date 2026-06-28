@@ -73,10 +73,12 @@ async def funding_matrix() -> dict:
 @router.get("/arbitrage")
 async def arbitrage(
     min_gap: float = Query(0.0, description="최소 갭%"),
+    min_volume: float = Query(0.0, description="최소 거래대금(USDT)"),
     limit: int = Query(200, description="최대 전략 수"),
 ) -> dict:
     """해외 거래소 아비트라지 전략 리스트(갭순)."""
-    return await compute_arbitrage(get_redis(), min_gap_pct=min_gap, limit=limit)
+    return await compute_arbitrage(get_redis(), min_gap_pct=min_gap,
+                                   min_volume=min_volume, limit=limit)
 
 
 @router.websocket("/ws/premium")

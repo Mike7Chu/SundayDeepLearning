@@ -99,6 +99,7 @@ async def compute_premium(
                 premium_perp_pct=perp_pct,
                 premium_perp_coin_pct=perp_coin_pct,
                 ref_perp_price_krw=perp_krw,
+                base_volume_krw=b.quote_volume,
             )
         )
     return cells

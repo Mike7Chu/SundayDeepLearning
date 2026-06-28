@@ -35,6 +35,7 @@ class TickerSnapshot(BaseModel):
     price: float       # 마켓 통화 기준 (KRW 또는 USDT)
     quote: str         # KRW | USDT
     ts: float          # epoch seconds (수집 시각)
+    quote_volume: float | None = None   # 24h 거래대금 (KRW 또는 USDT)
 
 
 class PremiumCell(BaseModel):
@@ -58,3 +59,4 @@ class PremiumCell(BaseModel):
     premium_perp_pct: float | None = None        # 테더 기준
     premium_perp_coin_pct: float | None = None   # 코인/환율 기준
     ref_perp_price_krw: float | None = None      # 해외 선물 환산가(코인 기준)
+    base_volume_krw: float | None = None         # 국내 24h 거래대금(KRW) — 알림 볼륨 필터

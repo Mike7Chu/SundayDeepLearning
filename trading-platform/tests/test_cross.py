@@ -18,9 +18,26 @@ from shared.schemas import TickerSnapshot
 from shared.symbols import is_leveraged_token, parse_symbol
 
 
-def _seed_price(redis, key, coin, price):
-    snap = TickerSnapshot(coin=coin, price=price, quote="USDT", ts=time.time())
+def _seed_price(redis, key, coin, price, vol=None):
+    snap = TickerSnapshot(coin=coin, price=price, quote="USDT", ts=time.time(),
+                          quote_volume=vol)
     return redis.hset(key, coin, snap.model_dump_json())
+
+
+def test_arbitrage_volume_filter():
+    async def run():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        # BTC 저거래대금, ETH 고거래대금
+        await _seed_price(redis, ticker_key("binance"), "BTC", 100_000, vol=1_000)
+        await _seed_price(redis, ticker_key("bybit"), "BTC", 101_000, vol=1_000)
+        await _seed_price(redis, ticker_key("binance"), "ETH", 4_000, vol=5_000_000)
+        await _seed_price(redis, ticker_key("bybit"), "ETH", 4_040, vol=5_000_000)
+        d = await compute_arbitrage(redis, min_volume=1_000_000)
+        coins = {x["coin"] for x in d["rows"]}
+        assert "ETH" in coins and "BTC" not in coins   # 저거래대금 제외
+        await redis.aclose()
+
+    asyncio.run(run())
 
 
 def _seed_funding(redis, ex, coin, rate, interval_h=8.0, next_ts=None):

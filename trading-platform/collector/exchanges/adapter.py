@@ -45,7 +45,8 @@ class ExchangeAdapter:
                 price = _last_price(t)
                 if price is not None:
                     out[coin] = TickerSnapshot(
-                        coin=coin, price=price, quote=self.cfg.quote, ts=now)
+                        coin=coin, price=price, quote=self.cfg.quote, ts=now,
+                        quote_volume=_quote_volume(t, price))
         except Exception as exc:
             logger.warning("[%s] fetch failed: %s", self.cfg.name, exc)
         return out
@@ -68,3 +69,12 @@ def _last_price(ticker: dict | None) -> float | None:
         return None
     price = ticker.get("last") or ticker.get("close")
     return float(price) if price else None
+
+
+def _quote_volume(ticker: dict, price: float) -> float | None:
+    """24h 거래대금. quoteVolume 우선, 없으면 baseVolume*price."""
+    qv = ticker.get("quoteVolume")
+    if qv:
+        return float(qv)
+    bv = ticker.get("baseVolume")
+    return float(bv) * price if bv else None

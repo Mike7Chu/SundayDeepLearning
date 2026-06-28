@@ -28,6 +28,7 @@ class AlertSettings(BaseModel):
     funding_spread_pct: float = 0.1
     cooldown_sec: int = 600
     min_hold_sec: int = 0                # 조건이 이 초 이상 지속될 때만 알림(디바운스)
+    min_volume_eokwon: float = 0.0       # 국내 거래대금 이 억원 미만이면 김프/역프/현선 알림 skip
     exclude_coins: list[str] = []        # 제외 코인(대문자)
     pairs: list[dict] = []               # 감시 쌍 [{base, ref}]
 

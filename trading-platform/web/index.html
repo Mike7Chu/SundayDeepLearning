@@ -89,10 +89,11 @@
     <span class="ctl" data-for="arb">
       <label class="chk"><input type="checkbox" id="arbSpot" checked>현물</label>
       <label class="chk"><input type="checkbox" id="arbPerp" checked>선물</label></span>
+    <span class="ctl" data-for="arb">거래대금 ≥ <input class="rng" id="minVol" type="number" step="100000" placeholder="USDT"></span>
 
     <span class="ctl" data-for="funding">주기 <select id="fundInt">
       <option value="">모두</option><option value="8">8H</option><option value="4">4H</option>
-      <option value="2">2H</option><option value="1">1H</option></select></span>
+      <option value="2">2H</option><option value="1">1H</option><option value="none">주기없음</option></select></span>
     <span class="ctl" data-for="funding">정렬 <select id="fundSort">
       <option value="abs">|펀비|↓</option><option value="desc">펀비↓</option><option value="asc">펀비↑</option></select></span>
     <span class="ctl" data-for="funding"><label class="chk"><input type="checkbox" id="apyToggle">APY</label></span>
@@ -162,6 +163,7 @@
     <div class="arow">
       <label>쿨다운 <input class="rng" id="aCool" type="number" step="10">초</label>
       <label>최소유지 <input class="rng" id="aHold" type="number" step="1">초</label>
+      <label>최소거래대금 <input class="rng" id="aVol" type="number" step="1">억원</label>
     </div>
     <div class="arow">
       <label style="flex:1">제외코인(쉼표) <input id="aExcl" style="width:60%" placeholder="예: PEPE, DOGE"></label>
@@ -227,7 +229,8 @@ async function loadAlerts(){
     $("aHigh").value=s.premium_high_pct; $("aLow").value=s.premium_low_pct;
     $("aHyeon").value=s.hyeonseon_low_pct; $("aApy").value=s.funding_apy_pct;
     $("aSpread").value=s.funding_spread_pct; $("aCool").value=s.cooldown_sec;
-    $("aHold").value=s.min_hold_sec; $("aExcl").value=(s.exclude_coins||[]).join(", ");
+    $("aHold").value=s.min_hold_sec; $("aVol").value=s.min_volume_eokwon;
+    $("aExcl").value=(s.exclude_coins||[]).join(", ");
     setStatus("live","설정 로드됨");
   }catch(e){ setStatus("err","오류: "+e.message); }
 }
@@ -240,7 +243,7 @@ async function saveAlerts(){
     premium_high_pct:parseFloat($("aHigh").value), premium_low_pct:parseFloat($("aLow").value),
     hyeonseon_low_pct:parseFloat($("aHyeon").value), funding_apy_pct:parseFloat($("aApy").value),
     funding_spread_pct:parseFloat($("aSpread").value), cooldown_sec:parseInt($("aCool").value),
-    min_hold_sec:parseInt($("aHold").value),
+    min_hold_sec:parseInt($("aHold").value), min_volume_eokwon:parseFloat($("aVol").value)||0,
     exclude_coins:$("aExcl").value.split(",").map(x=>x.trim().toUpperCase()).filter(Boolean),
   };
   await fetch("/alerts/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});
@@ -326,8 +329,10 @@ function legHtml(leg, side){
   let w="";
   if(leg.wallet){ const dot=(v)=>`<span class="dot" style="background:${v===true?'var(--green)':v===false?'var(--up)':'var(--gray)'}"></span>`;
     w=`<span class="wallet" title="입금/출금">${dot(leg.wallet.deposit)}${dot(leg.wallet.withdraw)}</span>`; }
-  return `<div class="leg">${mk}${sd}<span class="sym">${leg.exchange}</span><span class="legprice">${fmt4(leg.price)}</span>${w}</div>`;
+  const v = leg.volume ? ` <span class="fund">$${fmtVol(leg.volume)}</span>` : "";
+  return `<div class="leg">${mk}${sd}<span class="sym">${leg.exchange}</span><span class="legprice">${fmt4(leg.price)}</span>${v}${w}</div>`;
 }
+function fmtVol(n){ n=Number(n); if(n>=1e9)return (n/1e9).toFixed(1)+"B"; if(n>=1e6)return (n/1e6).toFixed(1)+"M"; if(n>=1e3)return (n/1e3).toFixed(0)+"k"; return n.toFixed(0); }
 function fundLine(leg){ if(!leg.funding) return "";
   const iv=leg.funding.interval_h?`${leg.funding.interval_h}H`:"";
   return `<div class="fund">펀비 ${leg.funding.rate_pct.toFixed(4)}% ${iv}</div>`; }
@@ -336,7 +341,8 @@ async function renderArb(){
   const minG=numOr("minGap",0), maxG=numOr("maxGap",Infinity);
   const useSpot=$("arbSpot").checked, usePerp=$("arbPerp").checked;
   const excl=new Set([...document.querySelectorAll(".exEx:checked")].map(e=>e.value));
-  const d = await (await fetch(`/arbitrage?min_gap=0&limit=400`)).json();
+  const minVol=numOr("minVol",0);
+  const d = await (await fetch(`/arbitrage?min_gap=0&min_volume=${minVol}&limit=400`)).json();
   let rows=(d.rows||[]).filter(x=>matchCoin(x.coin))
     .filter(x=>x.gap_pct>=minG && x.gap_pct<=maxG)
     .filter(x=>{ const ms=[x.long.market,x.short.market];
@@ -358,7 +364,7 @@ async function renderArb(){
 function cdText(ts){ if(!ts) return ""; let s=Math.floor((ts-Date.now())/1000); if(s<0)s=0;
   const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
   return `${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`; }
-const ivOf = (c)=> c.interval_h || 8;
+const ivStr = (c)=> (c.interval_h==null ? "none" : String(c.interval_h));   // 주기 미상=none
 
 async function renderFunding(){
   const d = await (await fetch(`/funding/matrix`)).json();
@@ -373,7 +379,7 @@ async function renderFunding(){
     fundColSort = (fundColSort.ex===e) ? {ex:e,dir:-fundColSort.dir} : {ex:e,dir:-1};
     tick(); });
   let coins=(d.coins||[]).filter(r=>matchCoin(r.coin));
-  if(fInt) coins=coins.filter(r=> Object.values(r.by_ex).some(c=>String(ivOf(c))===fInt));
+  if(fInt) coins=coins.filter(r=> Object.values(r.by_ex).some(c=>ivStr(c)===fInt));
   if(fundColSort.ex){
     const e=fundColSort.ex;
     const cv=(r)=>{ const c=r.by_ex[e]; return c?valOf(c):(fundColSort.dir<0?-Infinity:Infinity); };
@@ -389,7 +395,8 @@ async function renderFunding(){
     const cells=exs.map(ex=>{ const c=r.by_ex[ex];
       if(!c) return `<td class="num">-</td>`;
       const val=valOf(c), cls=val>=0?"pos":"neg", s=val>=0?"+":"";
-      const iv=(c.interval_h && c.interval_h!==8)?`<span class="cell-int">${c.interval_h}H</span>`:"";
+      const iv = c.interval_h==null ? `<span class="cell-int">—</span>`
+                 : (c.interval_h!==8 ? `<span class="cell-int">${c.interval_h}H</span>` : "");
       const cd=cdText(c.next_ts);
       return `<td><span class="prem ${cls}">${s}${val.toFixed(apy?2:4)}%</span>${iv}${cd?`<div class="cd">${cd}</div>`:""}</td>`;
     }).join("");

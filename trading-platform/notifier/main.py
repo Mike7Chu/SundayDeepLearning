@@ -57,8 +57,12 @@ async def _should_send(redis: aioredis.Redis, ev: AlertEvent, cooldown: int) -> 
 
 
 async def _dispatch(redis, sender, s: AlertSettings, events: list[AlertEvent]) -> None:
+    min_vol_krw = s.min_volume_eokwon * 1e8
     for ev in events:
         if s.excluded(ev.coin):
+            continue
+        # 거래대금 필터(국내 KRW 기준 이벤트만; 펀비 등 volume 없는 건 통과)
+        if min_vol_krw > 0 and ev.base_volume_krw is not None and ev.base_volume_krw < min_vol_krw:
             continue
         if not await _held_long_enough(redis, ev, s.min_hold_sec):
             continue

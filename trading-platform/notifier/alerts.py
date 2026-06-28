@@ -13,6 +13,7 @@ class AlertEvent(BaseModel):
     premium_pct: float
     base_exchange: str
     ref_exchange: str
+    base_volume_krw: float | None = None   # 국내 거래대금(볼륨 필터용)
 
     @property
     def dedup_key(self) -> str:
@@ -32,6 +33,7 @@ def evaluate_hyeonseon(
                     pair_key=pair_key, coin=c.coin, side="perp_low",
                     premium_pct=pp,
                     base_exchange=c.base_exchange, ref_exchange=c.ref_exchange,
+                    base_volume_krw=c.base_volume_krw,
                 )
             )
     return events
@@ -60,6 +62,7 @@ def evaluate(
                     premium_pct=c.premium_pct,
                     base_exchange=c.base_exchange,
                     ref_exchange=c.ref_exchange,
+                    base_volume_krw=c.base_volume_krw,
                 )
             )
     return events

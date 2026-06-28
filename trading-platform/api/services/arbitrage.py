@@ -56,7 +56,8 @@ def _funding_leg(d: dict | None) -> dict | None:
 
 
 async def compute_arbitrage(
-    redis: aioredis.Redis, min_gap_pct: float = 0.0, limit: int = 100
+    redis: aioredis.Redis, min_gap_pct: float = 0.0,
+    min_volume: float = 0.0, limit: int = 100
 ) -> dict:
     universe = load_universe()
     overseas = universe.overseas
@@ -72,8 +73,13 @@ async def compute_arbitrage(
         coins.update(spot[ex].keys())
         coins.update(perp[ex].keys())
 
+    def _vol(coin: str, ex: str, market: str) -> float:
+        src = (perp if market == "perp" else spot)[ex].get(coin) or {}
+        return float(src.get("quote_volume") or 0)
+
     def leg(coin: str, ex: str, market: str, price: float) -> dict:
-        d: dict = {"exchange": ex, "market": market, "price": price}
+        vol = _vol(coin, ex, market)
+        d: dict = {"exchange": ex, "market": market, "price": price, "volume": vol}
         if market == "perp":
             f = _funding_leg(funding[ex].get(coin))
             if f:
@@ -102,11 +108,15 @@ async def compute_arbitrage(
         gap = (hi[2] / lo[2] - 1) * 100
         if gap < min_gap_pct:
             continue
+        long_leg, short_leg = leg(coin, *lo), leg(coin, *hi)
+        # 거래대금 필터: 두 다리 중 작은 쪽이 기준 미만이면 제외(저유동 노이즈)
+        if min_volume > 0 and min(long_leg["volume"], short_leg["volume"]) < min_volume:
+            continue
         items.append({
             "coin": coin,
             "gap_pct": round(gap, 4),
-            "long": leg(coin, *lo),   # 싸게 매수
-            "short": leg(coin, *hi),  # 비싸게 매도/숏
+            "long": long_leg,   # 싸게 매수
+            "short": short_leg,  # 비싸게 매도/숏
         })
 
     items.sort(key=lambda x: x["gap_pct"], reverse=True)

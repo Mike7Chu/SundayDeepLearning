@@ -79,8 +79,11 @@ class PerpAdapter:
                     continue
                 price = _last_price(t)
                 if price is not None:
+                    qv = t.get("quoteVolume") or (
+                        float(t["baseVolume"]) * price if t.get("baseVolume") else None)
                     out[coin] = TickerSnapshot(
-                        coin=coin, price=price, quote="USDT", ts=now)
+                        coin=coin, price=price, quote="USDT", ts=now,
+                        quote_volume=float(qv) if qv else None)
         except Exception as exc:
             logger.warning("[%s perp] tickers failed: %s", self.cfg.name, exc)
         return out
