@@ -56,6 +56,24 @@ def test_arbitrage_volume_filter():
     asyncio.run(run())
 
 
+def test_arbitrage_net_spread():
+    """순스프레드 = 총갭 - (롱+숏 taker) - 전송버퍼."""
+    async def run():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        # binance(taker 0.1) 100000, bybit(taker 0.1) 101000 → 총갭 1.0%
+        await _seed_price(redis, ticker_key("binance"), "BTC", 100_000)
+        await _seed_price(redis, ticker_key("bybit"), "BTC", 101_000)
+        d = await compute_arbitrage(redis, min_gap_pct=0.0)
+        btc = {x["coin"]: x for x in d["rows"]}["BTC"]
+        assert abs(btc["gap_pct"] - 1.0) < 1e-6
+        # 비용 = 0.1+0.1+0.1(버퍼) = 0.3 → 순 0.7
+        assert abs(btc["cost_pct"] - 0.3) < 1e-6
+        assert abs(btc["net_gap_pct"] - 0.7) < 1e-6
+        await redis.aclose()
+
+    asyncio.run(run())
+
+
 def _seed_funding(redis, ex, coin, rate, interval_h=8.0, next_ts=None):
     return redis.hset(funding_key(ex), coin,
                       json.dumps({"rate": rate, "interval_h": interval_h, "next_ts": next_ts}))

@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # 아비트라지: 코인별 가격점 중앙값 대비 이 배수 밖이면 이상치(충돌/dust)로 제외
     arb_outlier_factor: float = 3.0
 
+    # 아비트라지 순스프레드: 거래소간 전송/슬리피지 버퍼(%)를 수수료에 더해 차감
+    arb_transfer_buffer_pct: float = 0.1
+
     # 거래소 마켓 메타 재로딩 주기(초). 상폐/신규상장 반영(stale 마켓 캐시 제거)
     markets_reload_sec: float = 3600.0
     # 펀딩비 수집 주기(초). 펀비는 정산주기(시간) 단위로 변하므로 시세보다 느리게

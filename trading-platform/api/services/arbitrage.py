@@ -12,6 +12,7 @@ from statistics import median
 
 import redis.asyncio as aioredis
 
+from shared.fees import taker_pct
 from shared.redis_keys import funding_key, perp_ticker_key, ticker_key, wallet_key
 from shared.settings import settings
 from shared.universe import load_universe
@@ -116,9 +117,13 @@ async def compute_arbitrage(
         # 거래대금 필터: 두 다리 중 작은 쪽이 기준 미만이면 제외(저유동 노이즈)
         if min_volume > 0 and min(long_leg["volume"], short_leg["volume"]) < min_volume:
             continue
+        # 순스프레드 = 총갭 - (롱 taker + 숏 taker) - 전송/슬리피지 버퍼
+        cost = taker_pct(lo[0]) + taker_pct(hi[0]) + settings.arb_transfer_buffer_pct
         items.append({
             "coin": coin,
             "gap_pct": round(gap, 4),
+            "net_gap_pct": round(gap - cost, 4),
+            "cost_pct": round(cost, 4),
             "long": long_leg,   # 싸게 매수
             "short": short_leg,  # 비싸게 매도/숏
         })

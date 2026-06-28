@@ -98,6 +98,7 @@
       <label class="chk"><input type="checkbox" id="arbSpot" checked>현물</label>
       <label class="chk"><input type="checkbox" id="arbPerp" checked>선물</label></span>
     <span class="ctl" data-for="arb">거래대금 ≥ <input class="rng" id="minVol" type="number" step="100000" placeholder="USDT"></span>
+    <span class="ctl" data-for="arb">순스프 ≥ <input class="rng" id="minNet" type="number" step="0.1" placeholder="%"></span>
     <span class="ctl" data-for="arb"><label class="chk" title="현물을 숏하려면 마진(차입)이 필요"><input type="checkbox" id="arbMarginShort" checked>현물숏 마진만</label></span>
 
     <span class="ctl" data-for="funding">주기 <select id="fundInt">
@@ -446,10 +447,12 @@ async function renderArb(){
   const useSpot=$("arbSpot").checked, usePerp=$("arbPerp").checked;
   const excl=new Set([...document.querySelectorAll(".exEx:checked")].map(e=>e.value));
   const minVol=numOr("minVol",0);
+  const minNet=numOr("minNet",-Infinity);
   const marginShort=$("arbMarginShort").checked;
   const d = await (await fetch(`/arbitrage?min_gap=0&min_volume=${minVol}&limit=400`)).json();
   let rows=(d.rows||[]).filter(x=>matchCoin(x.coin))
     .filter(x=>x.gap_pct>=minG && x.gap_pct<=maxG)
+    .filter(x=> (x.net_gap_pct??x.gap_pct) >= minNet)
     .filter(x=>{ const ms=[x.long.market,x.short.market];
       if(!useSpot && ms.includes("spot")) return false;
       if(!usePerp && ms.includes("perp")) return false;
@@ -462,7 +465,9 @@ async function renderArb(){
   box.innerHTML = rows.slice(0,100).map(x=>`<div class="card">
     <div class="legs"><div class="coin">${x.coin}/USDT</div>
       ${legHtml(x.long,"long")}${legHtml(x.short,"short")}</div>
-    <div class="right"><div class="gap">${x.gap_pct.toFixed(2)}%</div>${fundLine(x.long)}${fundLine(x.short)}</div>
+    <div class="right"><div class="gap">${x.gap_pct.toFixed(2)}%</div>
+      ${x.net_gap_pct!=null?`<div class="fund">순 ${x.net_gap_pct.toFixed(2)}% (수수료 ${x.cost_pct}%)</div>`:""}
+      ${fundLine(x.long)}${fundLine(x.short)}</div>
   </div>`).join("");
   $("metaInfo").textContent=`${rows.length} 전략`;
   setStatus("live","실시간");
