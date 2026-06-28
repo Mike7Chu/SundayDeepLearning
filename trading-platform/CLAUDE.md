@@ -21,7 +21,8 @@
 - ✅ **봇 페이퍼**(`bots/`): 프레임워크+실행게이트웨이(dry-run)+현선봇. `/bots` 컨트롤(enable/disable/killswitch), 대시보드 봇 탭. 실거래 미오픈
 - ✅ **주식(KIS)**(`collector/stock/kis.py`): 관심종목 현재가 수집(키 없으면 idle), `/stocks` + 대시보드 주식 탭
 - ✅ **알림 설정**(`shared/alert_settings.py`, `/alerts/settings`, 대시보드 알림설정 탭): 마스터/종류 on-off·임계치·쿨다운·**최소유지(디바운스)**·제외코인을 실시간 조절(Redis 오버라이드, notifier 매주기 반영)
-- ✅ **AI 가치투자 리서치**(`research/`, Addendum 9): 버핏·멍거·돤융핑·리루 4대 거장 렌즈(`lenses.py`)로 관심종목 분석 → 구조화 리포트(`analyst.py`, 모델 `claude-opus-4-8`). `research/main.py` 정기 분석 + 텔레그램 브리핑, `/research`·`/research/{code}`·`POST /research/{code}/run`, 대시보드 주식 탭 리서치 보기. 백엔드 2종: **api**(`ANTHROPIC_API_KEY`, 종량과금) / **cli**(`RESEARCH_USE_CLI=true` + Claude Code 설치 시 `claude -p` 헤드리스 = **구독 무과금**). 둘 다 없으면 idle. `deploy/set-anthropic.sh`로 설정. 추천 아님·분석 보조(면책)
+- ✅ **AI 가치투자 리서치**(`research/`, Addendum 9): 버핏·멍거·돤융핑·리루 4대 거장 렌즈(`lenses.py`)로 관심종목 분석 → 구조화 리포트(`analyst.py`, 모델 `claude-opus-4-8`). `research/main.py` 정기 분석 + 텔레그램 브리핑, `/research`·`/research/{code}`·`POST /research/{code}/run`, 대시보드 주식 탭 리서치 보기. 백엔드 2종: **api**(`ANTHROPIC_API_KEY`, 종량과금) / **cli**(`RESEARCH_USE_CLI=true` + Claude Code 설치 시 `claude -p` 헤드리스 = **구독 무과금**, research를 호스트에서 `deploy/run-research-host.sh`로 구동). 둘 다 없으면 idle. `deploy/set-anthropic.sh`로 설정. 추천 아님·분석 보조(면책)
+- ✅ **현물 정합성·마진·펀비 보강**: 마켓 메타 주기적 reload(`markets_reload_sec`, 상폐 stale 제거) / 현물 `margin` 수집→아비 **현물숏은 마진 가능시만 표시**(대시보드 토글) / 펀비 정산주기 파싱 강화(분·시 키)+**전 거래소 시간표시** / 펀비 단건 폴백(`fetchFundingRate`)으로 **MEXC 등 bulk 미지원 거래소 펀비 수집** / 김프 탭 **거래대금(억원) 필터·컬럼**(알림은 기존 `min_volume_eokwon`)
 - ⏭️ **다음**: 봇 실거래 게이트(안전장치) / 주식 전략(시그널·가치·배당)·브리핑 / TimescaleDB 영속화
 - ⏸️ **봇 실행(현선/loan/매도), 주식**: 페이퍼 모드부터 단계적 (Phase 3~6, 미착수)
 

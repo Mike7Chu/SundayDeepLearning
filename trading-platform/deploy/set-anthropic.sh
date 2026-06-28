@@ -38,9 +38,19 @@ case "$MODE" in
     set_kv RESEARCH_CLI_BIN "$BIN"
     set_kv ANTHROPIC_API_KEY ""   # 키 모드 비우기(키 있으면 그게 우선이라)
     echo "[.env] 구독 무과금 모드(cli) 설정 — 백엔드='$BIN'"
-    echo "  ⚠️ 컨테이너 안에서 claude를 쓰려면 호스트의 인증/실행파일이 컨테이너에"
-    echo "     보여야 합니다. 가장 단순한 방법은 research를 호스트에서 직접 실행:"
-    echo "       python -m research.main"
+
+    echo "로그인/연결 자가진단('OK' 한 단어 요청)..."
+    if OUT=$("$BIN" -p "Reply with only: OK" --output-format text 2>/tmp/claude_err); then
+      echo "  ✓ 연결 성공 — 응답: $(echo "$OUT" | head -1)"
+    else
+      echo "  ✗ 호출 실패. 먼저 로그인하세요:  $BIN   (구독 계정으로 로그인 후 /exit)"
+      echo "    에러: $(head -1 /tmp/claude_err 2>/dev/null)"
+    fi
+    echo "  ⚠️ 컨테이너 안에서는 호스트의 claude 로그인이 안 보입니다."
+    echo "     → cli 모드는 research를 '호스트에서 직접' 실행하세요(컨테이너 대신):"
+    echo "       cd $(pwd) && nohup python -m research.main >/tmp/research.log 2>&1 &"
+    echo "     (docker compose의 research 서비스는 cli 모드에선 띄우지 마세요)"
+    SKIP_RECREATE=1
     ;;
   api)
     KEY="${2:-}"
@@ -56,6 +66,10 @@ case "$MODE" in
     ;;
 esac
 
+if [ "${SKIP_RECREATE:-0}" = "1" ]; then
+  echo "(cli 모드: docker research 컨테이너는 건너뜀 — 위 안내대로 호스트에서 실행)"
+  exit 0
+fi
 SUDO=""; docker info >/dev/null 2>&1 || SUDO="sudo"
 if docker compose version >/dev/null 2>&1; then C="docker compose"; else C="docker-compose"; fi
 $SUDO $C up -d --force-recreate research 2>/dev/null || true

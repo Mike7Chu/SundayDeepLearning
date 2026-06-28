@@ -9,7 +9,15 @@ Phase 2 + 더따리 패리티 + 알림설정 + 봇 페이퍼 + 주식(KIS) + **A
 - `research/lenses.py`: 버핏·멍거·돤융핑·리루 4대 거장 렌즈(렌즈별 focus+체크리스트) → `SYSTEM_PROMPT`(출력형식+면책).
 - `research/data.py`: Redis `stock:quote`(현재가+per/pbr/eps/bps)에서 `StockData` 수집, `format_for_prompt`(미상 처리).
 - `research/analyst.py`: 백엔드 2종 — **api**(`AsyncAnthropic` 지연 import, 스트리밍+적응형 사고, 종량과금) / **cli**(`RESEARCH_USE_CLI=true`+`claude` 설치 시 `claude -p` 헤드리스 = **구독 무과금**). 모델 `claude-opus-4-8`. 둘 다 없으면 `mode=None`·비활성. `deploy/set-anthropic.sh`로 모드 설정.
-- 결정: **Claude 구독 ≠ API 무료**(별도 결제). 추가과금 없이 구독 활용하려면 Claude Code CLI(`cli` 모드) 경유. console API 키는 종량과금. 구독으로 무과금 API 키 발급은 불가.
+- 결정: **Claude 구독 ≠ API 무료**(별도 결제). 추가과금 없이 구독 활용하려면 Claude Code CLI(`cli` 모드) 경유 — research를 호스트에서 `deploy/run-research-host.sh`로 구동(컨테이너는 호스트 로그인 못 봄). console API 키는 종량과금. 구독으로 무과금 API 키 발급은 불가.
+
+### 정합성·마진·펀비 보강 (완료)
+- **상폐 stale 근본수정**: 수집기가 장기구동이라 ccxt 마켓 캐시가 굳어 상폐 코인(bybit 등)이 잔존 → `adapter`/`perp`에 `load_markets(reload=True)` 주기 새로고침(`markets_reload_sec`=1h).
+- **현물 마진**: spot `market['margin']` → `TickerSnapshot.margin` 수집. 아비 현물 다리에 `margin` 첨부. 대시보드 "현물숏 마진만"(기본 ON): 숏 다리가 현물인데 마진 불가/미상이면 제외(현물 숏=차입 필요). 다리에 마진O/X/? 뱃지.
+- **펀비 정산주기**: `_interval_hours` 강화(통합 interval + raw info의 분/시 키). 프론트는 전 거래소 시간표시(미상=8H? 가정). 펀비 수집은 `funding_interval_sec`(60s) 주기로 throttle.
+- **MEXC 펀비**: bulk(`fetchFundingRates`) 미지원/빈값이면 단건(`fetchFundingRate`) 폴백(동시성8·상한 `funding_single_cap`=250).
+- **거래대금 필터**: 김프 탭에 거래대금(억원) 필터+컬럼 추가(`base_volume_krw`). 알림은 기존 `min_volume_eokwon` 유지.
+- 테스트 43 passed(펀비주기 파싱·마진플래그·아비 마진다리 추가).
 - `research/main.py`: 관심종목 `research_interval_sec`(기본 1일) 정기 분석 → `research:reports` 저장 + 텔레그램 브리핑. 키 없으면 idle.
 - `api/routers/research.py`: `/research`(목록)·`/research/{code}`(전문)·`POST /research/{code}/run`(즉시). 대시보드 주식 탭 리서치 보기/분석 버튼.
 - `collector/stock/kis.parse_price`: inquire-price에서 밸류에이션(per/pbr/eps/bps/시총/52주) 추가 추출(테스트 가능 순수 함수).

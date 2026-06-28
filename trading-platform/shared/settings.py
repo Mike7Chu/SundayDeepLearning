@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     # 아비트라지: 코인별 가격점 중앙값 대비 이 배수 밖이면 이상치(충돌/dust)로 제외
     arb_outlier_factor: float = 3.0
 
+    # 거래소 마켓 메타 재로딩 주기(초). 상폐/신규상장 반영(stale 마켓 캐시 제거)
+    markets_reload_sec: float = 3600.0
+    # 펀딩비 수집 주기(초). 펀비는 정산주기(시간) 단위로 변하므로 시세보다 느리게
+    funding_interval_sec: float = 60.0
+    # 펀비 bulk 미지원 거래소(예: MEXC) 단건 폴백 시 심볼 수 상한(부하 방지)
+    funding_single_cap: int = 250
+
     # 텔레그램 (Phase 2)
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""

@@ -36,6 +36,7 @@ class TickerSnapshot(BaseModel):
     quote: str         # KRW | USDT
     ts: float          # epoch seconds (수집 시각)
     quote_volume: float | None = None   # 24h 거래대금 (KRW 또는 USDT)
+    margin: bool | None = None          # 현물 마진(차입) 거래 가능 여부 — 현물 숏 가능성 판단
 
 
 class PremiumCell(BaseModel):

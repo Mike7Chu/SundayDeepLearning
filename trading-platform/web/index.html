@@ -54,6 +54,8 @@
   .wallet{display:inline-flex; gap:3px; margin-left:6px;}
   .lo{color:var(--green);} .hi{color:var(--up);}
   .cell-int{font-size:10px; color:var(--badge); margin-left:3px;} .cd{font-size:10px; color:var(--muted);}
+  .mg{font-size:10px; margin-left:4px; padding:1px 4px; border-radius:4px; border:1px solid var(--line);}
+  .mg.ok{color:var(--green); border-color:var(--green);} .mg.no{color:var(--up);} .mg.unk{color:var(--gray);}
   .btn{background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;}
   .btn:hover{border-color:var(--green);}
   .rbox{margin:14px; border:1px solid var(--line); border-radius:8px; padding:14px; background:var(--bg);}
@@ -87,6 +89,7 @@
     <span class="ctl" data-for="kimp">범위
       <input class="rng" id="kimpMin" type="number" step="0.1" placeholder="최소%">~
       <input class="rng" id="kimpMax" type="number" step="0.1" placeholder="최대%"></span>
+    <span class="ctl" data-for="kimp">거래대금 ≥ <input class="rng" id="kimpVol" type="number" step="1" placeholder="억원"></span>
 
     <span class="ctl" data-for="arb">갭
       <input class="rng" id="minGap" type="number" step="0.1" value="0.5" placeholder="최소%">~
@@ -95,6 +98,7 @@
       <label class="chk"><input type="checkbox" id="arbSpot" checked>현물</label>
       <label class="chk"><input type="checkbox" id="arbPerp" checked>선물</label></span>
     <span class="ctl" data-for="arb">거래대금 ≥ <input class="rng" id="minVol" type="number" step="100000" placeholder="USDT"></span>
+    <span class="ctl" data-for="arb"><label class="chk" title="현물을 숏하려면 마진(차입)이 필요"><input type="checkbox" id="arbMarginShort" checked>현물숏 마진만</label></span>
 
     <span class="ctl" data-for="funding">주기 <select id="fundInt">
       <option value="">모두</option><option value="8">8H</option><option value="4">4H</option>
@@ -122,8 +126,8 @@
     <thead><tr>
       <th data-sort="coin">코인</th><th data-sort="prem">김프 %</th>
       <th data-sort="perp">선물김프 %</th>
-      <th>국내가(KRW)</th><th>해외가(KRW)</th></tr></thead>
-    <tbody id="kimpRows"><tr><td colspan="5" class="empty">불러오는 중…</td></tr></tbody>
+      <th>국내가(KRW)</th><th>해외가(KRW)</th><th>거래대금(억)</th></tr></thead>
+    <tbody id="kimpRows"><tr><td colspan="6" class="empty">불러오는 중…</td></tr></tbody>
   </table>
 </div>
 
@@ -336,8 +340,10 @@ async function renderKimp(){
   const pv=(c)=> basis==="tether"?c.premium_pct:c.premium_coin_pct;
   const ppv=(c)=> basis==="tether"?c.premium_perp_pct:c.premium_perp_coin_pct;  // 선물김프(null 가능)
   const mn=numOr("kimpMin",-Infinity), mx=numOr("kimpMax",Infinity);
+  const minVolKrw=numOr("kimpVol",0)*1e8;   // 억원 → 원
   const d = await (await fetch(`/premium?base=${$("base").value}&ref=${$("ref").value}`)).json();
-  let rows=(d.rows||[]).filter(c=>matchCoin(c.coin)).filter(c=>pv(c)>=mn && pv(c)<=mx);
+  let rows=(d.rows||[]).filter(c=>matchCoin(c.coin)).filter(c=>pv(c)>=mn && pv(c)<=mx)
+    .filter(c=> minVolKrw<=0 || (c.base_volume_krw!=null && c.base_volume_krw>=minVolKrw));
   const skey=(c)=> kimpSort.key==="perp"?(ppv(c)??-9999):(kimpSort.key==="coin"?null:pv(c));
   rows.sort((a,b)=> kimpSort.key==="coin"
     ? kimpSort.dir*a.coin.localeCompare(b.coin) : kimpSort.dir*(skey(a)-skey(b)));
@@ -346,12 +352,14 @@ async function renderKimp(){
     th.innerHTML = LBL[th.dataset.sort] + (kimpSort.key===th.dataset.sort?` <span class="arrow">${kimpSort.dir<0?"↓":"↑"}</span>`:"");
   });
   const tb=$("kimpRows");
-  if(!rows.length){ tb.innerHTML='<tr><td colspan="5" class="empty">조건에 맞는 코인 없음</td></tr>'; setStatus("stale","-"); return; }
+  if(!rows.length){ tb.innerHTML='<tr><td colspan="6" class="empty">조건에 맞는 코인 없음</td></tr>'; setStatus("stale","-"); return; }
   tb.innerHTML = rows.map(c=>{const v=pv(c),cls=v>=0?"pos":"neg",s=v>=0?"+":"";
     const p=ppv(c);
     const pcell=(p==null)?'<td class="num">-</td>':`<td class="prem ${p>=0?"pos":"neg"}">${p>=0?"+":""}${p.toFixed(2)}%</td>`;
+    const vol=(c.base_volume_krw!=null)?fmt(c.base_volume_krw/1e8):"-";
     return `<tr><td class="coin">${c.coin}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>${pcell}
-      <td class="num">${fmt(c.base_price_krw)}</td><td class="num">${fmt(c.ref_price_krw)}</td></tr>`;}).join("");
+      <td class="num">${fmt(c.base_price_krw)}</td><td class="num">${fmt(c.ref_price_krw)}</td>
+      <td class="num">${vol}</td></tr>`;}).join("");
   $("metaInfo").textContent=`${rows.length}코인 · ${basis==="tether"?"테더김프":"코인(환율)"} · 환율 ${fmt(rows[0].forex_rate)} · 테더 ${fmt(rows[0].tether_rate)}`;
   setStatus("live","실시간");
 }
@@ -363,7 +371,14 @@ function legHtml(leg, side){
   if(leg.wallet){ const dot=(v)=>`<span class="dot" style="background:${v===true?'var(--green)':v===false?'var(--up)':'var(--gray)'}"></span>`;
     w=`<span class="wallet" title="입금/출금">${dot(leg.wallet.deposit)}${dot(leg.wallet.withdraw)}</span>`; }
   const v = leg.volume ? ` <span class="fund">$${fmtVol(leg.volume)}</span>` : "";
-  return `<div class="leg">${mk}${sd}<span class="sym">${leg.exchange}</span><span class="legprice">${fmt4(leg.price)}</span>${v}${w}</div>`;
+  // 현물 숏은 마진(차입) 필요 → 마진 가능여부 표시
+  let mg="";
+  if(leg.market==="spot" && side==="short"){
+    mg = leg.margin===true?'<span class="mg ok">마진O</span>'
+       : leg.margin===false?'<span class="mg no">마진X</span>'
+       : '<span class="mg unk">마진?</span>';
+  }
+  return `<div class="leg">${mk}${sd}<span class="sym">${leg.exchange}</span><span class="legprice">${fmt4(leg.price)}</span>${v}${mg}${w}</div>`;
 }
 function fmtVol(n){ n=Number(n); if(n>=1e9)return (n/1e9).toFixed(1)+"B"; if(n>=1e6)return (n/1e6).toFixed(1)+"M"; if(n>=1e3)return (n/1e3).toFixed(0)+"k"; return n.toFixed(0); }
 function fundLine(leg){ if(!leg.funding) return "";
@@ -375,6 +390,7 @@ async function renderArb(){
   const useSpot=$("arbSpot").checked, usePerp=$("arbPerp").checked;
   const excl=new Set([...document.querySelectorAll(".exEx:checked")].map(e=>e.value));
   const minVol=numOr("minVol",0);
+  const marginShort=$("arbMarginShort").checked;
   const d = await (await fetch(`/arbitrage?min_gap=0&min_volume=${minVol}&limit=400`)).json();
   let rows=(d.rows||[]).filter(x=>matchCoin(x.coin))
     .filter(x=>x.gap_pct>=minG && x.gap_pct<=maxG)
@@ -382,6 +398,8 @@ async function renderArb(){
       if(!useSpot && ms.includes("spot")) return false;
       if(!usePerp && ms.includes("perp")) return false;
       if(excl.has(x.long.exchange)||excl.has(x.short.exchange)) return false;
+      // 현물 숏인데 마진 불가(또는 미상)면 실행 불가 → 제외
+      if(marginShort && x.short.market==="spot" && x.short.margin!==true) return false;
       return true; });
   const box=$("arbCards");
   if(!rows.length){ box.innerHTML='<div class="empty">조건에 맞는 기회 없음</div>'; setStatus("stale","-"); return; }
@@ -428,8 +446,9 @@ async function renderFunding(){
     const cells=exs.map(ex=>{ const c=r.by_ex[ex];
       if(!c) return `<td class="num">-</td>`;
       const val=valOf(c), cls=val>=0?"pos":"neg", s=val>=0?"+":"";
-      const iv = c.interval_h==null ? `<span class="cell-int">—</span>`
-                 : (c.interval_h!==8 ? `<span class="cell-int">${c.interval_h}H</span>` : "");
+      // 모든 거래소 정산주기 표시(미상이면 8H 가정 표기 '8H?')
+      const ivh = c.interval_h==null ? 8 : c.interval_h;
+      const iv = `<span class="cell-int">${ivh}H${c.interval_h==null?"?":""}</span>`;
       const cd=cdText(c.next_ts);
       return `<td><span class="prem ${cls}">${s}${val.toFixed(apy?2:4)}%</span>${iv}${cd?`<div class="cd">${cd}</div>`:""}</td>`;
     }).join("");

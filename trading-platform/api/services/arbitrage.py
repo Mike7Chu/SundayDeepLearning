@@ -84,6 +84,10 @@ async def compute_arbitrage(
             f = _funding_leg(funding[ex].get(coin))
             if f:
                 d["funding"] = f
+        else:
+            # 현물 마진 가능 여부(현물 숏=차입 매도 가능 판단용). unknown=None
+            sd = spot[ex].get(coin) or {}
+            d["margin"] = sd.get("margin")
         w = wallet[ex].get(coin)
         if isinstance(w, dict):
             d["wallet"] = {"deposit": w.get("deposit"), "withdraw": w.get("withdraw")}

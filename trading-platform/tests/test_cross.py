@@ -18,10 +18,26 @@ from shared.schemas import TickerSnapshot
 from shared.symbols import is_leveraged_token, parse_symbol
 
 
-def _seed_price(redis, key, coin, price, vol=None):
+def _seed_price(redis, key, coin, price, vol=None, margin=None):
     snap = TickerSnapshot(coin=coin, price=price, quote="USDT", ts=time.time(),
-                          quote_volume=vol)
+                          quote_volume=vol, margin=margin)
     return redis.hset(key, coin, snap.model_dump_json())
+
+
+def test_arbitrage_spot_leg_margin():
+    """현물 다리에 마진 가능여부(margin)가 첨부된다."""
+    async def run():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        await _seed_price(redis, ticker_key("binance"), "BTC", 100_000, margin=True)
+        await _seed_price(redis, ticker_key("gate"), "BTC", 101_000, margin=False)
+        d = await compute_arbitrage(redis, min_gap_pct=0.0)
+        btc = {x["coin"]: x for x in d["rows"]}["BTC"]
+        # 숏(비싼 gate)=현물·마진X, 롱(싼 binance)=현물·마진O
+        assert btc["short"]["market"] == "spot" and btc["short"]["margin"] is False
+        assert btc["long"]["margin"] is True
+        await redis.aclose()
+
+    asyncio.run(run())
 
 
 def test_arbitrage_volume_filter():

@@ -74,3 +74,38 @@ sudo docker compose up -d --build
 - RPi4에서 첫 `--build`는 ccxt 등 설치로 수 분 소요.
 - 기본은 시세 수집(공개 데이터, API 키 불필요)만 동작. 텔레그램 알림/봇은 이후 단계에서 `.env`에 키 추가.
 - 자동 재시작: compose에 `restart: unless-stopped` 적용됨(재부팅 후 자동 기동).
+
+## AI 가치투자 리서치 연결 (research)
+
+버핏·멍거·돤융핑·리루 4대 거장 렌즈로 관심종목을 분석한다. 백엔드 2종 중 택1:
+
+### (A) 구독 무과금 — Claude Code 경유 (추천: 우선 체험)
+> Claude Pro/Max **구독**과 Anthropic **API**는 별도 결제다. 구독엔 API 사용량이
+> 포함되지 않으므로, 추가과금 없이 쓰려면 Claude Code(`claude -p`)를 경유한다.
+1. Pi에 Claude Code 설치 + **구독 계정으로 로그인**:
+   ```
+   npm i -g @anthropic-ai/claude-code   # (또는 공식 설치 방법)
+   claude                                # 로그인 후 /exit
+   ```
+2. `.env` 설정 + 로그인 자가진단:
+   ```
+   bash deploy/set-anthropic.sh cli
+   ```
+3. research를 **호스트에서** 구동(컨테이너는 호스트 로그인을 못 봄):
+   ```
+   nohup bash deploy/run-research-host.sh >/tmp/research.log 2>&1 &
+   tail -f /tmp/research.log
+   ```
+   ⚠️ 자동 백엔드 용도는 인터랙티브 사용 의도와 다르고 **구독 사용량 한도·약관**에 유의.
+
+### (B) 종량과금 — Anthropic API 키
+1. console.anthropic.com에서 키 발급(구독과 별도 결제).
+2. ```
+   bash deploy/set-anthropic.sh api <ANTHROPIC_API_KEY>
+   ```
+   → docker compose `research` 컨테이너가 자동 기동.
+
+### 확인
+- 대시보드 **주식 탭** → 종목 옆 `🧠 분석` 클릭 → 리포트 생성, `📄 보기`로 재열람.
+- API: `POST /research/005930/run`, `GET /research/005930`.
+- 키/로그인 둘 다 없으면 안전하게 idle(안내 리포트만).

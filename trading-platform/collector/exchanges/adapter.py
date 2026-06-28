@@ -8,6 +8,7 @@ import logging
 import time
 
 from shared.schemas import ExchangeConfig, TickerSnapshot
+from shared.settings import settings
 from shared.symbols import is_leveraged_token
 
 logger = logging.getLogger(__name__)
@@ -21,15 +22,28 @@ class ExchangeAdapter:
         self.exclude = exclude or set()
         klass = getattr(ccxt, cfg.ccxt_id)
         self.client = klass({"enableRateLimit": True})
+        self._markets_at = 0.0
 
     def _accept(self, coin: str) -> bool:
         return coin.upper() not in self.exclude and not is_leveraged_token(coin)
+
+    async def _reload_markets_if_due(self) -> None:
+        """마켓 메타를 주기적으로 새로고침 — 상폐 코인이 캐시에 남아 stale 가격을
+        내보내는 것을 막는다(수집기는 장기 구동이라 최초 1회 캐시가 굳어짐)."""
+        now = time.time()
+        if now - self._markets_at >= settings.markets_reload_sec:
+            try:
+                await self.client.load_markets(reload=bool(self._markets_at))
+                self._markets_at = now
+            except Exception as exc:
+                logger.warning("[%s] load_markets 실패: %s", self.cfg.name, exc)
 
     async def fetch(self) -> dict[str, TickerSnapshot]:
         """coin -> TickerSnapshot. cfg.quote 의 **거래중(active)·현물** 마켓만."""
         out: dict[str, TickerSnapshot] = {}
         now = time.time()
         try:
+            await self._reload_markets_if_due()
             tickers = await self.client.fetch_tickers()
             markets = self.client.markets or {}
             for symbol, t in tickers.items():
@@ -46,7 +60,8 @@ class ExchangeAdapter:
                 if price is not None:
                     out[coin] = TickerSnapshot(
                         coin=coin, price=price, quote=self.cfg.quote, ts=now,
-                        quote_volume=_quote_volume(t, price))
+                        quote_volume=_quote_volume(t, price),
+                        margin=_margin_flag(m))
         except Exception as exc:
             logger.warning("[%s] fetch failed: %s", self.cfg.name, exc)
         return out
@@ -69,6 +84,12 @@ def _last_price(ticker: dict | None) -> float | None:
         return None
     price = ticker.get("last") or ticker.get("close")
     return float(price) if price else None
+
+
+def _margin_flag(market: dict) -> bool | None:
+    """현물 마진(차입) 거래 가능 여부. ccxt market['margin'] (없으면 unknown=None)."""
+    v = market.get("margin")
+    return bool(v) if v is not None else None
 
 
 def _quote_volume(ticker: dict, price: float) -> float | None:
