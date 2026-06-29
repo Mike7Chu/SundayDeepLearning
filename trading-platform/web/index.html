@@ -58,6 +58,22 @@
   .mg.ok{color:var(--green); border-color:var(--green);} .mg.no{color:var(--up);} .mg.unk{color:var(--gray);}
   .btn{background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;}
   .btn:hover{border-color:var(--green);}
+  .clk{cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;}
+  .clk:hover{color:var(--green);}
+  .modal{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50; display:flex;
+    align-items:flex-start; justify-content:center; overflow:auto; padding:24px 12px;}
+  .modal-box{background:var(--panel,#0f1115); border:1px solid var(--line); border-radius:12px;
+    width:100%; max-width:860px; padding:16px;}
+  .modal-head{display:flex; justify-content:space-between; align-items:center; font-size:18px;
+    font-weight:700; margin-bottom:12px;}
+  .cgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px;}
+  .ccard{border:1px solid var(--line); border-radius:8px; padding:10px; background:var(--bg);}
+  .ccard .ex{font-weight:600;} .ccard .mk{font-size:11px; color:var(--muted);}
+  .ccard .pr{font-size:17px; font-weight:700; margin:4px 0;}
+  .ccard .sub{font-size:11px; color:var(--muted);}
+  .modal-sec{font-size:13px; color:var(--muted); margin:12px 0 6px; border-top:1px solid var(--line); padding-top:8px;}
+  .wgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; margin-top:8px;}
+  .wcard{border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-size:13px;}
   .rbox{margin:14px; border:1px solid var(--line); border-radius:8px; padding:14px; background:var(--bg);}
   .rhead{font-weight:600; margin-bottom:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
   .rwhen{color:var(--muted); font-size:12px; font-weight:400;}
@@ -185,6 +201,15 @@
   </div>
 </div>
 
+<!-- 코인 상세 모달 -->
+<div id="coinModal" class="modal" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head"><span id="cmTitle">코인</span>
+      <button class="btn" onclick="closeCoin()">✕ 닫기</button></div>
+    <div id="cmBody"><div class="empty">불러오는 중…</div></div>
+  </div>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n).toLocaleString("ko-KR",{maximumFractionDigits:2});
@@ -216,6 +241,10 @@ async function init(){
   document.querySelectorAll("input,select").forEach(el=> el.addEventListener("input", tick));
   $("fundSort").addEventListener("change", ()=>{ fundColSort={ex:null,dir:-1}; });  // 드롭다운 쓰면 컬럼정렬 해제
   $("aSave").onclick = saveAlerts;
+  // 검색창 Enter → 해당 코인 상세, 모달 바깥 클릭 시 닫기
+  $("search").addEventListener("keydown", e=>{ if(e.key==="Enter"){ const t=term(); if(t) openCoin(t); }});
+  $("coinModal").addEventListener("click", e=>{ if(e.target.id==="coinModal") closeCoin(); });
+  document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeCoin(); });
   $("killBtn").onclick = async ()=>{ const d=await (await fetch("/bots")).json();
     await fetch(`/bots/killswitch/${d.killswitch?0:1}`,{method:"POST"}); tick(); };
   switchTab("kimp");
@@ -369,6 +398,34 @@ async function runResearch(code,name){
   catch(e){ box.innerHTML=`<div class="rhead">분석 실패: ${e}</div>`; }
 }
 
+// ===== 코인 상세 모달 =====
+function dotc(v){ return v===true?'var(--green)':v===false?'var(--up)':'var(--gray)'; }
+async function openCoin(coin){
+  const m=$("coinModal"); m.style.display="flex";
+  $("cmTitle").textContent=coin; $("cmBody").innerHTML='<div class="empty">불러오는 중…</div>';
+  try{
+    const d=await (await fetch(`/coin/${encodeURIComponent(coin)}`)).json();
+    $("cmTitle").textContent=`${d.coin}  ·  환율 ${fmt(d.forex)}`;
+    const cards=(d.legs||[]).map(l=>{
+      const g=l.gap_pct;
+      const gcell=g==null?"":`<div class="prem ${g>=0?'pos':'neg'}">갭 ${g>=0?'+':''}${g.toFixed(2)}%</div>`;
+      const vol=l.volume?`<div class="sub">거래대금 $${fmtVol(l.volume)}</div>`:"";
+      const mg=(l.market==="spot"&&l.margin===true)?' <span class="mg ok">마진</span>':'';
+      let f="";
+      if(l.funding){ const iv=l.funding.interval_h?`${l.funding.interval_h}H`:""; const cd=cdText(l.funding.next_ts);
+        f=`<div class="sub">펀비 <span class="${l.funding.rate_pct>=0?'pos':'neg'}">${l.funding.rate_pct.toFixed(4)}%</span> ${iv}${cd?' · '+cd:''}</div>`; }
+      return `<div class="ccard"><div class="ex">${l.exchange} <span class="mk">${l.market==='perp'?'USDT 선물':l.quote+' 현물'}${mg}</span></div>
+        <div class="pr">${fmt4(l.price)}</div><div class="sub">≈ $${fmt4(l.price_usd)}</div>${vol}${gcell}${f}</div>`;
+    }).join("");
+    const wallets=(d.wallets||[]).map(w=>`<div class="wcard">${w.exchange}
+      <span class="dot" style="background:${dotc(w.deposit)}"></span>입금
+      <span class="dot" style="background:${dotc(w.withdraw)}"></span>출금</div>`).join("");
+    $("cmBody").innerHTML=`<div class="modal-sec">거래소 가격 및 갭</div><div class="cgrid">${cards||'<div class="empty">데이터 없음</div>'}</div>
+      <div class="modal-sec">거래소 지갑 정보 (🟢가능 🔴불가)</div><div class="wgrid">${wallets||'<div class="empty">데이터 없음</div>'}</div>`;
+  }catch(e){ $("cmBody").innerHTML=`<div class="empty">불러오기 실패: ${e.message}</div>`; }
+}
+function closeCoin(){ $("coinModal").style.display="none"; }
+
 async function renderBots(){
   const d = await (await fetch("/bots")).json();
   $("killBtn").textContent = d.killswitch ? "🟥 킬스위치 ON" : "⛔ 킬스위치";
@@ -417,7 +474,7 @@ async function renderKimp(){
   tb.innerHTML = rows.map(c=>{const v=pv(c),cls=v>=0?"pos":"neg",s=v>=0?"+":"";
     const vol=(c.base_volume_krw!=null)?fmt(c.base_volume_krw/1e8):"-";
     const perpPrice=(c.ref_perp_price_krw!=null)?fmt(c.ref_perp_price_krw):"-";
-    return `<tr><td class="coin">${c.coin}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>
+    return `<tr><td class="coin clk" onclick="openCoin('${c.coin}')">${c.coin}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>
       ${pct(ppv(c))}${pct(bv(c))}
       <td class="num">${fmt(c.base_price_krw)}</td><td class="num">${fmt(c.ref_price_krw)}</td>
       <td class="num">${perpPrice}</td><td class="num">${vol}</td></tr>`;}).join("");
@@ -467,7 +524,7 @@ async function renderArb(){
   const box=$("arbCards");
   if(!rows.length){ box.innerHTML='<div class="empty">조건에 맞는 기회 없음</div>'; setStatus("stale","-"); return; }
   box.innerHTML = rows.slice(0,100).map(x=>`<div class="card">
-    <div class="legs"><div class="coin">${x.coin}/USDT</div>
+    <div class="legs"><div class="coin clk" onclick="openCoin('${x.coin}')">${x.coin}/USDT</div>
       ${legHtml(x.long,"long")}${legHtml(x.short,"short")}</div>
     <div class="right"><div class="gap">${x.gap_pct.toFixed(2)}%</div>
       ${x.net_gap_pct!=null?`<div class="fund">순 ${x.net_gap_pct.toFixed(2)}% (수수료 ${x.cost_pct}%)</div>`:""}
@@ -517,7 +574,7 @@ async function renderFunding(){
       const cd=cdText(c.next_ts);
       return `<td><span class="prem ${cls}">${s}${val.toFixed(apy?2:4)}%</span>${iv}${cd?`<div class="cd">${cd}</div>`:""}</td>`;
     }).join("");
-    return `<tr><td class="coin">${r.coin}</td>${cells}</tr>`;
+    return `<tr><td class="coin clk" onclick="openCoin('${r.coin}')">${r.coin}</td>${cells}</tr>`;
   }).join("");
   $("metaInfo").textContent=`${coins.length}코인 · ${apy?"APY":"펀비"}${fInt?` · ${fInt}H`:""}`;
   setStatus("live","실시간");

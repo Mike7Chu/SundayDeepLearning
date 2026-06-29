@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from api.redis_client import get_redis
 from api.services.arbitrage import compute_arbitrage
+from api.services.coin_detail import compute_coin_detail
 from api.services.cross import (
     all_coins,
     compute_cross,
@@ -31,6 +32,12 @@ async def list_exchanges() -> dict:
 async def coins() -> dict:
     """해외 현물에 존재하는 전 코인(검색 자동완성용)."""
     return {"coins": await all_coins(get_redis())}
+
+
+@router.get("/coin/{coin}")
+async def coin_detail(coin: str) -> dict:
+    """코인 상세: 전 거래소 현물/선물 가격·갭·펀비·입출금."""
+    return await compute_coin_detail(get_redis(), coin)
 
 
 @router.get("/tickers/{exchange}")
