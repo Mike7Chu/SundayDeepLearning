@@ -421,8 +421,24 @@ async function openCoin(coin){
       <span class="dot" style="background:${dotc(w.deposit)}"></span>입금
       <span class="dot" style="background:${dotc(w.withdraw)}"></span>출금</div>`).join("");
     $("cmBody").innerHTML=`<div class="modal-sec">거래소 가격 및 갭</div><div class="cgrid">${cards||'<div class="empty">데이터 없음</div>'}</div>
-      <div class="modal-sec">거래소 지갑 정보 (🟢가능 🔴불가)</div><div class="wgrid">${wallets||'<div class="empty">데이터 없음</div>'}</div>`;
+      <div class="modal-sec">거래소 지갑 정보 (🟢가능 🔴불가)</div><div class="wgrid">${wallets||'<div class="empty">데이터 없음</div>'}</div>
+      <div class="modal-sec">펀딩비 히스토리</div><div id="cmHist"><div class="empty">불러오는 중…</div></div>`;
+    loadHist(d.coin);   // 온디맨드(느릴 수 있어 비동기)
   }catch(e){ $("cmBody").innerHTML=`<div class="empty">불러오기 실패: ${e.message}</div>`; }
+}
+async function loadHist(coin){
+  try{
+    const d=await (await fetch(`/coin/${encodeURIComponent(coin)}/funding_history`)).json();
+    const exs=d.exchanges||[], rows=d.rows||[];
+    if(!exs.length||!rows.length){ $("cmHist").innerHTML='<div class="empty">펀비 히스토리 없음(거래소 미지원)</div>'; return; }
+    const head=`<tr><th>시간</th>${exs.map(e=>`<th>${e}</th>`).join("")}</tr>`;
+    const body=rows.map(r=>{
+      const t=new Date(r.ts).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+      const cells=exs.map(e=>{const v=r.by_ex[e];
+        return v==null?'<td class="num">-</td>':`<td class="prem ${v>=0?'pos':'neg'}">${v.toFixed(4)}</td>`;}).join("");
+      return `<tr><td>${t}</td>${cells}</tr>`;}).join("");
+    if($("cmHist")) $("cmHist").innerHTML=`<div class="scroll" style="max-height:340px"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+  }catch(e){ if($("cmHist")) $("cmHist").innerHTML=`<div class="empty">히스토리 실패: ${e.message}</div>`; }
 }
 function closeCoin(){ $("coinModal").style.display="none"; }
 

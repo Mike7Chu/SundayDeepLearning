@@ -9,6 +9,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from api.redis_client import get_redis
 from api.services.arbitrage import compute_arbitrage
 from api.services.coin_detail import compute_coin_detail
+from api.services.funding_history import funding_history
 from api.services.cross import (
     all_coins,
     compute_cross,
@@ -38,6 +39,12 @@ async def coins() -> dict:
 async def coin_detail(coin: str) -> dict:
     """코인 상세: 전 거래소 현물/선물 가격·갭·펀비·입출금."""
     return await compute_coin_detail(get_redis(), coin)
+
+
+@router.get("/coin/{coin}/funding_history")
+async def coin_funding_history(coin: str) -> dict:
+    """코인 상세: 거래소별 과거 펀딩비(시간×거래소). 온디맨드 조회(5분 캐시)."""
+    return await funding_history(get_redis(), coin)
 
 
 @router.get("/tickers/{exchange}")

@@ -20,6 +20,8 @@ _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
+    from api.services.funding_history import close_clients
+    await close_clients()
     await close_redis()
 
 

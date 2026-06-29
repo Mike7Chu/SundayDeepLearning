@@ -15,7 +15,7 @@
 - ✅ **아비트라지 전략 리스트**(더따리식): `/arbitrage` 코인별 현물/선물 최저·최고 다리 + 갭% + **순스프레드(수수료·전송버퍼 차감, `config/fees.yaml`+`shared/fees.py`)** + 펀비 + 입출금 상태. 대시보드 전략 카드(순스프 필터)
 - ✅ **입출금 상태 수집**(`collector/exchanges/wallet.py`): `fetch_currencies`로 입금/출금 가능여부(5분 주기)
 - ✅ **대시보드 6탭**(`web/index.html`, `GET /`): 김프 / 아비트라지(전략카드) / 펀비(매트릭스) / 봇 / 주식 / 알림설정 + 코인 검색. 노드 빌드 X
-- ✅ **코인 상세 모달**(더따리식): 김프/아비/펀비에서 코인명 클릭(또는 검색 Enter) → `/coin/{coin}` 전 거래소 현물·선물 가격/갭/거래대금/펀비(주기·카운트다운) 카드 + 입출금 지갑정보(`api/services/coin_detail.py`)
+- ✅ **코인 상세 모달**(더따리식): 김프/아비/펀비에서 코인명 클릭(또는 검색 Enter) → `/coin/{coin}` 전 거래소 현물·선물 가격/갭/거래대금/펀비(주기·카운트다운) 카드 + 입출금 지갑정보(`api/services/coin_detail.py`) + **펀딩비 히스토리**(시간×거래소, `/coin/{coin}/funding_history` — ccxt `fetch_funding_rate_history` 온디맨드·5분 캐시, `api/services/funding_history.py`)
 - ✅ **선물김프 + 현선 알림**: 김프 탭에 국내현물 vs 해외선물(perp) 비교 컬럼(`premium_perp_pct`). 선물 역프 임계치(`hyeonseon_low_pct`) 이하 시 텔레그램 현선(현물매수+선물숏) 알림
 - ✅ **정렬/필터**: 김프(컬럼정렬·범위) / 아비(갭·현물선물·거래소 제외) / 펀비(정산주기·정렬)
 - ✅ **펀비 알림**: 과열 |APY| + 거래소간 펀비차(%p) 텔레그램(`notifier/alerts.evaluate_funding`)
