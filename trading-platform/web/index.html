@@ -11,14 +11,15 @@
   }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; font-size:14px; }
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; font-size:15px;
+    -webkit-font-smoothing:antialiased; }
   header { position:sticky; top:0; background:var(--panel);
     border-bottom:1px solid var(--line); padding:10px 14px; z-index:10; }
   h1 { margin:0 0 8px; font-size:15px; }
-  .tabs { display:flex; gap:6px; margin-bottom:8px; }
+  .tabs { display:flex; gap:6px; margin-bottom:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; }
   .tabs button { background:var(--bg); color:var(--muted); border:1px solid var(--line);
-    border-radius:6px; padding:6px 14px; font-size:14px; cursor:pointer; }
-  .tabs button.active { color:var(--text); border-color:var(--green); }
+    border-radius:8px; padding:8px 15px; font-size:14px; cursor:pointer; white-space:nowrap; min-height:38px; }
+  .tabs button.active { color:var(--text); border-color:var(--green); background:#11331f; }
   .controls { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; }
   select, input { background:var(--bg); color:var(--text); border:1px solid var(--line);
     border-radius:6px; padding:5px 7px; font-size:13px; }
@@ -31,16 +32,26 @@
   .live{background:var(--green);} .stale{background:var(--badge);} .err{background:var(--up);}
   .summary { padding:8px 14px; color:var(--muted); border-bottom:1px solid var(--line); font-size:12px; }
   table { width:100%; border-collapse:collapse; }
-  th,td { padding:9px 10px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th,td { padding:11px 12px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap; font-size:14px; }
   th:first-child, td:first-child { text-align:left; }
-  th { color:var(--muted); font-weight:600; font-size:12px; cursor:pointer; user-select:none; }
-  th .arrow { color:var(--green); }
+  th { color:var(--muted); font-weight:600; font-size:12px; cursor:pointer; user-select:none;
+    letter-spacing:.2px; background:var(--bg); }
+  th[data-sort]:hover, th.exh:hover { color:var(--text); }
+  th .arrow { color:var(--green); font-weight:800; }
+  tbody tr { transition:background .1s; }
   tbody tr:hover { background:#1c2128; }
-  .coin{font-weight:700;} .pos{color:var(--up);} .neg{color:var(--down);}
+  .coin{font-weight:700; font-size:15px; display:inline-flex; align-items:center;}
+  .pos{color:var(--up);} .neg{color:var(--down);}
   .num{font-variant-numeric:tabular-nums; color:var(--muted);}
   .prem{font-weight:700; font-variant-numeric:tabular-nums;}
   .empty{padding:40px; text-align:center; color:var(--muted);}
-  .panel{display:none;} .panel.active{display:block;} .scroll{overflow-x:auto;}
+  .panel{display:none;} .panel.active{display:block;}
+  .scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+  .vscroll{overflow:auto; -webkit-overflow-scrolling:touch; max-height:340px;}
+  .vscroll thead th{position:sticky; top:0; background:var(--panel); z-index:2;}
+  /* 코인 아이콘 / 거래소 색상 점 */
+  .cico{width:18px; height:18px; border-radius:50%; margin-right:6px; vertical-align:middle; background:#222; flex:none;}
+  .exdot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; vertical-align:middle; flex:none;}
   .card{border:1px solid var(--line); border-radius:10px; margin:10px 14px; padding:12px;
     display:flex; justify-content:space-between; align-items:center; gap:10px; }
   .legs{display:flex; flex-direction:column; gap:6px;}
@@ -56,8 +67,8 @@
   .cell-int{font-size:10px; color:var(--badge); margin-left:3px;} .cd{font-size:10px; color:var(--muted);}
   .mg{font-size:10px; margin-left:4px; padding:1px 4px; border-radius:4px; border:1px solid var(--line);}
   .mg.ok{color:var(--green); border-color:var(--green);} .mg.no{color:var(--up);} .mg.unk{color:var(--gray);}
-  .btn{background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer;}
-  .btn:hover{border-color:var(--green);}
+  .btn{background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 13px; font-size:13px; cursor:pointer; min-height:34px;}
+  .btn:hover{border-color:var(--green);} .btn:active{background:#1c2128;}
   .clk{cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;}
   .clk:hover{color:var(--green);}
   .modal{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:50; display:flex;
@@ -84,6 +95,17 @@
   .arow{display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; margin-bottom:6px;}
   .arow label{font-size:13px; color:var(--text);}
   .chk.big{font-size:15px; font-weight:700;}
+  .ccard .ex{display:flex; align-items:center;}
+  @media (max-width:640px){
+    body{font-size:14px;}
+    th,td{padding:10px 8px; font-size:13.5px;}
+    .coin{font-size:14px;}
+    .card{margin:8px; padding:11px;}
+    .gap{font-size:16px;}
+    input.search{width:92px;}
+    .cgrid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));}
+    .modal-box{padding:12px;}
+  }
 </style>
 </head>
 <body>
@@ -147,7 +169,7 @@
     <thead><tr>
       <th data-sort="coin">코인</th><th data-sort="prem">김프 %</th>
       <th data-sort="perp">선물김프 %</th><th data-sort="basis">현선 %</th>
-      <th>국내가(KRW)</th><th>해외현물가</th><th>해외선물가</th><th>거래대금(억)</th></tr></thead>
+      <th>국내가(KRW)</th><th>해외현물가</th><th>해외선물가</th><th data-sort="vol">거래대금(억)</th></tr></thead>
     <tbody id="kimpRows"><tr><td colspan="8" class="empty">불러오는 중…</td></tr></tbody>
   </table>
 </div>
@@ -220,6 +242,18 @@ let fundColSort={ex:null, dir:-1};       // 펀비: 특정 거래소 컬럼 정�
 const term = () => $("search").value.trim().toUpperCase();
 const matchCoin = (c) => { const t=term(); return !t || c.toUpperCase().includes(t); };
 const numOr = (id, dflt) => { const v=parseFloat($(id).value); return isNaN(v)?dflt:v; };
+
+// 코인 아이콘(coincap CDN, 없으면 숨김) + 코인명
+function coinIcon(sym){
+  const s=(sym||"").split("/")[0].trim().toLowerCase();
+  return `<img class="cico" loading="lazy" src="https://assets.coincap.io/assets/icons/${s}@2x.png" onerror="this.style.display='none'">`;
+}
+const coinLabel=(sym)=> coinIcon(sym)+sym;
+// 거래소 브랜드 색상 점
+const EXC={upbit:"#1763f6",bithumb:"#f37321",binance:"#f0b90b",bybit:"#f7a600",mexc:"#00b897",
+  bitget:"#00c7d4",gate:"#cf0a2c",bingx:"#2954fe",okx:"#7b61ff",coinbase:"#1652f0",kraken:"#7b5be6"};
+const exDot=(ex)=>`<span class="exdot" style="background:${EXC[ex]||'#6e7681'}"></span>`;
+const exLabel=(ex)=> exDot(ex)+ex;
 
 function setStatus(cls,text){ $("status").className="dot "+cls; $("statusText").textContent=text; }
 function fillSelect(sel,names,def){ sel.innerHTML="";
@@ -405,7 +439,7 @@ async function openCoin(coin){
   $("cmTitle").textContent=coin; $("cmBody").innerHTML='<div class="empty">불러오는 중…</div>';
   try{
     const d=await (await fetch(`/coin/${encodeURIComponent(coin)}`)).json();
-    $("cmTitle").textContent=`${d.coin}  ·  환율 ${fmt(d.forex)}`;
+    $("cmTitle").innerHTML=`${coinIcon(d.coin)}${d.coin}  ·  <span class="rwhen">환율 ${fmt(d.forex)}</span>`;
     const cards=(d.legs||[]).map(l=>{
       const g=l.gap_pct;
       const gcell=g==null?"":`<div class="prem ${g>=0?'pos':'neg'}">갭 ${g>=0?'+':''}${g.toFixed(2)}%</div>`;
@@ -414,10 +448,10 @@ async function openCoin(coin){
       let f="";
       if(l.funding){ const iv=l.funding.interval_h?`${l.funding.interval_h}H`:""; const cd=cdText(l.funding.next_ts);
         f=`<div class="sub">펀비 <span class="${l.funding.rate_pct>=0?'pos':'neg'}">${l.funding.rate_pct.toFixed(4)}%</span> ${iv}${cd?' · '+cd:''}</div>`; }
-      return `<div class="ccard"><div class="ex">${l.exchange} <span class="mk">${l.market==='perp'?'USDT 선물':l.quote+' 현물'}${mg}</span></div>
+      return `<div class="ccard"><div class="ex">${exDot(l.exchange)}<b>${l.exchange}</b> <span class="mk">${l.market==='perp'?'USDT 선물':l.quote+' 현물'}${mg}</span></div>
         <div class="pr">${fmt4(l.price)}</div><div class="sub">≈ $${fmt4(l.price_usd)}</div>${vol}${gcell}${f}</div>`;
     }).join("");
-    const wallets=(d.wallets||[]).map(w=>`<div class="wcard">${w.exchange}
+    const wallets=(d.wallets||[]).map(w=>`<div class="wcard">${exDot(w.exchange)}<b>${w.exchange}</b>
       <span class="dot" style="background:${dotc(w.deposit)}"></span>입금
       <span class="dot" style="background:${dotc(w.withdraw)}"></span>출금</div>`).join("");
     $("cmBody").innerHTML=`<div class="modal-sec">거래소 가격 및 갭</div><div class="cgrid">${cards||'<div class="empty">데이터 없음</div>'}</div>
@@ -431,13 +465,13 @@ async function loadHist(coin){
     const d=await (await fetch(`/coin/${encodeURIComponent(coin)}/funding_history`)).json();
     const exs=d.exchanges||[], rows=d.rows||[];
     if(!exs.length||!rows.length){ $("cmHist").innerHTML='<div class="empty">펀비 히스토리 없음(거래소 미지원)</div>'; return; }
-    const head=`<tr><th>시간</th>${exs.map(e=>`<th>${e}</th>`).join("")}</tr>`;
+    const head=`<tr><th>시간</th>${exs.map(e=>`<th>${exDot(e)}${e}</th>`).join("")}</tr>`;
     const body=rows.map(r=>{
       const t=new Date(r.ts).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
       const cells=exs.map(e=>{const v=r.by_ex[e];
         return v==null?'<td class="num">-</td>':`<td class="prem ${v>=0?'pos':'neg'}">${v.toFixed(4)}</td>`;}).join("");
       return `<tr><td>${t}</td>${cells}</tr>`;}).join("");
-    if($("cmHist")) $("cmHist").innerHTML=`<div class="scroll" style="max-height:340px"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+    if($("cmHist")) $("cmHist").innerHTML=`<div class="vscroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }catch(e){ if($("cmHist")) $("cmHist").innerHTML=`<div class="empty">히스토리 실패: ${e.message}</div>`; }
 }
 function closeCoin(){ $("coinModal").style.display="none"; }
@@ -477,10 +511,11 @@ async function renderKimp(){
   const d = await (await fetch(`/premium?base=${$("base").value}&ref=${$("ref").value}`)).json();
   let rows=(d.rows||[]).filter(c=>matchCoin(c.coin)).filter(c=>pv(c)>=mn && pv(c)<=mx)
     .filter(c=> minVolKrw<=0 || (c.base_volume_krw!=null && c.base_volume_krw>=minVolKrw));
-  const skey=(c)=> kimpSort.key==="perp"?(ppv(c)??-9999):kimpSort.key==="basis"?(bv(c)??-9999):(kimpSort.key==="coin"?null:pv(c));
+  const skey=(c)=> kimpSort.key==="perp"?(ppv(c)??-9999):kimpSort.key==="basis"?(bv(c)??-9999)
+    :kimpSort.key==="vol"?(c.base_volume_krw??-1):(kimpSort.key==="coin"?null:pv(c));
   rows.sort((a,b)=> kimpSort.key==="coin"
     ? kimpSort.dir*a.coin.localeCompare(b.coin) : kimpSort.dir*(skey(a)-skey(b)));
-  const LBL={coin:"코인",prem:"김프 %",perp:"선물김프 %",basis:"현선 %"};
+  const LBL={coin:"코인",prem:"김프 %",perp:"선물김프 %",basis:"현선 %",vol:"거래대금(억)"};
   document.querySelectorAll("#panel-kimp th[data-sort]").forEach(th=>{
     th.innerHTML = LBL[th.dataset.sort] + (kimpSort.key===th.dataset.sort?` <span class="arrow">${kimpSort.dir<0?"↓":"↑"}</span>`:"");
   });
@@ -490,7 +525,7 @@ async function renderKimp(){
   tb.innerHTML = rows.map(c=>{const v=pv(c),cls=v>=0?"pos":"neg",s=v>=0?"+":"";
     const vol=(c.base_volume_krw!=null)?fmt(c.base_volume_krw/1e8):"-";
     const perpPrice=(c.ref_perp_price_krw!=null)?fmt(c.ref_perp_price_krw):"-";
-    return `<tr><td class="coin clk" onclick="openCoin('${c.coin}')">${c.coin}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>
+    return `<tr><td class="coin clk" onclick="openCoin('${c.coin}')">${coinLabel(c.coin)}</td><td class="prem ${cls}">${s}${v.toFixed(2)}%</td>
       ${pct(ppv(c))}${pct(bv(c))}
       <td class="num">${fmt(c.base_price_krw)}</td><td class="num">${fmt(c.ref_price_krw)}</td>
       <td class="num">${perpPrice}</td><td class="num">${vol}</td></tr>`;}).join("");
@@ -512,7 +547,7 @@ function legHtml(leg, side){
        : leg.margin===false?'<span class="mg no">마진X</span>'
        : '<span class="mg unk">마진?</span>';
   }
-  return `<div class="leg">${mk}${sd}<span class="sym">${leg.exchange}</span><span class="legprice">${fmt4(leg.price)}</span>${v}${mg}${w}</div>`;
+  return `<div class="leg">${mk}${sd}<span class="sym">${exDot(leg.exchange)}${leg.exchange}</span><span class="legprice">${fmt4(leg.price)}</span>${v}${mg}${w}</div>`;
 }
 function fmtVol(n){ n=Number(n); if(n>=1e9)return (n/1e9).toFixed(1)+"B"; if(n>=1e6)return (n/1e6).toFixed(1)+"M"; if(n>=1e3)return (n/1e3).toFixed(0)+"k"; return n.toFixed(0); }
 function fundLine(leg){ if(!leg.funding) return "";
@@ -540,7 +575,7 @@ async function renderArb(){
   const box=$("arbCards");
   if(!rows.length){ box.innerHTML='<div class="empty">조건에 맞는 기회 없음</div>'; setStatus("stale","-"); return; }
   box.innerHTML = rows.slice(0,100).map(x=>`<div class="card">
-    <div class="legs"><div class="coin clk" onclick="openCoin('${x.coin}')">${x.coin}/USDT</div>
+    <div class="legs"><div class="coin clk" onclick="openCoin('${x.coin}')">${coinIcon(x.coin)}${x.coin}/USDT</div>
       ${legHtml(x.long,"long")}${legHtml(x.short,"short")}</div>
     <div class="right"><div class="gap">${x.gap_pct.toFixed(2)}%</div>
       ${x.net_gap_pct!=null?`<div class="fund">순 ${x.net_gap_pct.toFixed(2)}% (수수료 ${x.cost_pct}%)</div>`:""}
@@ -562,7 +597,7 @@ async function renderFunding(){
   const valOf=(c)=> apy?c.apy:c.rate_pct;
   $("fundHead").innerHTML = `<th>코인</th>` + exs.map(e=>{
     const arr = fundColSort.ex===e ? ` <span class="arrow">${fundColSort.dir<0?"↓":"↑"}</span>` : "";
-    return `<th class="exh" data-ex="${e}">${e}${arr}</th>`;}).join("");
+    return `<th class="exh" data-ex="${e}">${exDot(e)}${e}${arr}</th>`;}).join("");
   $("fundHead").querySelectorAll(".exh").forEach(th=> th.onclick=()=>{
     const e=th.dataset.ex;
     fundColSort = (fundColSort.ex===e) ? {ex:e,dir:-fundColSort.dir} : {ex:e,dir:-1};
@@ -590,7 +625,7 @@ async function renderFunding(){
       const cd=cdText(c.next_ts);
       return `<td><span class="prem ${cls}">${s}${val.toFixed(apy?2:4)}%</span>${iv}${cd?`<div class="cd">${cd}</div>`:""}</td>`;
     }).join("");
-    return `<tr><td class="coin clk" onclick="openCoin('${r.coin}')">${r.coin}</td>${cells}</tr>`;
+    return `<tr><td class="coin clk" onclick="openCoin('${r.coin}')">${coinLabel(r.coin)}</td>${cells}</tr>`;
   }).join("");
   $("metaInfo").textContent=`${coins.length}코인 · ${apy?"APY":"펀비"}${fInt?` · ${fInt}H`:""}`;
   setStatus("live","실시간");
