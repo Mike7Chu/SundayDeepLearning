@@ -11,6 +11,9 @@ import logging
 import redis.asyncio as aioredis
 
 from bots.coin.hyeonseon import HyeonseonPaperBot
+from bots.coin.loan import LoanPaperBot
+from bots.coin.margin import MarginPaperBot
+from bots.coin.sell import SellPaperBot
 from shared.settings import settings
 
 logging.basicConfig(
@@ -22,7 +25,8 @@ logger = logging.getLogger("bots")
 
 async def main() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-    bots = [HyeonseonPaperBot(redis)]
+    bots = [HyeonseonPaperBot(redis), MarginPaperBot(redis),
+            LoanPaperBot(redis), SellPaperBot(redis)]
     logger.info("bots start (paper): %s", [b.name for b in bots])
     try:
         await asyncio.gather(*[b.run_forever() for b in bots])

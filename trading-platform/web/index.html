@@ -353,7 +353,7 @@ async function renderStocks(){
       const rows=((await (await fetch("/stocks")).json()).rows||[]).filter(flt);
       box.innerHTML=stockTable(["종목","현재가","등락률","PER","PBR","AI 리서치"],
         rows.map(r=>{const c=(r.change_pct||0)>=0?"pos":"neg",s=(r.change_pct||0)>=0?"+":"";
-          return `<tr><td class="coin">${r.name}</td><td class="num">${fmt(r.price)}</td>
+          return `<tr><td class="coin clk" onclick="openStock('${r.code}','${r.name}')">${r.name}</td><td class="num">${fmt(r.price)}</td>
             <td class="prem ${c}">${s}${(r.change_pct||0).toFixed(2)}%</td>
             <td class="num">${numC(r.per)}</td><td class="num">${numC(r.pbr)}</td>
             <td><button class="btn" onclick="showResearch('${r.code}','${r.name}')">📄</button>
@@ -362,7 +362,7 @@ async function renderStocks(){
     } else if(view==="value"){
       const rows=((await (await fetch("/stocks/value")).json()).rows||[]).filter(flt);
       box.innerHTML=stockTable(["#","종목","PER","PBR","ROE%","이익수익%","마법랭크","품질"],
-        rows.map(r=>`<tr><td class="num">${r.value_rank}</td><td class="coin">${r.name}</td>
+        rows.map(r=>`<tr><td class="num">${r.value_rank}</td><td class="coin clk" onclick="openStock('${r.code}','${r.name}')">${r.name}</td>
           <td class="num">${numC(r.per)}</td><td class="num">${numC(r.pbr)}</td>
           <td class="num">${numC(r.roe)}</td><td class="num">${numC(r.earnings_yield)}</td>
           <td class="num">${r.magic_rank??"-"}</td><td class="num">${"★".repeat(r.quality||0)||"-"}</td></tr>`).join(""));
@@ -371,7 +371,7 @@ async function renderStocks(){
       const rows=((await (await fetch("/stocks/signals")).json()).rows||[]).filter(flt);
       const sg={buy:'🟢매수',sell:'🔴매도',neutral:'⚪중립'};
       box.innerHTML=stockTable(["종목","시그널","RSI","SMA교차","모멘텀60%","점수","백테스트"],
-        rows.map(r=>`<tr><td class="coin">${r.name}</td><td>${sg[r.signal]||r.signal}</td>
+        rows.map(r=>`<tr><td class="coin clk" onclick="openStock('${r.code}','${r.name}')">${r.name}</td><td>${sg[r.signal]||r.signal}</td>
           <td class="num">${numC(r.rsi)}</td><td>${r.sma_cross||"-"}</td>
           <td class="prem ${(r.momentum_pct||0)>=0?"pos":"neg"}">${numC(r.momentum_pct)}</td>
           <td class="num">${r.score}</td>
@@ -381,7 +381,7 @@ async function renderStocks(){
     } else {
       const rows=((await (await fetch("/stocks/dividend")).json()).rows||[]).filter(flt);
       box.innerHTML=stockTable(["종목","현재가","연배당","배당수익%","다음기준일"],
-        rows.map(r=>`<tr><td class="coin">${r.name}</td><td class="num">${fmt(r.price)}</td>
+        rows.map(r=>`<tr><td class="coin clk" onclick="openStock('${r.code}','${r.name}')">${r.name}</td><td class="num">${fmt(r.price)}</td>
           <td class="num">${numC(r.annual_per_share,0)}</td>
           <td class="prem pos">${r.yield_pct!=null?r.yield_pct+"%":"-"}</td>
           <td>${r.next_ex_date||"-"}</td></tr>`).join("")
@@ -476,25 +476,79 @@ async function loadHist(coin){
 }
 function closeCoin(){ $("coinModal").style.display="none"; }
 
+// ===== 종목 상세 모달(펀더멘털·시그널·배당·백테스트·AI) =====
+function kv(k,v){ return `<div class="ccard"><div class="mk">${k}</div><div class="pr" style="font-size:15px">${v}</div></div>`; }
+async function openStock(code,name){
+  const m=$("coinModal"); m.style.display="flex";
+  $("cmTitle").textContent=`${name} (${code})`; $("cmBody").innerHTML='<div class="empty">불러오는 중…</div>';
+  try{
+    const [q,sg,dv]=await Promise.all([
+      fetch("/stocks").then(r=>r.json()), fetch("/stocks/signals").then(r=>r.json()),
+      fetch("/stocks/dividend").then(r=>r.json())]);
+    const Q=(q.rows||[]).find(r=>r.code===code)||{};
+    const S=(sg.rows||[]).find(r=>r.code===code);
+    const D=(dv.rows||[]).find(r=>r.code===code)||{};
+    const fund=`<div class="cgrid">${kv("현재가",fmt(Q.price)+"원")}${kv("등락률",Q.change_pct!=null?Q.change_pct.toFixed(2)+"%":"-")}
+      ${kv("PER",numC(Q.per))}${kv("PBR",numC(Q.pbr))}${kv("EPS",numC(Q.eps,0))}${kv("BPS",numC(Q.bps,0))}
+      ${kv("시총(억)",numC(Q.market_cap,0))}${kv("52주",numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0))}</div>`;
+    const sgH=S?`<div class="cgrid">${kv("시그널",{buy:'🟢매수',sell:'🔴매도',neutral:'⚪중립'}[S.signal]||S.signal)}
+      ${kv("RSI",numC(S.rsi))}${kv("SMA교차",S.sma_cross||"-")}${kv("모멘텀60",numC(S.momentum_pct)+"%")}</div>`
+      :'<div class="empty">일봉 수집 대기(KIS 키 필요)</div>';
+    const dvH=D.yield_pct!=null?`<div class="cgrid">${kv("배당수익률",D.yield_pct+"%")}${kv("연배당",numC(D.annual_per_share,0)+"원")}${kv("다음기준일",D.next_ex_date||"-")}</div>`
+      :'<div class="empty">배당 데이터 없음</div>';
+    $("cmBody").innerHTML=`<div class="modal-sec">펀더멘털</div>${fund}
+      <div class="modal-sec">기술적 시그널</div>${sgH}
+      <div class="modal-sec">배당</div>${dvH}
+      <div class="modal-sec">분석</div>
+      <div class="arow"><button class="btn" onclick="cmBacktest('${code}')">📈 백테스트</button>
+        <button class="btn" onclick="cmResearch('${code}')">🧠 AI 분석</button></div>
+      <div id="cmExtra"></div>`;
+  }catch(e){ $("cmBody").innerHTML=`<div class="empty">불러오기 실패: ${e.message}</div>`; }
+}
+async function cmBacktest(code){
+  const e=$("cmExtra"); e.innerHTML='<div class="empty">백테스트 중…</div>';
+  try{ const out=await Promise.all(["sma","rsi","momentum"].map(s=>fetch(`/stocks/backtest/${code}?strategy=${s}`).then(r=>r.json())));
+    const body=out.map(d=>`<tr><td>${d.strategy||"-"}</td>
+      <td class="prem ${(d.total_return_pct||0)>=0?'pos':'neg'}">${numC(d.total_return_pct)}</td>
+      <td class="num">${numC(d.buy_hold_pct)}</td><td class="num">${d.win_rate_pct??"-"}</td>
+      <td class="neg">${numC(d.max_drawdown_pct)}</td></tr>`).join("");
+    e.innerHTML=stockTable(["전략","전략수익%","매수후보유%","승률%","MDD%"],body);
+  }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
+}
+async function cmResearch(code){
+  const e=$("cmExtra"); e.innerHTML='<div class="empty">AI 분석 중…(키/구독 없으면 비활성)</div>';
+  try{ const r=await (await fetch(`/research/${code}/run`,{method:"POST"})).json();
+    e.innerHTML=`<pre class="rbody">${(r.report||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</pre>`+
+      (r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
+  }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
+}
+
+const BOTLBL={hyeonseon:"현선봇",margin:"마진봇",loan:"론봇",sell:"매도봇"};
+const BOTDESC={hyeonseon:"국내현물+해외선물 역프 헤지",margin:"해외 마진 숏 차익",
+  loan:"차입 진입 차익",sell:"김프 익절(저점매집·고점매도)"};
 async function renderBots(){
   const d = await (await fetch("/bots")).json();
   $("killBtn").textContent = d.killswitch ? "🟥 킬스위치 ON" : "⛔ 킬스위치";
   const cards = d.bots.map(b=>`<div class="card">
-    <div class="legs"><div class="coin">${b.name} <span class="pill">${b.state||"-"}</span></div>
-      <div class="fund">포지션 ${b.positions}개 · 페이퍼(dry-run)</div></div>
+    <div class="legs"><div class="coin">${BOTLBL[b.name]||b.name} <span class="pill">${b.state||"-"}</span></div>
+      <div class="fund">${BOTDESC[b.name]||""} · 포지션 ${b.positions}개 · 페이퍼(dry-run)</div></div>
     <div class="right"><button class="btn" onclick="toggleBot('${b.name}',${b.enabled?0:1})">${b.enabled?"■ 중지":"▶ 시작"}</button></div>
   </div>`).join("");
-  let fillsHtml = "";
-  if(d.bots[0]){
-    const f = await (await fetch(`/bots/${d.bots[0].name}/fills?limit=20`)).json();
-    fillsHtml = `<div class="summary" style="display:block">최근 체결 (${d.bots[0].name})</div>` +
-      (f.fills.length ? `<table><thead><tr><th>코인</th><th>액션</th><th>선물김프%</th><th>PnL%</th></tr></thead><tbody>`+
-        f.fills.map(x=>`<tr><td class="coin">${x.coin}</td><td>${x.action==="enter"?"진입":"청산"}</td>
-          <td class="num">${(x.entry_perp_pct??x.exit_perp_pct??"-")}</td>
-          <td class="prem ${(x.pnl_pct||0)>=0?"pos":"neg"}">${x.pnl_pct!=null?x.pnl_pct.toFixed(3):"-"}</td></tr>`).join("")+
-        `</tbody></table>` : `<div class="empty">아직 체결 없음 (조건 충족 시 기록)</div>`);
-  }
-  $("botsBox").innerHTML = cards + fillsHtml;
+  // 각 봇 최근 체결(병렬)
+  const fillsArr = await Promise.all(d.bots.map(b=>
+    fetch(`/bots/${b.name}/fills?limit=10`).then(r=>r.json()).catch(()=>({fills:[]}))));
+  let fillsHtml="";
+  d.bots.forEach((b,i)=>{
+    const f=(fillsArr[i].fills)||[]; if(!f.length) return;
+    const ind=(x)=> x.entry_gap??x.exit_gap??x.entry_perp_pct??x.exit_perp_pct??x.entry_premium??x.sell_premium??"-";
+    fillsHtml += `<div class="summary" style="display:block">${BOTLBL[b.name]||b.name} 최근 체결</div>`+
+      `<table><thead><tr><th>코인</th><th>액션</th><th>지표</th><th>PnL%</th></tr></thead><tbody>`+
+      f.map(x=>`<tr><td class="coin">${coinLabel(x.coin)}</td><td>${x.action==="enter"?"진입":"청산"}</td>
+        <td class="num">${ind(x)}</td>
+        <td class="prem ${(x.pnl_pct||0)>=0?"pos":"neg"}">${x.pnl_pct!=null?x.pnl_pct.toFixed(3):"-"}</td></tr>`).join("")+
+      `</tbody></table>`;
+  });
+  $("botsBox").innerHTML = cards + (fillsHtml||'<div class="empty">아직 체결 없음 (봇 시작 + 조건 충족 시 기록)</div>');
   $("metaInfo").textContent = d.killswitch ? "킬스위치 ON" : "페이퍼 모드";
   setStatus("live","실시간");
 }

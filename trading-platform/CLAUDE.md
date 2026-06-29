@@ -19,12 +19,12 @@
 - ✅ **선물김프 + 현선 알림**: 김프 탭에 국내현물 vs 해외선물(perp) 비교 컬럼(`premium_perp_pct`). 선물 역프 임계치(`hyeonseon_low_pct`) 이하 시 텔레그램 현선(현물매수+선물숏) 알림
 - ✅ **정렬/필터**: 김프(컬럼정렬·범위) / 아비(갭·현물선물·거래소 제외) / 펀비(정산주기·정렬)
 - ✅ **펀비 알림**: 과열 |APY| + 거래소간 펀비차(%p) 텔레그램(`notifier/alerts.evaluate_funding`)
-- ✅ **봇 페이퍼**(`bots/`): 프레임워크+실행게이트웨이(dry-run)+현선봇. `/bots` 컨트롤(enable/disable/killswitch), 대시보드 봇 탭. 실거래 미오픈
+- ✅ **봇 페이퍼**(`bots/`): 프레임워크+실행게이트웨이(dry-run) + **현선봇·마진봇·론봇·매도봇**(`bots/coin/`). 마진=해외 마진숏 차익(숏다리 마진가능 필요), 론=차입 진입(차입비용 차감), 매도=김프 저점매집·고점익절. `/bots` 컨트롤(enable/disable/killswitch)·텔레그램 `/bot start|stop`, 대시보드 봇 탭(봇별 체결). 전부 dry-run·실거래 미오픈
 - ✅ **주식(KIS)**(`collector/stock/kis.py`): 관심종목 현재가 수집(키 없으면 idle), `/stocks` + 대시보드 주식 탭
 - ✅ **알림 설정**(`shared/alert_settings.py`, `/alerts/settings`, 대시보드 알림설정 탭): 마스터/종류 on-off·임계치·쿨다운·**최소유지(디바운스)**·제외코인을 실시간 조절(Redis 오버라이드, notifier 매주기 반영)
 - ✅ **AI 가치투자 리서치**(`research/`, Addendum 9): 버핏·멍거·돤융핑·리루 4대 거장 렌즈(`lenses.py`)로 관심종목 분석 → 구조화 리포트(`analyst.py`, 모델 `claude-opus-4-8`). `research/main.py` 정기 분석 + 텔레그램 브리핑, `/research`·`/research/{code}`·`POST /research/{code}/run`, 대시보드 주식 탭 리서치 보기. 백엔드 2종: **api**(`ANTHROPIC_API_KEY`, 종량과금) / **cli**(`RESEARCH_USE_CLI=true` + Claude Code 설치 시 `claude -p` 헤드리스 = **구독 무과금**, research를 호스트에서 `deploy/run-research-host.sh`로 구동). 둘 다 없으면 idle. `deploy/set-anthropic.sh`로 설정. 추천 아님·분석 보조(면책)
 - ✅ **현물 정합성·마진·펀비 보강**: 마켓 메타 주기적 reload(`markets_reload_sec`, 상폐 stale 제거) / 현물 `margin` 수집→아비 **현물숏은 마진 가능시만 표시**(대시보드 토글) / 펀비 정산주기 파싱 강화(분·시 키)+**전 거래소 시간표시** / 펀비 단건 폴백(`fetchFundingRate`)으로 **MEXC 등 bulk 미지원 거래소 펀비 수집** / 김프 탭 **거래대금(억원) 필터·컬럼**(알림은 기존 `min_volume_eokwon`)
-- ✅ **주식 전략 3종**(Phase 5, 모니터링 전용): **가치 스크리너**(`api/services/stock_value.py`, 마법공식 이익수익률+ROE 랭킹·품질) / **시그널 엔진**(`stock_signal.py`, SMA 골든·데드크로스·RSI·모멘텀·볼린저, 일봉 `stock:ohlcv:{code}` 기반) / **배당**(`stock_dividend.py`, 배당수익률·캘린더·정기적립 DRIP). API `/stocks/value`·`/stocks/signals`·`/stocks/dividend`, 대시보드 주식탭 보기 전환(시세/가치/시그널/배당). 일봉·배당 수집(`collector.stock_history_loop`, 6h)
+- ✅ **주식 전략 3종**(Phase 5, 모니터링 전용): **가치 스크리너**(`api/services/stock_value.py`, 마법공식 이익수익률+ROE 랭킹·품질) / **시그널 엔진**(`stock_signal.py`, SMA 골든·데드크로스·RSI·모멘텀·볼린저, 일봉 `stock:ohlcv:{code}` 기반) / **배당**(`stock_dividend.py`, 배당수익률·캘린더·정기적립 DRIP). API `/stocks/value`·`/stocks/signals`·`/stocks/dividend`, 대시보드 주식탭 보기 전환(시세/가치/시그널/배당) + **종목명 클릭 → 종목 상세 모달**(펀더멘털·시그널·배당·백테스트·AI분석 한 곳). 일봉·배당 수집(`collector.stock_history_loop`, 6h)
 - ✅ **주식 일일 브리핑**(`briefing/`): 시세·시그널·가치·배당 요약을 텔레그램 1일 발송(`compose.py` 순수 조립, 키 없으면 로그). docker `briefing` 서비스
 - ✅ **텔레그램 명령 제어**(`notifier/commands.py`+`command_main.py`): `/status /bots /bot start|stop /killswitch /mute /unmute /alerts /brief` — 봇·알림을 Redis 컨트롤 플레인으로(대시보드와 단일 진실원). 소유자 chat_id만 응답. docker `commander` 서비스
 - ✅ **백테스트 하버스**(`backtest/engine.py`): 저장 일봉으로 sma·rsi·momentum 룰 검증(전략수익/매수후보유/승률/MDD, 룩어헤드 없음). `/stocks/backtest/{code}?strategy=`, 대시보드 시그널뷰 백테스트 버튼(수수료 미반영·룰 검증용)
