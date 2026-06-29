@@ -5,8 +5,11 @@ import json
 
 from fastapi import APIRouter
 
+from fastapi import Request
+
 from api.redis_client import get_redis
 from bots.registry import REGISTERED_BOTS
+from shared.bot_settings import FIELDS, load_bot_settings, save_bot_settings
 from shared.redis_keys import (
     BOT_KILLSWITCH_KEY,
     bot_enabled_key,
@@ -47,6 +50,20 @@ async def enable_bot(name: str) -> dict:
 async def disable_bot(name: str) -> dict:
     await get_redis().set(bot_enabled_key(name), "0")
     return {"name": name, "enabled": False}
+
+
+@router.get("/bots/{name}/settings")
+async def get_bot_settings(name: str) -> dict:
+    """봇 effective 설정 + 폼 메타(필드 목록)."""
+    return {"name": name, "settings": await load_bot_settings(get_redis(), name),
+            "fields": FIELDS.get(name, [])}
+
+
+@router.post("/bots/{name}/settings")
+async def post_bot_settings(name: str, request: Request) -> dict:
+    """봇 설정 부분 저장(대시보드/텔레그램 공용)."""
+    patch = await request.json()
+    return {"name": name, "settings": await save_bot_settings(get_redis(), name, patch)}
 
 
 @router.post("/bots/killswitch/{on}")

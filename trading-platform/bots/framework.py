@@ -12,6 +12,7 @@ import time
 
 import redis.asyncio as aioredis
 
+from shared.bot_settings import bot_settings_key
 from shared.redis_keys import (
     BOT_KILLSWITCH_KEY,
     bot_enabled_key,
@@ -33,6 +34,19 @@ class BotBase:
 
     async def killed(self) -> bool:
         return (await self.redis.get(BOT_KILLSWITCH_KEY)) == "1"
+
+    async def get_settings(self, defaults: dict) -> dict:
+        """인스턴스 기본값 위에 Redis 오버라이드(bot:settings:{name}) 머지 → 실시간 설정."""
+        base = dict(defaults)
+        raw = await self.redis.get(bot_settings_key(self.name))
+        if raw:
+            try:
+                o = json.loads(raw)
+                if isinstance(o, dict):
+                    base.update({k: v for k, v in o.items() if k in base and v is not None})
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return base
 
     async def set_state(self, state: str, **extra) -> None:
         await self.redis.set(bot_state_key(self.name),

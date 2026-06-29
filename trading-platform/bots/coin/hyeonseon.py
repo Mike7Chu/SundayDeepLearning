@@ -24,17 +24,19 @@ class HyeonseonPaperBot(BotBase):
         self.gw = ExecutionGateway(redis, self.name, dry_run=True)
 
     async def step(self) -> None:
-        cells = await compute_premium(self.redis, self.base, self.ref)
+        s = await self.get_settings({"base": self.base, "ref": self.ref,
+                                     "entry_pct": self.entry_pct, "exit_pct": self.exit_pct})
+        cells = await compute_premium(self.redis, s["base"], s["ref"])
         held = await self.gw.position_coins()
         pos = {p["coin"]: p for p in await self.gw.positions()}
         for c in cells:
             pp = c.premium_perp_pct
             if pp is None:
                 continue
-            if c.coin not in held and pp <= self.entry_pct:
+            if c.coin not in held and pp <= s["entry_pct"]:
                 await self.gw.open_paper(c.coin, {
-                    "entry_perp_pct": pp, "base": self.base, "ref": self.ref})
-            elif c.coin in held and pp >= self.exit_pct:
+                    "entry_perp_pct": pp, "base": s["base"], "ref": s["ref"]})
+            elif c.coin in held and pp >= s["exit_pct"]:
                 entry = pos.get(c.coin, {}).get("entry_perp_pct", pp)
                 pnl = pp - entry   # 역프(-)에서 0으로 회복 → 양(+) 이익
                 await self.gw.close_paper(c.coin, pnl, {"exit_perp_pct": pp})

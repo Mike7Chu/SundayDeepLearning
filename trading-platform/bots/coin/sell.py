@@ -22,14 +22,16 @@ class SellPaperBot(BotBase):
         self.gw = ExecutionGateway(redis, self.name, dry_run=True)
 
     async def step(self) -> None:
-        cells = await compute_premium(self.redis, self.base, self.ref)
+        s = await self.get_settings({"base": self.base, "ref": self.ref,
+                                     "buy_pct": self.buy_pct, "sell_pct": self.sell_pct})
+        cells = await compute_premium(self.redis, s["base"], s["ref"])
         held = await self.gw.position_coins()
         pos = {p["coin"]: p for p in await self.gw.positions()}
         for c in cells:
             p = c.premium_pct   # 테더 기준 김프
-            if c.coin not in held and p <= self.buy_pct:
+            if c.coin not in held and p <= s["buy_pct"]:
                 await self.gw.open_paper(c.coin, {"entry_premium": round(p, 4),
-                                                  "base": self.base, "ref": self.ref})
-            elif c.coin in held and p >= self.sell_pct:
+                                                  "base": s["base"], "ref": s["ref"]})
+            elif c.coin in held and p >= s["sell_pct"]:
                 entry = pos.get(c.coin, {}).get("entry_premium", p)
                 await self.gw.close_paper(c.coin, p - entry, {"sell_premium": round(p, 4)})

@@ -22,24 +22,30 @@ class MarginPaperBot(BotBase):
     name = "margin"
     interval_sec = 5.0
 
-    def __init__(self, redis, entry_gap=1.0, exit_gap=0.2, min_volume=0.0):
+    def __init__(self, redis, entry_gap=1.0, exit_gap=0.2, min_volume=0.0, exchanges=None):
         super().__init__(redis)
         self.entry_gap, self.exit_gap, self.min_volume = entry_gap, exit_gap, min_volume
+        self.exchanges = exchanges or []
         self.gw = ExecutionGateway(redis, self.name, dry_run=True)
 
     async def step(self) -> None:
-        d = await compute_arbitrage(self.redis, min_gap_pct=0.0, min_volume=self.min_volume)
+        s = await self.get_settings({"entry_gap": self.entry_gap, "exit_gap": self.exit_gap,
+                                     "min_volume": self.min_volume, "exchanges": self.exchanges})
+        allow = set(s["exchanges"])
+        d = await compute_arbitrage(self.redis, min_gap_pct=0.0, min_volume=s["min_volume"])
         held = await self.gw.position_coins()
         pos = {p["coin"]: p for p in await self.gw.positions()}
         for row in d["rows"]:
             coin = row["coin"]
+            if allow and not ({row["long"]["exchange"], row["short"]["exchange"]} <= allow):
+                continue   # 사용 거래소 제한
             net = row.get("net_gap_pct")
             if net is None:
                 net = row["gap_pct"]
-            if coin not in held and net >= self.entry_gap and _shortable(row["short"]):
+            if coin not in held and net >= s["entry_gap"] and _shortable(row["short"]):
                 await self.gw.open_paper(coin, {
                     "entry_gap": round(net, 4),
                     "long": row["long"]["exchange"], "short": row["short"]["exchange"]})
-            elif coin in held and net <= self.exit_gap:
+            elif coin in held and net <= s["exit_gap"]:
                 entry = pos.get(coin, {}).get("entry_gap", net)
                 await self.gw.close_paper(coin, entry - net, {"exit_gap": round(net, 4)})

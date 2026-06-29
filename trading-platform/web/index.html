@@ -181,7 +181,10 @@
   <tbody id="fundRows"><tr><td class="empty">불러오는 중…</td></tr></tbody>
 </table></div></div>
 
-<div id="panel-bots" class="panel"><div id="botsBox"><div class="empty">불러오는 중…</div></div></div>
+<div id="panel-bots" class="panel">
+  <div id="botSettings" class="rbox" style="display:none"></div>
+  <div id="botsBox"><div class="empty">불러오는 중…</div></div>
+</div>
 
 <div id="panel-stocks" class="panel">
   <div id="stockBox" class="scroll"><div class="empty">불러오는 중…</div></div>
@@ -260,8 +263,10 @@ function fillSelect(sel,names,def){ sel.innerHTML="";
   names.forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=n;
     if(n===def)o.selected=true; sel.appendChild(o);}); }
 
+let EX={domestic:[],overseas:[]};
 async function init(){
   const d = await (await fetch("/exchanges")).json();
+  EX=d;
   fillSelect($("base"), d.domestic, "upbit");
   fillSelect($("ref"), d.overseas, "binance");
   // 아비트라지 거래소 제외 체크박스
@@ -285,6 +290,45 @@ async function init(){
   setInterval(tick, 3000);
 }
 window.toggleBot = async (name,on)=>{ await fetch(`/bots/${name}/${on?"enable":"disable"}`,{method:"POST"}); tick(); };
+
+async function openBotSettings(name){
+  const box=$("botSettings"); box.style.display="block";
+  box.innerHTML=`<div class="rhead">⚙ ${BOTLBL[name]||name} 설정 불러오는 중…</div>`;
+  const d=await (await fetch(`/bots/${name}/settings`)).json();
+  const s=d.settings||{}, fields=d.fields||[];
+  const inputs=fields.map(f=>{
+    const v=s[f.key];
+    if(f.type==="num") return `<label>${f.label} <input class="rng" data-k="${f.key}" type="number" step="${f.step||0.1}" value="${v??""}"></label>`;
+    if(f.type==="domestic"||f.type==="overseas"){
+      const list=f.type==="domestic"?EX.domestic:EX.overseas;
+      return `<label>${f.label} <select data-k="${f.key}">${list.map(e=>`<option ${e===v?"selected":""}>${e}</option>`).join("")}</select></label>`;
+    }
+    if(f.type==="overseas_multi"){
+      const set=new Set(v||[]);
+      return `<div style="flex-basis:100%"><div class="fund">${f.label}</div><div class="arow">${
+        EX.overseas.map(e=>`<label class="chk"><input type="checkbox" data-mk="${f.key}" value="${e}" ${set.has(e)?"checked":""}>${exDot(e)}${e}</label>`).join("")}</div></div>`;
+    }
+    return "";
+  }).join("");
+  box.innerHTML=`<div class="rhead">⚙ ${BOTLBL[name]||name} 설정</div>
+    <div class="arow">${inputs}</div>
+    <div class="arow"><button class="btn" onclick="saveBotSettings('${name}')">💾 저장</button>
+      <button class="btn" onclick="$('botSettings').style.display='none'">닫기</button>
+      <span id="botSetMsg" class="fund"></span></div>`;
+}
+async function saveBotSettings(name){
+  const box=$("botSettings"), patch={};
+  box.querySelectorAll("[data-k]").forEach(el=>{
+    patch[el.dataset.k] = el.tagName==="SELECT" ? el.value : parseFloat(el.value);
+  });
+  const multi={};
+  box.querySelectorAll("[data-mk]").forEach(el=>{
+    multi[el.dataset.mk]=multi[el.dataset.mk]||[]; if(el.checked) multi[el.dataset.mk].push(el.value);
+  });
+  Object.assign(patch, multi);
+  await fetch(`/bots/${name}/settings`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});
+  $("botSetMsg").textContent="저장됨 ✓ "+new Date().toLocaleTimeString("ko-KR");
+}
 
 function switchTab(tab){
   activeTab=tab;
@@ -532,7 +576,8 @@ async function renderBots(){
   const cards = d.bots.map(b=>`<div class="card">
     <div class="legs"><div class="coin">${BOTLBL[b.name]||b.name} <span class="pill">${b.state||"-"}</span></div>
       <div class="fund">${BOTDESC[b.name]||""} · 포지션 ${b.positions}개 · 페이퍼(dry-run)</div></div>
-    <div class="right"><button class="btn" onclick="toggleBot('${b.name}',${b.enabled?0:1})">${b.enabled?"■ 중지":"▶ 시작"}</button></div>
+    <div class="right"><button class="btn" onclick="openBotSettings('${b.name}')">⚙ 설정</button>
+      <button class="btn" onclick="toggleBot('${b.name}',${b.enabled?0:1})">${b.enabled?"■ 중지":"▶ 시작"}</button></div>
   </div>`).join("");
   // 각 봇 최근 체결(병렬)
   const fillsArr = await Promise.all(d.bots.map(b=>
