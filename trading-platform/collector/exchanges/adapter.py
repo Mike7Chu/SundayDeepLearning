@@ -21,10 +21,12 @@ class ExchangeAdapter:
         self.cfg = cfg
         self.exclude = exclude or set()
         klass = getattr(ccxt, cfg.ccxt_id)
-        # defaultType=spot 명시: bybit/okx 등은 fetch_tickers에 카테고리(spot)가 없으면
-        # 비현물(linear)을 반환해 현물 필터에 전부 걸려 0개가 됨 → 현물 카테고리 고정.
-        self.client = klass({"enableRateLimit": True,
-                             "options": {"defaultType": "spot"}})
+        # 거래소별 옵션만 적용(예: bybit는 config에서 defaultType=spot). 전역 강제는 일부
+        # 거래소를 깨뜨려서, 필요한 거래소만 config/symbols.yaml에서 지정한다.
+        conf = {"enableRateLimit": True}
+        if cfg.options:
+            conf["options"] = dict(cfg.options)
+        self.client = klass(conf)
         self._markets_at = 0.0
 
     def _accept(self, coin: str) -> bool:

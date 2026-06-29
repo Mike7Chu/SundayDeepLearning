@@ -33,6 +33,8 @@ exchanges:
     ccxt_id: bybit
     quote: USDT
     region: overseas
+    options:
+      defaultType: spot   # bybit는 현물 카테고리 명시 안 하면 fetch_tickers가 0개 반환
   mexc:
     ccxt_id: mexc
     quote: USDT

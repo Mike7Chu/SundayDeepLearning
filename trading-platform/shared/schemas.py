@@ -9,6 +9,7 @@ class ExchangeConfig(BaseModel):
     ccxt_id: str       # ccxt 거래소 id (gateio ...)
     quote: str         # KRW | USDT
     region: str        # domestic | overseas
+    options: dict = {}  # 거래소별 ccxt options (예: bybit {defaultType: spot})
 
 
 class Universe(BaseModel):
