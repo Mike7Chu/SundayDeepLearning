@@ -17,6 +17,7 @@ from api.services.cross import (
     compute_funding_matrix,
 )
 from api.services.premium import _load_tickers, compute_premium
+from shared.redis_keys import FX_USDKRW_KEY, tether_key
 from shared.settings import settings
 from shared.universe import load_universe
 
@@ -27,6 +28,22 @@ router = APIRouter()
 async def list_exchanges() -> dict:
     u = load_universe()
     return {"domestic": u.domestic, "overseas": u.overseas}
+
+
+@router.get("/stats")
+async def market_stats() -> dict:
+    """상단 스트립용 — 환율·원화테더가·테더김프."""
+    redis = get_redis()
+    u = load_universe()
+    fx = await redis.get(FX_USDKRW_KEY)
+    forex = float(fx) if fx else settings.fx_usdkrw_fallback
+    tethers: dict[str, float | None] = {}
+    for ex in u.domestic:
+        v = await redis.get(tether_key(ex))
+        tethers[ex] = float(v) if v else None
+    rep = tethers.get("upbit") or tethers.get("bithumb")
+    kimp = round((rep / forex - 1) * 100, 2) if rep else None
+    return {"forex": round(forex, 2), "tethers": tethers, "tether_kimp": kimp}
 
 
 @router.get("/coins")
