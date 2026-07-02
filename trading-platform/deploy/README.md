@@ -18,9 +18,9 @@ bash deploy/bootstrap.sh
 확인 (기본 포트 8090):
 ```bash
 curl http://localhost:8090/health          # {"status":"ok"}
-curl "http://localhost:8090/premium?base=upbit&ref=binance"
+curl http://localhost:8090/stocks          # 관심종목 시세(KIS 키 설정 시)
 ```
-브라우저: `http://<pi-ip>:8090/docs`
+브라우저 대시보드: `http://<pi-ip>:8090/`  (API 문서: `/docs`)
 
 ### 자주 나는 문제
 - **`address already in use` (포트 충돌)**: 다른 서비스가 그 포트를 점유 중.
@@ -36,8 +36,16 @@ curl "http://localhost:8090/premium?base=upbit&ref=binance"
 cd SundayDeepLearning/trading-platform
 git pull
 cp -n .env.example .env          # API_PORT 등 새 항목 보강(기존 값 유지)
-sudo docker compose up -d --build
+sudo docker compose up -d --build --remove-orphans
 ```
+> **`--remove-orphans` 중요**: compose에서 삭제된 옛 서비스(예: 코인 시절 `notifier`·`announcer`·
+> `bots`)의 컨테이너를 함께 정리한다. 없으면 옛 컨테이너가 계속 살아 **엉뚱한 텔레그램 알림(김프/펀비)**
+> 을 계속 보낸다. 이미 유령이 돌고 있으면 한 번 완전 정리:
+> ```bash
+> sudo docker compose down --remove-orphans   # 유령 제거 + Redis 초기화(stale 데이터 소멸)
+> sudo docker compose up -d --build
+> sudo docker compose ps                       # notifier/announcer/bots 없어야 정상
+> ```
 
 ## 외부에서 접속 (집 밖에서) — Tailscale 사설 IP
 
@@ -56,8 +64,8 @@ sudo docker compose up -d --build
 3. 폰/랩탑에도 Tailscale 설치 + **같은 계정** 로그인 + ON.
 4. 그 주소로 접속:
    ```
-   http://100.x.y.z:8090/docs
-   http://100.x.y.z:8090/premium?base=upbit&ref=binance
+   http://100.x.y.z:8090/          (대시보드)
+   http://100.x.y.z:8090/docs      (API 문서)
    ```
    (MagicDNS를 켰다면 `http://<pi-host>.<tailnet>.ts.net:8090` 도 가능)
 
@@ -71,9 +79,11 @@ sudo docker compose up -d --build
 
 ## 메모
 
-- RPi4에서 첫 `--build`는 ccxt 등 설치로 수 분 소요.
-- 기본은 시세 수집(공개 데이터, API 키 불필요)만 동작. 텔레그램 알림/봇은 이후 단계에서 `.env`에 키 추가.
+- 주식 플랫폼(피벗 완료) — 서비스: `redis, collector, api, dart, research, briefing`. 코인 기능은 제거됨.
+- KIS 키가 없으면 수집은 idle(대시보드 셸만). `.env`에 `KIS_APP_KEY/SECRET` 넣으면 시세·일봉·배당 채워짐.
+- DART 공시 알림은 `DART_API_KEY`(무료, opendart.fss.or.kr), AI 리서치는 `ANTHROPIC_API_KEY` 또는 `RESEARCH_USE_CLI`.
 - 자동 재시작: compose에 `restart: unless-stopped` 적용됨(재부팅 후 자동 기동).
+- **재배포 시 항상 `--remove-orphans`** — 옛 서비스 컨테이너 잔재로 인한 엉뚱한 알림 방지.
 
 ## AI 가치투자 리서치 연결 (research)
 

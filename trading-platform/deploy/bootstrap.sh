@@ -43,7 +43,9 @@ fi
 echo "==> 3/4 빌드 & 기동 (RPi에선 첫 빌드가 수 분 걸릴 수 있음)"
 SUDO=""
 docker info >/dev/null 2>&1 || SUDO="sudo"
-$SUDO $COMPOSE up -d --build
+# --remove-orphans: compose에서 삭제된 옛 서비스(예: 코인 notifier/announcer/bots)의
+# 유령 컨테이너를 함께 제거해 옛 알림 스팸을 막는다.
+$SUDO $COMPOSE up -d --build --remove-orphans
 
 echo "==> 4/4 상태 확인"
 sleep 5
@@ -52,13 +54,13 @@ echo
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 PORT=$(grep -E '^API_PORT=' .env 2>/dev/null | cut -d= -f2)
 PORT=${PORT:-8090}
-echo "완료. API 헬스체크:"
-echo "  curl http://localhost:${PORT}/health"
-echo "  브라우저: http://${IP:-<pi-ip>}:${PORT}/docs"
-echo "  김프:    http://${IP:-<pi-ip>}:${PORT}/premium?base=upbit&ref=binance"
+echo "완료. 주식 대시보드:"
+echo "  브라우저: http://${IP:-<pi-ip>}:${PORT}/       (대시보드)"
+echo "  헬스체크: curl http://localhost:${PORT}/health"
+echo "  종목/문서: http://${IP:-<pi-ip>}:${PORT}/stocks , /docs"
 echo
 echo "* 포트 충돌(address already in use) 시: .env 의 API_PORT 를 비어있는 포트로 바꾸고"
-echo "  $SUDO $COMPOSE up -d 재실행. 점유 확인: sudo ss -ltnp | grep :${PORT}"
+echo "  $SUDO $COMPOSE up -d --remove-orphans 재실행. 점유 확인: sudo ss -ltnp | grep :${PORT}"
 echo
 echo "로그 보기:   $SUDO $COMPOSE logs -f collector"
 echo "중지:        $SUDO $COMPOSE down"
