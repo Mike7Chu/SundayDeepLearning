@@ -15,7 +15,9 @@
 - ✅ **코인 전면 제거**: 수집기 코인 루프·김프/아비/펀비 서비스·페이퍼봇·notifier 알림·공지·코인 대시보드 삭제.
 - ✅ **수집(KIS)**(`collector/main.py`·`collector/stock/kis.py`): 관심종목 현재가+밸류에이션(PER/PBR/EPS/BPS/시총/52주),
   일봉(시그널용 `stock:ohlcv:{code}`), 배당(`stock:dividend`). 키 없으면 idle.
-- ✅ **가치 스크리너**(`api/services/stock_value.py`): 마법공식(이익수익률+ROE) 랭킹 + 품질점수. `/stocks/value`
+- ✅ **가치 스크리너**(`api/services/stock_value.py`): 마법공식(이익수익률+ROE) 랭킹 + 품질점수. **전체 시장(`stock:market`) ∪ 관심종목 병합** 스캔. `/stocks/value?limit=`
+- ✅ **전체 시장 유니버스**(`collector/stock/kis_master.py`): KIS 종목마스터(.mst) 다운로드·파싱 → `stock:universe`, collector `market_loop`이 배치로 펀더멘털 수집 → `stock:market`(스크리너가 스캔). 오프셋 Pi 검증 권장.
+- ✅ **뉴스·공시(DART)**(`collector/news/`): opendart 전자공시 실시간 폴링(`dart_interval_sec`), 관심종목 신규 공시 → `dart:recent` + 텔레그램 알림. `/news`. docker `dart` 서비스. **무료 키(`DART_API_KEY`) 없으면 idle**
 - ✅ **시그널 엔진**(`stock_signal.py`): SMA20/60 골든·데드크로스·RSI·모멘텀·볼린저 → buy/sell/neutral. `/stocks/signals`
 - ✅ **배당**(`stock_dividend.py`): 배당수익률·캘린더·DRIP. `/stocks/dividend`
 - ✅ **백테스트**(`backtest/engine.py`): sma/rsi/momentum 룰 검증(전략수익/승률/MDD, 룩어헤드 없음). `/stocks/backtest/{code}`

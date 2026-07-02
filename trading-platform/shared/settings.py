@@ -17,6 +17,16 @@ class Settings(BaseSettings):
     # 자산 목표(원) — 홈 대시보드 진행률 바
     target_asset_krw: float = 10_000_000_000  # 100억
 
+    # DART 전자공시 (opendart.fss.or.kr, 무료 키). 없으면 공시 수집 비활성
+    dart_api_key: str = ""
+    dart_interval_sec: float = 30.0          # 공시 폴링 주기(속도)
+    dart_watch_all: bool = False             # True=전 종목 공시, False=관심/유니버스만
+
+    # 전체 시장 스크리너: 유니버스 펀더멘털 수집(배치·느린 주기, KIS 레이트리밋 대비)
+    market_scan_interval_sec: float = 3600.0  # 유니버스 1바퀴 목표 주기
+    market_batch: int = 60                     # 사이클당 조회 종목 수
+    market_universe_max: int = 900             # 유니버스 상한(부하 방지)
+
     # 한국투자증권(KIS) — 키 없으면 주식 수집 비활성
     kis_app_key: str = ""
     kis_app_secret: str = ""

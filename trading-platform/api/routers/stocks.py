@@ -28,9 +28,9 @@ async def stocks() -> dict:
 
 
 @router.get("/stocks/value")
-async def stocks_value() -> dict:
-    """가치투자 스크리너(마법공식 랭킹)."""
-    return await value_screener(get_redis())
+async def stocks_value(limit: int = 200) -> dict:
+    """가치투자 스크리너(마법공식 랭킹). 전체 시장 수집분(stock:market) 기준, 상위 limit."""
+    return await value_screener(get_redis(), limit=limit)
 
 
 @router.get("/stocks/signals")

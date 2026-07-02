@@ -98,6 +98,7 @@
     <button data-tab="value">가치</button>
     <button data-tab="signal">시그널</button>
     <button data-tab="dividend">배당</button>
+    <button data-tab="news">공시</button>
     <button data-tab="research">리서치</button>
     <button data-tab="settings">설정</button>
   </div>
@@ -113,6 +114,7 @@
   <div id="panel-value" class="panel"><div class="scroll" id="valueBox"><div class="empty">불러오는 중…</div></div></div>
   <div id="panel-signal" class="panel"><div class="scroll" id="signalBox"><div class="empty">불러오는 중…</div></div></div>
   <div id="panel-dividend" class="panel"><div class="scroll" id="dividendBox"><div class="empty">불러오는 중…</div></div></div>
+  <div id="panel-news" class="panel"><div id="newsBox"><div class="empty">불러오는 중…</div></div></div>
   <div id="panel-research" class="panel"><div id="researchBox"><div class="empty">불러오는 중…</div></div></div>
   <div id="panel-settings" class="panel"><div id="settingsBox"></div></div>
 </div>
@@ -158,6 +160,7 @@ async function render(){
     else if(activeTab==="value") await renderValue();
     else if(activeTab==="signal") await renderSignal();
     else if(activeTab==="dividend") await renderDividend();
+    else if(activeTab==="news") await renderNews();
     else if(activeTab==="research") await renderResearch();
     else if(activeTab==="settings") renderSettings();
     setStatus("live","실시간");
@@ -166,7 +169,7 @@ async function render(){
 }
 
 async function renderHome(){
-  const [q,v,s,d]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/signals"),jget("/stocks/dividend")]);
+  const [q,v,s,d,n]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/signals"),jget("/stocks/dividend"),jget("/news")]);
   const quotes=q.rows||[], sigs=s.rows||[];
   const buys=sigs.filter(r=>r.signal==="buy"), sells=sigs.filter(r=>r.signal==="sell");
   const up=quotes.filter(r=>(r.change_pct||0)>0).length, dn=quotes.filter(r=>(r.change_pct||0)<0).length;
@@ -194,7 +197,8 @@ async function renderHome(){
       <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</b></div>`).join("")||'<div class="empty">데이터 없음(KIS 키 필요)</div>'}</div>
     <div class="card"><h3>🟢 오늘의 매수 시그널</h3>${buys.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="badge">RSI ${numC(r.rsi)}</b></div>`).join("")||'<div class="empty">없음</div>'}</div>
     <div class="card"><h3>💎 가치 상위(마법공식)</h3>${topval.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="num">PER ${numC(r.per)} · ROE ${numC(r.roe)}%</b></div>`).join("")||'<div class="empty">데이터 없음</div>'}</div>
-    <div class="card"><h3>💰 배당 상위</h3>${topdiv.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="pos">${r.yield_pct}%</b></div>`).join("")||'<div class="empty">데이터 없음</div>'}</div>`;
+    <div class="card"><h3>💰 배당 상위</h3>${topdiv.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="pos">${r.yield_pct}%</b></div>`).join("")||'<div class="empty">데이터 없음</div>'}</div>
+    <div class="card" style="grid-column:1/-1"><h3>📢 최근 공시</h3>${(n.rows||[]).slice(0,6).map(r=>`<div class="row"><a class="clk" href="${r.url}" target="_blank">${r.corp_name} · ${r.report_nm}</a><span class="num">${r.rcept_dt||''}</span></div>`).join("")||'<div class="empty">공시 없음 (DART 키 필요)</div>'}</div>`;
   $("metaInfo").textContent=`관심종목 ${quotes.length} · 매수 ${buys.length}`;
 }
 function saveAsset(){ localStorage.setItem("curAsset", $("curAsset").value||0); renderHome(); }
@@ -215,7 +219,7 @@ async function renderValue(){
     rows.map(r=>`<tr><td class="num">${r.value_rank}</td><td class="name clk" onclick="openStock('${r.code}','${r.name}')">${r.name}</td>
       <td class="num">${numC(r.per)}</td><td class="num">${numC(r.pbr)}</td><td class="num">${numC(r.roe)}</td>
       <td class="num">${numC(r.earnings_yield)}</td><td class="num">${r.magic_rank??"–"}</td><td>${"★".repeat(r.quality||0)||"–"}</td></tr>`).join(""));
-  $("metaInfo").textContent=`${rows.length}종목 · 마법공식`;
+  $("metaInfo").textContent=`전체시장 스크리너 · 상위 ${rows.length}`;
 }
 async function renderSignal(){
   const rows=((await jget("/stocks/signals")).rows||[]).filter(r=>match(r.name)||match(r.code));
@@ -236,6 +240,19 @@ async function renderDividend(){
     || `<tr><td colspan="5" class="empty">배당 데이터 대기 (KIS 키 필요)</td></tr>`);
   $("metaInfo").textContent=`${rows.length}종목 · 배당`;
 }
+async function renderNews(){
+  const rows=((await jget("/news")).rows||[]).filter(r=>match(r.corp_name)||match(r.stock_code)||match(r.report_nm));
+  $("newsBox").innerHTML=`<div style="padding:12px 16px;color:var(--muted);font-size:13px">
+    📢 DART 전자공시 실시간 — 관심종목 신규 공시. (.env DART_API_KEY 필요, 텔레그램 알림 동시)</div>`+
+    (rows.length? rows.map(r=>`<div class="card" style="margin:8px 16px">
+      <div class="row"><b>${r.corp_name} ${r.stock_code?`<span class="badge">${r.stock_code}</span>`:''}</b>
+        <span class="num">${r.rcept_dt||''}</span></div>
+      <div style="margin-top:6px"><a class="clk" href="${r.url}" target="_blank">${r.report_nm}</a>
+        <span class="num"> · ${r.flr_nm||''}</span></div></div>`).join("")
+      : '<div class="empty">신규 공시 없음 (DART 키 설정 후 실시간 수집)</div>');
+  $("metaInfo").textContent=`공시 ${rows.length}건`;
+}
+
 async function renderResearch(){
   const d=await jget("/research");
   const rows=(d.rows||[]).filter(r=>match(r.name)||match(r.code));

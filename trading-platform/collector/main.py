@@ -14,9 +14,12 @@ import httpx
 import redis.asyncio as aioredis
 
 from collector.stock.kis import KISClient, load_watchlist
+from collector.stock.kis_master import fetch_universe
 from shared.redis_keys import (
     STOCK_DIVIDEND_KEY,
+    STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
+    STOCK_UNIVERSE_KEY,
     stock_ohlcv_key,
 )
 from shared.redis_store import replace_hash
@@ -83,6 +86,67 @@ async def stock_history_loop(redis: aioredis.Redis) -> None:
         await asyncio.sleep(settings.stock_history_interval_sec)
 
 
+async def universe_loop(redis: aioredis.Redis) -> None:
+    """전체 시장 유니버스(코스피/코스닥 종목마스터) — 하루 1회 갱신. 실패 시 관심종목 폴백."""
+    kis = KISClient()
+    if not kis.enabled:
+        return
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=40) as client:
+                uni = await fetch_universe(client)
+            uni = uni[: settings.market_universe_max]
+            if uni:
+                await redis.set(STOCK_UNIVERSE_KEY, json.dumps(uni, ensure_ascii=False))
+                logger.info("[universe] %d종목 저장", len(uni))
+        except Exception as exc:
+            logger.warning("[universe] 실패: %s", exc)
+        await asyncio.sleep(86400)
+
+
+async def _universe_codes(redis: aioredis.Redis) -> list[dict]:
+    raw = await redis.get(STOCK_UNIVERSE_KEY)
+    if raw:
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return load_watchlist()   # 폴백
+
+
+async def market_loop(redis: aioredis.Redis) -> None:
+    """유니버스 펀더멘털을 배치로 순회 수집 → stock:market (전체 시장 스크리너). 키 없으면 비활성."""
+    kis = KISClient()
+    if not kis.enabled:
+        return
+    cursor = 0
+    await asyncio.sleep(20)   # 유니버스 로딩 여유
+    while True:
+        uni = await _universe_codes(redis)
+        if not uni:
+            await asyncio.sleep(60)
+            continue
+        batch = uni[cursor: cursor + settings.market_batch]
+        if not batch:
+            cursor = 0
+            continue
+        out: dict[str, str] = {}
+        async with httpx.AsyncClient(timeout=10) as client:
+            for item in batch:
+                code = item["code"]
+                try:
+                    q = await kis.fetch_price(client, code)
+                    out[code] = json.dumps({"code": code, "name": item.get("name", ""),
+                                            "ts": time.time(), **q}, ensure_ascii=False)
+                except Exception:
+                    continue
+        if out:
+            await redis.hset(STOCK_MARKET_KEY, mapping=out)
+        cursor += settings.market_batch
+        n = max(1, (len(uni) + settings.market_batch - 1) // settings.market_batch)
+        await asyncio.sleep(max(10, settings.market_scan_interval_sec / n))
+
+
 async def main() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     logger.info("collector start (stock-only)")
@@ -90,6 +154,8 @@ async def main() -> None:
         await asyncio.gather(
             stock_loop(redis),
             stock_history_loop(redis),
+            universe_loop(redis),
+            market_loop(redis),
         )
     finally:
         await redis.aclose()

@@ -13,7 +13,22 @@ import json
 
 import redis.asyncio as aioredis
 
-from shared.redis_keys import STOCK_QUOTE_KEY
+from shared.redis_keys import STOCK_MARKET_KEY, STOCK_QUOTE_KEY
+
+
+async def load_quotes(redis: aioredis.Redis) -> list[dict]:
+    """전체 시장(stock:market) ∪ 관심종목(stock:quote) 시세를 병합(코드 중복은 market 우선)."""
+    merged: dict[str, dict] = {}
+    for key in (STOCK_QUOTE_KEY, STOCK_MARKET_KEY):
+        raw = await redis.hgetall(key)
+        for v in raw.values():
+            try:
+                q = json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if q.get("code"):
+                merged[q["code"]] = q
+    return list(merged.values())
 
 
 def _roe(eps: float | None, bps: float | None) -> float | None:
@@ -69,12 +84,11 @@ def compute_value(quotes: list[dict]) -> dict:
     return {"rows": rows}
 
 
-async def value_screener(redis: aioredis.Redis) -> dict:
-    raw = await redis.hgetall(STOCK_QUOTE_KEY)
-    quotes = []
-    for v in raw.values():
-        try:
-            quotes.append(json.loads(v))
-        except (json.JSONDecodeError, TypeError):
-            continue
-    return compute_value(quotes)
+async def value_screener(redis: aioredis.Redis, limit: int = 0) -> dict:
+    """전체 시장 마법공식 스크리너. limit>0이면 상위 N만."""
+    quotes = await load_quotes(redis)
+    out = compute_value(quotes)
+    out["total"] = len(out["rows"])
+    if limit > 0:
+        out["rows"] = out["rows"][:limit]
+    return out

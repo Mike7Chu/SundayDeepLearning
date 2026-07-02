@@ -7,6 +7,12 @@
 남은 것: KIS 수집(시세/일봉/배당) · 가치(마법공식)/시그널/배당 스크리너 · 백테스트 · AI 4대 거장 리서치 · 일일 브리핑.
 대시보드 7탭(홈·종목·가치·시그널·배당·리서치·설정), 홈에 100억 진행률. 테스트 23/23 통과(주식만).
 
+### Phase 2 — 전체 시장 스크리너 + 뉴스·공시(DART) (완료, Pi 검증 필요)
+- **전체 시장 스크리너**: `collector/stock/kis_master.parse_mst`/`fetch_universe`로 KIS 종목마스터→`stock:universe`, `collector.market_loop`이 배치(60/사이클)로 펀더멘털→`stock:market`. `stock_value.load_quotes`가 market∪quote 병합, `/stocks/value?limit=200` 전체시장 마법공식 랭킹.
+- **뉴스·공시(DART)**: `collector/news/dart.py`(`parse_disclosure_list` 순수·`DartClient`)+`main.py`(30s 폴링, 신규 rcept_no 선별, silent prime, `dart:recent`+텔레그램). `/news`, docker `dart` 서비스. 대시보드 **공시 탭**+홈 최근공시 카드. `DART_API_KEY`(무료) 없으면 idle.
+- 설정: `dart_api_key/interval/watch_all`, `market_scan_interval/batch/universe_max`. 테스트 27/27.
+- ⚠️ KIS .mst 오프셋·DART 응답 스키마는 Pi에서 실제 데이터로 검증·튜닝(클라우드 403).
+
 ### 🔀 주식 피벗 (Phase 1 완료)
 - 코인 삭제: `bots/·collector/exchanges/·forex·notifier(coin)·api coin routers/services·shared coin·코인 config/테스트`. `notifier/telegram.py`만 유지(리서치·브리핑 공용).
 - 재작성: `collector/main.py`(주식 루프만)·`api/main.py`(stocks+research)·`docker-compose.yml`(redis/collector/api/research/briefing)·`shared/{redis_keys,settings}`(주식만)·`web/index.html`(주식 SPA 전면 재구성).
