@@ -1,4 +1,4 @@
-"""FastAPI 엔트리포인트.
+"""FastAPI 엔트리포인트 (주식 플랫폼).
 
 실행: uvicorn api.main:app --port 8000
 """
@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from api.redis_client import close_redis
-from api.routers import alerts, bots, premium, research, stocks
+from api.routers import research, stocks
 
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -20,12 +20,10 @@ _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    from api.services.funding_history import close_clients
-    await close_clients()
     await close_redis()
 
 
-app = FastAPI(title="Trading Platform API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Stock Platform API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -34,10 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(premium.router)
-app.include_router(bots.router)
 app.include_router(stocks.router)
-app.include_router(alerts.router)
 app.include_router(research.router)
 
 
@@ -48,5 +43,5 @@ async def health() -> dict:
 
 @app.get("/", include_in_schema=False)
 async def dashboard() -> FileResponse:
-    """김프 대시보드(단일 페이지)."""
+    """주식 대시보드(단일 페이지)."""
     return FileResponse(_WEB_DIR / "index.html")

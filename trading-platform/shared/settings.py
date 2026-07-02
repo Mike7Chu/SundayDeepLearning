@@ -10,31 +10,12 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # 수집 주기
-    collect_interval_sec: float = 5.0
-    fx_interval_sec: float = 300.0
-    fx_usdkrw_fallback: float = 1380.0
-    wallet_interval_sec: float = 300.0   # 입출금 상태(느린 변화)
-
-    # 아비트라지: 코인별 가격점 중앙값 대비 이 배수 밖이면 이상치(충돌/dust)로 제외
-    arb_outlier_factor: float = 3.0
-
-    # 24h 거래대금 0인 데드마켓(상폐/거래중지) 즉시 제거 — active 거짓양성 방어
-    drop_zero_volume: bool = True
-
-    # 아비트라지 순스프레드: 거래소간 전송/슬리피지 버퍼(%)를 수수료에 더해 차감
-    arb_transfer_buffer_pct: float = 0.1
-
-    # 거래소 마켓 메타 재로딩 주기(초). 상폐/신규상장 반영(stale 마켓 캐시 제거)
-    markets_reload_sec: float = 3600.0
-    # 펀딩비 수집 주기(초). 펀비는 정산주기(시간) 단위로 변하므로 시세보다 느리게
-    funding_interval_sec: float = 60.0
-    # 펀비 bulk 미지원 거래소(예: MEXC) 단건 폴백 시 심볼 수 상한(부하 방지)
-    funding_single_cap: int = 250
-
-    # 텔레그램 (Phase 2)
+    # 텔레그램 (브리핑/알림 발송)
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+
+    # 자산 목표(원) — 홈 대시보드 진행률 바
+    target_asset_krw: float = 10_000_000_000  # 100억
 
     # 한국투자증권(KIS) — 키 없으면 주식 수집 비활성
     kis_app_key: str = ""

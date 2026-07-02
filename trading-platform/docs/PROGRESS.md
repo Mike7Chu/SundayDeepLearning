@@ -3,7 +3,16 @@
 > 무엇을 왜 했는지의 시간순 기록. 새 세션은 여기서 "지금까지"를 빠르게 파악.
 
 ## 현재 한 줄 상태
-Phase 2 + 더따리 패리티 + 알림설정 + 봇 페이퍼 + 주식(KIS) + **AI 가치투자 리서치(Addendum 9)** 완료. 대시보드 6탭(김프·아비트라지·펀비·봇·주식·알림설정). 테스트 36/36 통과.
+**🔀 주식 올인 피벗(목표 100억)** — 코인 아비트라지 축 전면 제거, 주식 전용 플랫폼으로 재편.
+남은 것: KIS 수집(시세/일봉/배당) · 가치(마법공식)/시그널/배당 스크리너 · 백테스트 · AI 4대 거장 리서치 · 일일 브리핑.
+대시보드 7탭(홈·종목·가치·시그널·배당·리서치·설정), 홈에 100억 진행률. 테스트 23/23 통과(주식만).
+
+### 🔀 주식 피벗 (Phase 1 완료)
+- 코인 삭제: `bots/·collector/exchanges/·forex·notifier(coin)·api coin routers/services·shared coin·코인 config/테스트`. `notifier/telegram.py`만 유지(리서치·브리핑 공용).
+- 재작성: `collector/main.py`(주식 루프만)·`api/main.py`(stocks+research)·`docker-compose.yml`(redis/collector/api/research/briefing)·`shared/{redis_keys,settings}`(주식만)·`web/index.html`(주식 SPA 전면 재구성).
+- 새 UI: 홈 대시보드(100억 진행률·시장온도·오늘의 시그널/가치/배당 하이라이트) + 종목/가치/시그널/배당/리서치/설정 탭 + 종목 상세 모달(펀더멘털·시그널·배당·백테스트·AI분석).
+- 로드맵: Phase2 관심종목 UI관리·전체시장 스크리너·뉴스/공시(DART), Phase3 포트폴리오(KIS 잔고)·목표 트래킹, Phase4 자동매매 게이트.
+- requirements에서 `ccxt` 제거. 코인 코드는 git 이력으로 복구 가능.
 
 ### Addendum 9 — AI 가치투자 리서치 (완료)
 - `research/lenses.py`: 버핏·멍거·돤융핑·리루 4대 거장 렌즈(렌즈별 focus+체크리스트) → `SYSTEM_PROMPT`(출력형식+면책).
