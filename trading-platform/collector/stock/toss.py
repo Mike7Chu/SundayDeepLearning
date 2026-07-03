@@ -59,11 +59,16 @@ class TossClient:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         d = r.json()
-        if "error" in d and d["error"]:
+        if d.get("error"):
+            # OAuth2 표준 에러는 {"error": "invalid_client", "error_description": "..."}
+            # (error가 문자열). BFF envelope({error:{code,message}})와 형식이 다름.
             err = d["error"]
-            logger.warning("[toss] 토큰 발급 실패: %s", err)
-            raise TossError(err.get("code", ""), err.get("message", ""),
-                            err.get("requestId", ""))
+            if isinstance(err, dict):
+                code, msg, rid = err.get("code", ""), err.get("message", ""), err.get("requestId", "")
+            else:
+                code, msg, rid = str(err), d.get("error_description", ""), ""
+            logger.warning("[toss] 토큰 발급 실패: %s %s", code, msg)
+            raise TossError(code, msg, rid)
         r.raise_for_status()
         self._token = d.get("access_token") or d.get("result", {}).get("access_token")
         exp = d.get("expires_in") or d.get("result", {}).get("expires_in", 3600)
@@ -105,9 +110,12 @@ class TossClient:
         return parse_holdings(await self._get(
             client, "/api/v1/holdings", account=account))
 
-    async def fetch_buying_power(self, client: httpx.AsyncClient, account: str) -> dict:
+    async def fetch_buying_power(self, client: httpx.AsyncClient, account: str,
+                                 currency: str = "KRW") -> dict:
+        # currency는 스펙상 필수 쿼리 파라미터(누락 시 400 invalid-request).
         return parse_buying_power(await self._get(
-            client, "/api/v1/buying-power", account=account))
+            client, "/api/v1/buying-power",
+            params={"currency": currency}, account=account))
 
     async def fetch_prices(self, client: httpx.AsyncClient,
                            symbols: list[str]) -> list[dict]:
@@ -231,59 +239,68 @@ def parse_accounts(res) -> list[dict]:
     return out
 
 
-def parse_holdings(res) -> dict:
-    """보유 종목 → {holdings:[...], cash, total_eval, pnl, pnl_pct, ts}.
+def _dig(o, *path):
+    """중첩 dict 경로 안전 조회. 중간에 dict 아니면 None."""
+    for k in path:
+        if not isinstance(o, dict):
+            return None
+        o = o.get(k)
+    return o
 
-    각 보유: symbol, name, qty, avg_price, cur_price, eval_amount, pnl, pnl_pct.
-    누락 필드(평가액·손익)는 수량/단가로 산출.
+
+def parse_holdings(res) -> dict:
+    """보유 자산(HoldingsOverview) → {holdings:[...], total_eval_krw, total_eval_usd,
+    pnl, pnl_pct, ts}.
+
+    실제 응답(토스 OpenAPI): items[]에 quantity·lastPrice·averagePurchasePrice·currency,
+    평가/손익은 중첩(marketValue.amount, profitLoss.amount, profitLoss.rate[소수]).
+    요약은 최상위 marketValue.amount.{krw,usd}·profitLoss.amount.krw·profitLoss.rate.
+    (원화 합산은 USD 환율 필요 → 수집 루프에서 환산; 여기선 통화별 분리 값만.)
     """
-    rows = _as_list(res, "holdings", "positions", "items")
+    if not isinstance(res, dict):
+        res = {}
     holdings: list[dict] = []
-    total_eval = 0.0
-    total_cost = 0.0
-    for h in rows:
-        qty = _f(_first(h, "quantity", "qty", "holdingQuantity")) or 0.0
-        avg = _f(_first(h, "averagePrice", "avgPrice", "purchasePrice",
-                        "averageBuyPrice")) or 0.0
-        cur = _f(_first(h, "currentPrice", "lastPrice", "price", "marketPrice")) or 0.0
-        eval_amt = _f(_first(h, "evaluationAmount", "evalAmount", "marketValue"))
+    for h in _as_list(res, "items", "holdings"):
+        qty = _f(_first(h, "quantity", "qty")) or 0.0
+        avg = _f(_first(h, "averagePurchasePrice", "averagePrice", "avgPrice")) or 0.0
+        cur = _f(_first(h, "lastPrice", "currentPrice", "price")) or 0.0
+        eval_amt = _f(_dig(h, "marketValue", "amount"))
         if eval_amt is None:
             eval_amt = qty * cur
-        pnl = _f(_first(h, "profitLoss", "pnl", "evaluationProfitLoss"))
+        pnl = _f(_dig(h, "profitLoss", "amount"))
         if pnl is None:
             pnl = (cur - avg) * qty
+        rate = _f(_dig(h, "profitLoss", "rate"))     # 소수비율(0.1077=10.77%)
         cost = avg * qty
-        pnl_pct = _f(_first(h, "profitLossRate", "pnlRate", "returnRate"))
-        if pnl_pct is None:
-            pnl_pct = (pnl / cost * 100.0) if cost else 0.0
+        pnl_pct = rate * 100.0 if rate is not None else ((pnl / cost * 100.0) if cost else 0.0)
         holdings.append({
             "symbol": str(_first(h, "symbol", "code", "ticker") or ""),
-            "name": _first(h, "name", "symbolName", "productName") or "",
+            "name": _first(h, "name", "symbolName") or "",
+            "currency": _first(h, "currency") or "KRW",
             "qty": qty, "avg_price": avg, "cur_price": cur,
             "eval_amount": round(eval_amt, 2),
             "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2),
         })
-        total_eval += eval_amt
-        total_cost += cost
-    cash = _f(_first(res, "cash", "cashBalance", "deposit")) if isinstance(res, dict) else None
-    total_pnl = total_eval - total_cost
-    total_pct = (total_pnl / total_cost * 100.0) if total_cost else 0.0
+    eval_krw = _f(_dig(res, "marketValue", "amount", "krw"))
+    eval_usd = _f(_dig(res, "marketValue", "amount", "usd"))
+    pnl_krw = _f(_dig(res, "profitLoss", "amount", "krw"))
+    total_rate = _f(_dig(res, "profitLoss", "rate"))   # 전체 원화환산 수익률(소수)
     return {
         "holdings": holdings,
-        "cash": round(cash, 2) if cash is not None else None,
-        "total_eval": round(total_eval, 2),
-        "pnl": round(total_pnl, 2),
-        "pnl_pct": round(total_pct, 2),
+        "total_eval_krw": round(eval_krw, 2) if eval_krw is not None else 0.0,
+        "total_eval_usd": round(eval_usd, 2) if eval_usd is not None else None,
+        "pnl": round(pnl_krw, 2) if pnl_krw is not None else None,
+        "pnl_pct": round(total_rate * 100.0, 2) if total_rate is not None else None,
         "ts": time.time(),
     }
 
 
 def parse_buying_power(res) -> dict:
-    """매수여력 → {buying_power}."""
+    """매수여력(BuyingPowerResponse) → {buying_power, currency}. 실제 필드 cashBuyingPower."""
     if not isinstance(res, dict):
-        return {"buying_power": None}
-    bp = _f(_first(res, "buyingPower", "cash", "availableAmount", "amount", "orderableAmount"))
-    return {"buying_power": bp}
+        return {"buying_power": None, "currency": None}
+    bp = _f(_first(res, "cashBuyingPower", "buyingPower", "cash", "availableAmount"))
+    return {"buying_power": bp, "currency": _first(res, "currency")}
 
 
 def parse_prices(res) -> list[dict]:

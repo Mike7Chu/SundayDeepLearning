@@ -178,7 +178,7 @@ async function renderHome(){
   const up=quotes.filter(r=>(r.change_pct||0)>0).length, dn=quotes.filter(r=>(r.change_pct||0)<0).length;
   $("stCount").textContent=quotes.length; $("stBuy").textContent=buys.length; $("stTarget").textContent=eok(TARGET);
   // 100억 진행률: 토스 실평가액(+현금) 있으면 자동, 없으면 수동입력(localStorage) 폴백
-  const autoEval=(pf&&pf.total_eval!=null)?(Number(pf.total_eval)+Number(pf.cash||0)):null;
+  const autoEval=(pf&&pf.total_eval!=null)?(Number(pf.total_eval)+Number(pf.buying_power||pf.cash||0)):null;
   const cur=autoEval!=null?autoEval:Number(localStorage.getItem("curAsset")||0);
   const pct=Math.min(100,(cur/TARGET*100));
   const movers=[...quotes].sort((a,b)=>Math.abs(b.change_pct||0)-Math.abs(a.change_pct||0)).slice(0,5);
@@ -274,14 +274,15 @@ async function submitOrder(side){
 }
 
 async function renderStocks(){
-  const rows=((await jget("/stocks")).rows||[]).filter(r=>match(r.name)||match(r.code));
+  const all=(await jget("/stocks/all")).rows||[];
+  const rows=all.filter(r=>match(r.name)||match(r.code));
   $("stocksBox").innerHTML=tableHTML(["종목","현재가","등락률","PER","PBR","상세"],
     rows.map(r=>{const c=(r.change_pct||0)>=0?"pos":"neg";
-      return `<tr><td class="name clk" onclick="openStock('${r.code}','${r.name}')">${r.name}</td>
+      return `<tr><td class="name clk" onclick="openStock('${r.code}','${r.name}')">${r.name}<span class="num" style="opacity:.5"> ${r.code}</span></td>
         <td class="strong">${fmt(r.price)}</td><td class="strong ${c}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</td>
         <td class="num">${numC(r.per)}</td><td class="num">${numC(r.pbr)}</td>
         <td><button class="btn" onclick="openStock('${r.code}','${r.name}')">보기</button></td></tr>`;}).join(""));
-  $("metaInfo").textContent=`${rows.length}종목 · 시세`;
+  $("metaInfo").textContent=`${rows.length}종목 · 전체 시장${term()?' (검색)':''}`;
 }
 async function renderValue(){
   const rows=((await jget("/stocks/value")).rows||[]).filter(r=>match(r.name)||match(r.code));

@@ -163,7 +163,23 @@ async def portfolio_loop(redis: aioredis.Redis, toss: TossClient) -> None:
                         continue
                     logger.info("[toss] account=%s", account)
                 snap = await toss.fetch_holdings(client, account)
-                bp = await toss.fetch_buying_power(client, account)
+                # 100억은 원화 기준: KRW 평가액 + (USD 평가액 × 환율). USD 보유 없으면 환율 조회 생략.
+                total_eval = snap.get("total_eval_krw") or 0.0
+                usd = snap.get("total_eval_usd")
+                if usd:
+                    try:
+                        fx = await toss.fetch_exchange_rate(client)  # USD→KRW
+                        rate = float(fx.get("rate") or 0)
+                        total_eval += usd * rate
+                    except Exception as exc:
+                        logger.warning("[toss] 환율 조회 실패(USD 미반영): %s", exc)
+                snap["total_eval"] = round(total_eval, 2)
+                # 매수여력은 별도 try — 실패해도 보유/평가는 저장(한 엔드포인트가 전체를 막지 않게).
+                try:
+                    bp = await toss.fetch_buying_power(client, account, "KRW")
+                except Exception as exc:
+                    logger.warning("[toss] 매수여력 조회 실패: %s", exc)
+                    bp = {"buying_power": None}
             await redis.set(TOSS_HOLDINGS_KEY, json.dumps(snap, ensure_ascii=False))
             await redis.set(TOSS_ACCOUNT_KEY, json.dumps(
                 {"accountSeq": account, "buying_power": bp.get("buying_power"),

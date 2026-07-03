@@ -59,43 +59,42 @@ def test_parse_accounts_picks_seq_variants():
     assert accs[0]["name"] == "주식"
 
 
-def test_parse_holdings_computes_eval_and_pnl():
-    res = {"holdings": [
-        {"symbol": "005930", "name": "삼성전자", "quantity": 10,
-         "averagePrice": 60000, "currentPrice": 66000},   # eval 660k, pnl +60k, +10%
-    ], "cash": 40000}
+def test_parse_holdings_real_schema():
+    # 실제 토스 HoldingsOverview 구조(중첩 marketValue/profitLoss + 요약 krw/usd).
+    res = {
+        "marketValue": {"amount": {"krw": "7200000", "usd": "1785"}},
+        "profitLoss": {"amount": {"krw": "700000"}, "rate": "0.1179"},
+        "items": [
+            {"symbol": "005930", "name": "삼성전자", "currency": "KRW",
+             "quantity": "100", "lastPrice": "72000", "averagePurchasePrice": "65000",
+             "marketValue": {"amount": "7200000"},
+             "profitLoss": {"amount": "700000", "rate": "0.1077"}},
+        ],
+    }
     out = parse_holdings(res)
     h = out["holdings"][0]
-    assert h["eval_amount"] == 660000
-    assert h["pnl"] == 60000
-    assert h["pnl_pct"] == 10.0
-    assert out["total_eval"] == 660000
-    assert out["pnl"] == 60000
-    assert out["pnl_pct"] == 10.0
-    assert out["cash"] == 40000
-
-
-def test_parse_holdings_prefers_given_values():
-    res = {"holdings": [
-        {"symbol": "AAPL", "qty": 2, "avgPrice": 100, "lastPrice": 120,
-         "evaluationAmount": 999, "profitLoss": 42, "profitLossRate": 3.5},
-    ]}
-    h = parse_holdings(res)["holdings"][0]
-    assert h["eval_amount"] == 999      # 응답값 우선(산출 안 함)
-    assert h["pnl"] == 42
-    assert h["pnl_pct"] == 3.5
+    assert h["qty"] == 100 and h["avg_price"] == 65000 and h["cur_price"] == 72000
+    assert h["eval_amount"] == 7200000     # marketValue.amount(중첩)
+    assert h["pnl"] == 700000              # profitLoss.amount(중첩)
+    assert h["pnl_pct"] == 10.77           # profitLoss.rate(소수) × 100
+    assert h["currency"] == "KRW"
+    assert out["total_eval_krw"] == 7200000
+    assert out["total_eval_usd"] == 1785
+    assert out["pnl"] == 700000
+    assert out["pnl_pct"] == 11.79         # 전체 원화환산 rate × 100
 
 
 def test_parse_holdings_empty():
-    out = parse_holdings({"holdings": []})
+    out = parse_holdings({"items": [], "marketValue": {"amount": {"krw": "0"}}})
     assert out["holdings"] == []
-    assert out["total_eval"] == 0
-    assert out["pnl_pct"] == 0.0
+    assert out["total_eval_krw"] == 0.0
+    assert out["total_eval_usd"] is None
 
 
-def test_parse_buying_power_variants():
-    assert parse_buying_power({"buyingPower": 1000})["buying_power"] == 1000
-    assert parse_buying_power({"orderableAmount": 500})["buying_power"] == 500
+def test_parse_buying_power_real_field():
+    # 실제 필드는 cashBuyingPower.
+    assert parse_buying_power({"currency": "KRW", "cashBuyingPower": "5000000"})["buying_power"] == 5000000
+    assert parse_buying_power({"cashBuyingPower": "3500.5"})["buying_power"] == 3500.5
     assert parse_buying_power("x")["buying_power"] is None
 
 

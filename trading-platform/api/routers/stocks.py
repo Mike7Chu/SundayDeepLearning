@@ -10,7 +10,7 @@ import json as _json
 from api.redis_client import get_redis
 from api.services.stock_dividend import dividend_view
 from api.services.stock_signal import signals_for
-from api.services.stock_value import value_screener
+from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
 from collector.stock.kis import load_watchlist
 from fastapi import HTTPException
@@ -25,6 +25,14 @@ async def stocks() -> dict:
     rows = [json.loads(v) for v in raw.values()]
     rows.sort(key=lambda r: r.get("change_pct", 0), reverse=True)
     return {"rows": rows}
+
+
+@router.get("/stocks/all")
+async def stocks_all() -> dict:
+    """전체 시장 시세(수집된 유니버스 stock:market ∪ 관심종목 stock:quote). 등락률 정렬."""
+    rows = await load_quotes(get_redis())
+    rows.sort(key=lambda r: r.get("change_pct") or 0, reverse=True)
+    return {"rows": rows, "total": len(rows)}
 
 
 @router.get("/stocks/value")
