@@ -62,10 +62,13 @@ class Analyst:
             "다음 종목을 4대 거장 렌즈로 분석해 정해진 출력 형식으로 정리하세요.\n\n"
             f"{format_for_prompt(data)}"
         )
-        if mode == "api":
-            report = await self._via_api(prompt)
-        else:
-            report = await self._via_cli(prompt)
+        try:
+            report = await (self._via_api(prompt) if mode == "api" else self._via_cli(prompt))
+        except Exception as exc:
+            # 실패를 조용히 삼키지 않고 리포트에 노출(대시보드에서 원인 확인 가능).
+            logger.warning("[research %s] 분석 실패(mode=%s): %s", data.code, mode, exc)
+            return self._wrap(data, enabled=True,
+                              report=f"⚠️ 분석 실패 (백엔드={mode})\n{exc}")
         return self._wrap(data, enabled=True, report=report)
 
     async def _via_api(self, prompt: str) -> str:
@@ -99,6 +102,10 @@ class Analyst:
         except asyncio.TimeoutError:
             proc.kill()
             raise RuntimeError(f"claude CLI 시간초과({_CLI_TIMEOUT}s)")
-        if proc.returncode != 0:
-            raise RuntimeError(f"claude CLI 오류(rc={proc.returncode}): {err.decode(errors='ignore')[:300]}")
-        return out.decode(errors="ignore").strip()
+        text = out.decode(errors="ignore").strip()
+        if proc.returncode != 0 or not text:
+            msg = err.decode(errors="ignore").strip()[:500] or f"(빈 출력, rc={proc.returncode})"
+            raise RuntimeError(
+                f"claude CLI 실패(rc={proc.returncode}). 컨테이너에는 호스트 구독 로그인이 "
+                f"없어 실패합니다 → 호스트에서 run-research-host.sh 실행. stderr: {msg}")
+        return text

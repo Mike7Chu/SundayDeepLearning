@@ -59,7 +59,8 @@ def normalize_watch_item(code: str, name: str = "") -> dict | None:
 
 class KISClient:
     def __init__(self):
-        self.base = _PAPER if settings.kis_paper else _REAL
+        # 조회 전용이므로 kis_quote_real면 실전 도메인 고정(예탁원 배당 등 모의도메인 미제공 대응).
+        self.base = _REAL if (settings.kis_quote_real or not settings.kis_paper) else _PAPER
         self._token: str | None = None
         self._exp: float = 0.0
         self._lock = asyncio.Lock()   # 토큰 발급 직렬화(동시 발급 → KIS 1분당 1회 제한 위반)
