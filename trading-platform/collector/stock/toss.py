@@ -128,8 +128,11 @@ class TossClient:
         params = {"symbol": symbol, "interval": interval}
         return parse_candles(await self._get(client, "/api/v1/candles", params=params))
 
-    async def fetch_exchange_rate(self, client: httpx.AsyncClient) -> dict:
-        return await self._get(client, "/api/v1/exchange-rate")
+    async def fetch_exchange_rate(self, client: httpx.AsyncClient,
+                                  base: str = "USD", quote: str = "KRW") -> dict:
+        # baseCurrency·quoteCurrency는 스펙상 필수(누락 시 400 invalid-request).
+        return await self._get(client, "/api/v1/exchange-rate",
+                             params={"baseCurrency": base, "quoteCurrency": quote})
 
     async def fetch_open_orders(self, client: httpx.AsyncClient, account: str,
                                 status: str = "OPEN") -> list[dict]:

@@ -52,7 +52,11 @@ async def run() -> None:
     analyst = Analyst()
     sender = TelegramSender()
     if not analyst.enabled:
-        logger.info("ANTHROPIC_API_KEY 미설정 → 리서치 비활성 (.env ANTHROPIC_API_KEY)")
+        logger.info(
+            "리서치 비활성 — 이 컨테이너는 호스트의 Claude Code 구독 로그인을 볼 수 없습니다. "
+            "구독(무과금)은 호스트에서 실행하세요: bash deploy/set-anthropic.sh cli && "
+            "nohup bash deploy/run-research-host.sh >/tmp/research.log 2>&1 & "
+            "· 또는 종량과금 .env ANTHROPIC_API_KEY 설정.")
         # 비활성이어도 컨테이너는 살아 있게(키 입력 후 재시작) — 길게 대기
         try:
             while not analyst.enabled:
