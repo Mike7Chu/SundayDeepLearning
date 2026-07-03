@@ -438,20 +438,29 @@ function closeModal(){ $("modal").style.display="none"; }
 async function openStock(code,name){
   $("modal").style.display="flex"; $("mTitle").textContent=`${name} (${code})`; $("mBody").innerHTML='<div class="empty">불러오는 중…</div>';
   try{
-    const [q,sg,dv]=await Promise.all([jget("/stocks"),jget("/stocks/signals"),jget("/stocks/dividend")]);
-    const Q=(q.rows||[]).find(r=>r.code===code)||{}, S=(sg.rows||[]).find(r=>r.code===code), D=(dv.rows||[]).find(r=>r.code===code)||{};
-    const fund=`<div class="cgrid">${kv("현재가",fmt(Q.price)+"원")}${kv("등락률",Q.change_pct!=null?Q.change_pct.toFixed(2)+"%":"–")}
+    const d=await jget("/stocks/"+encodeURIComponent(code));
+    const Q=d.quote||{}, S=d.signal, D=d.dividend;
+    const fund=`<div class="cgrid">${kv("현재가",fmt(Q.price)+"원")}${kv("등락률",Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–")}
       ${kv("PER",numC(Q.per))}${kv("PBR",numC(Q.pbr))}${kv("EPS",numC(Q.eps,0))}${kv("BPS",numC(Q.bps,0))}
       ${kv("시총(억)",numC(Q.market_cap,0))}${kv("52주",numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0))}</div>`;
-    const sgH=S?`<div class="cgrid">${kv("시그널",SIG[S.signal]||S.signal)}${kv("RSI",numC(S.rsi))}${kv("SMA교차",S.sma_cross||"–")}${kv("모멘텀60",numC(S.momentum_pct)+"%")}</div>`:'<div class="empty">일봉 수집 대기</div>';
-    const dvH=D.yield_pct!=null?`<div class="cgrid">${kv("배당수익률",D.yield_pct+"%")}${kv("연배당",numC(D.annual_per_share,0)+"원")}${kv("다음기준일",D.next_ex_date||"–")}</div>`:'<div class="empty">배당 데이터 없음</div>';
-    $("mBody").innerHTML=`<div class="modal-sec">펀더멘털</div>${fund}
+    const collectHint=d.in_watchlist?'수집 대기':'관심종목 추가 시 수집';
+    const sgH=S?`<div class="cgrid">${kv("시그널",SIG[S.signal]||S.signal)}${kv("RSI",numC(S.rsi))}${kv("SMA교차",S.sma_cross||"–")}${kv("모멘텀60",numC(S.momentum_pct)+"%")}</div>`:`<div class="empty">일봉 ${collectHint}</div>`;
+    const dvH=(D&&D.yield_pct!=null)?`<div class="cgrid">${kv("배당수익률",D.yield_pct+"%")}${kv("연배당",numC(D.annual_per_share,0)+"원")}${kv("다음기준일",D.next_ex_date||"–")}</div>`:`<div class="empty">배당 ${collectHint}</div>`;
+    const wbtn=d.in_watchlist?'<span class="badge pos">✓ 관심종목</span>':`<button class="btn buy" onclick="addWatchModal('${qesc(code)}','${qesc(name)}')">＋ 관심종목 추가</button>`;
+    $("mBody").innerHTML=`<div class="arow" style="margin-bottom:8px">${wbtn}</div>
+      <div class="modal-sec">펀더멘털</div>${fund}
       <div class="modal-sec">기술적 시그널</div>${sgH}
       <div class="modal-sec">배당</div>${dvH}
       <div class="modal-sec">분석</div>
-      <div class="arow"><button class="btn" onclick="mBacktest('${code}')">📈 백테스트</button>
-        <button class="btn" onclick="mResearch('${code}')">🧠 AI 분석</button></div><div id="mExtra"></div>`;
+      <div class="arow"><button class="btn" onclick="mBacktest('${qesc(code)}')">📈 백테스트</button>
+        <button class="btn" onclick="mResearch('${qesc(code)}')">🧠 AI 분석</button></div><div id="mExtra"></div>`;
   }catch(e){ $("mBody").innerHTML=`<div class="empty">불러오기 실패: ${e.message}</div>`; }
+}
+async function addWatchModal(code,name){
+  const r=await fetch("/watchlist",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({code,name})});
+  if(r.ok||r.status===409){ openStock(code,name); }
+  else{ const e=await r.json().catch(()=>({})); alert("추가 실패: "+(e.detail||r.status)); }
 }
 async function mBacktest(code){
   const e=$("mExtra"); e.innerHTML='<div class="empty">백테스트 중…</div>';
@@ -462,10 +471,23 @@ async function mBacktest(code){
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
 }
 async function mResearch(code){
-  const e=$("mExtra"); e.innerHTML='<div class="empty">AI 분석 중…(키/구독 없으면 비활성)</div>';
+  const e=$("mExtra"); e.innerHTML='<div class="empty">AI 분석 요청 중…</div>';
   try{ const r=await (await fetch(`/research/${code}/run`,{method:"POST"})).json();
+    if(r.queued){
+      // 구독 CLI 모드: 호스트 research가 처리 → 잠시 후 결과 폴링
+      e.innerHTML='<div class="empty">🧠 분석 요청됨 — 호스트에서 처리 중… (최대 1~2분)</div>';
+      pollResearch(code, e, 0); return;
+    }
     e.innerHTML=`<pre class="rbody">${(r.report||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</pre>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
+}
+async function pollResearch(code, e, tries){
+  if(tries>20){ e.innerHTML='<div class="empty">아직 결과가 없어요 — 호스트 research 구동 여부 확인(run-research-host.sh)</div>'; return; }
+  await new Promise(r=>setTimeout(r,6000));
+  const d=await jget("/research/"+encodeURIComponent(code));
+  if(d&&d.report&&d.ts){
+    e.innerHTML=`<pre class="rbody">${(d.report||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</pre>`+(d.disclaimer?`<div class="rdisc">${d.disclaimer}</div>`:"");
+  }else pollResearch(code, e, tries+1);
 }
 
 function init(){

@@ -9,6 +9,8 @@ STOCK_DIVIDEND_KEY = "stock:dividend"
 
 # AI 리서치 리포트 해시. field=종목코드, value=json{code,name,report,model,ts,...}
 RESEARCH_KEY = "research:reports"
+# 온디맨드 분석 요청 큐(set of 종목코드). 컨테이너 API가 넣고 호스트 research가 처리.
+RESEARCH_REQ_KEY = "research:requests"
 
 # 관심종목 오버라이드(대시보드 편집). value=json[{code,name}]. 없으면 config/stocks.yaml.
 WATCHLIST_KEY = "stock:watchlist"

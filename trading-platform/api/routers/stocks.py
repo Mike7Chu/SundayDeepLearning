@@ -8,13 +8,18 @@ from fastapi import APIRouter
 import json as _json
 
 from api.redis_client import get_redis
-from api.services.stock_dividend import dividend_view
+from api.services.stock_dividend import compute_dividend, dividend_view
 from api.services.stock_signal import signals_for
 from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
 from collector.stock.kis import effective_watchlist
 from fastapi import HTTPException
-from shared.redis_keys import STOCK_QUOTE_KEY, stock_ohlcv_key
+from shared.redis_keys import (
+    STOCK_DIVIDEND_KEY,
+    STOCK_MARKET_KEY,
+    STOCK_QUOTE_KEY,
+    stock_ohlcv_key,
+)
 
 router = APIRouter()
 
@@ -72,3 +77,26 @@ async def stocks_backtest(code: str, strategy: str = "sma") -> dict:
     candles = _json.loads(raw)
     closes = [c["close"] for c in candles if isinstance(c, dict) and c.get("close")]
     return {"code": code, **backtest(closes, strategy)}
+
+
+@router.get("/stocks/{code}")
+async def stock_detail(code: str) -> dict:
+    """단일 종목 상세 — 관심종목이 아니어도 전체시장(stock:market) 수집분에서 조회.
+
+    펀더멘털은 stock:quote(관심) ∪ stock:market(전체시장)에서, 시그널·배당은
+    수집된 경우에만(관심종목). 미수집이면 '관심종목 추가 시 수집' 안내.
+    """
+    redis = get_redis()
+    raw = await redis.hget(STOCK_QUOTE_KEY, code) or await redis.hget(STOCK_MARKET_KEY, code)
+    quote = json.loads(raw) if raw else {"code": code}
+    sig = await signals_for(redis, code, quote.get("name", ""))
+    div = None
+    draw = await redis.hget(STOCK_DIVIDEND_KEY, code)
+    if draw:
+        try:
+            div = compute_dividend(quote, json.loads(draw).get("items", []))
+        except (json.JSONDecodeError, TypeError):
+            div = None
+    wl = await effective_watchlist(redis)
+    return {"quote": quote, "signal": sig, "dividend": div,
+            "in_watchlist": any(w.get("code") == code for w in wl)}

@@ -14,7 +14,7 @@ from api.redis_client import get_redis
 from collector.stock.kis import load_watchlist
 from research.analyst import Analyst
 from research.data import StockData, gather
-from shared.redis_keys import RESEARCH_KEY
+from shared.redis_keys import RESEARCH_KEY, RESEARCH_REQ_KEY
 
 router = APIRouter()
 
@@ -54,6 +54,16 @@ async def research_get(code: str) -> dict:
 async def research_run(code: str) -> dict:
     redis = get_redis()
     analyst = Analyst()
+    # 구독 CLI 모드는 이 API 컨테이너에서 못 돎(호스트 로그인 필요) → 호스트 research가
+    # 처리하도록 큐에 넣고 반환. API 키(api) 모드는 컨테이너에서 바로 실행.
+    if analyst.mode != "api":
+        await redis.sadd(RESEARCH_REQ_KEY, code)
+        if analyst.mode is None:
+            return {"queued": False, "enabled": False, "code": code,
+                    "report": "리서치 비활성 — .env ANTHROPIC_API_KEY 또는 호스트에서 "
+                              "run-research-host.sh(구독 CLI) 실행."}
+        return {"queued": True, "code": code,
+                "report": "분석 요청됨 — 호스트 research가 곧 처리합니다. 잠시 후 새로고침."}
     data = await gather(redis, code) or StockData(code=code, name=_name_for(code))
     if not data.name:
         data.name = _name_for(code)

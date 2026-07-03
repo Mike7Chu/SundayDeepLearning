@@ -132,15 +132,22 @@ class KISClient:
             self._last_call = time.monotonic()
 
     async def _get(self, client: httpx.AsyncClient, path: str, tr_id: str,
-                   params: dict, ctx: str, retries: int = 2) -> dict:
-        """throttle + GET + 일시적 5xx 재시도 → _check_rt된 응답 dict."""
+                   params: dict, ctx: str, retries: int = 3) -> dict:
+        """throttle + GET + 일시적 5xx/연결오류 재시도(백오프) → _check_rt된 응답 dict."""
         token = await self._token_value(client)
         for attempt in range(retries + 1):
             await self._throttle()
-            r = await client.get(f"{self.base}{path}",
-                                 headers=self._headers(token, tr_id), params=params)
+            try:
+                r = await client.get(f"{self.base}{path}",
+                                     headers=self._headers(token, tr_id), params=params)
+            except httpx.HTTPError as exc:
+                # 연결 실패/타임아웃(실전 도메인 간헐) → 백오프 후 재시도
+                if attempt < retries:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                raise RuntimeError(f"KIS {ctx} 연결 실패: {exc!r}") from exc
             if r.status_code >= 500 and attempt < retries:
-                await asyncio.sleep(0.3 * (attempt + 1))   # KIS 일시적 500 → 재시도
+                await asyncio.sleep(0.4 * (attempt + 1))   # KIS 일시적 500 → 재시도
                 continue
             r.raise_for_status()
             return self._check_rt(r.json(), ctx)

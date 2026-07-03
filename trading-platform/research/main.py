@@ -16,7 +16,7 @@ from collector.stock.kis import effective_watchlist
 from notifier.telegram import TelegramSender
 from research.analyst import Analyst
 from research.data import StockData, gather
-from shared.redis_keys import RESEARCH_KEY
+from shared.redis_keys import RESEARCH_KEY, RESEARCH_REQ_KEY
 from shared.settings import settings
 
 logging.basicConfig(
@@ -67,17 +67,30 @@ async def run() -> None:
         return
     logger.info("research start (model=%s, interval=%ss)",
                 analyst.model, settings.research_interval_sec)
+
+    async def analyze_code(code: str, name: str = "") -> None:
+        item = {"code": code, "name": name}
+        try:
+            await run_one(redis, analyst, sender, item)
+            logger.info("[research] %s 분석 완료", code)
+        except Exception as exc:
+            logger.warning("[research %s] 실패: %s", code, exc)
+
+    last_full = 0.0
     try:
         while True:
-            watch = await effective_watchlist(redis)
-            for item in watch:
-                try:
-                    await run_one(redis, analyst, sender, item)
-                    logger.info("[research] %s 분석 완료", item["code"])
-                except Exception as exc:
-                    logger.warning("[research %s] 실패: %s", item.get("code"), exc)
-                await asyncio.sleep(2)   # API 부담 분산
-            await asyncio.sleep(settings.research_interval_sec)
+            # 1) 온디맨드 요청(대시보드 🧠 버튼 → API가 큐에 넣음) 우선 처리
+            reqs = await redis.spop(RESEARCH_REQ_KEY, 5)
+            for code in (reqs or []):
+                await analyze_code(code)
+                await asyncio.sleep(2)
+            # 2) 정기 전체 분석(하루 1회)
+            if time.time() - last_full >= settings.research_interval_sec:
+                for item in await effective_watchlist(redis):
+                    await analyze_code(item["code"], item.get("name", ""))
+                    await asyncio.sleep(2)
+                last_full = time.time()
+            await asyncio.sleep(15)   # 요청 큐 폴링 주기
     finally:
         await redis.aclose()
 
