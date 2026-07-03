@@ -65,6 +65,10 @@ class KISClient:
         self._exp: float = 0.0
         self._lock = asyncio.Lock()   # 토큰 발급 직렬화(동시 발급 → KIS 1분당 1회 제한 위반)
         self._retry_after: float = 0.0
+        # 요청 레이트리밋(전 루프 공유): 버스트로 KIS가 500을 뱉는 것 방지.
+        self._throttle_lock = asyncio.Lock()
+        self._last_call: float = 0.0
+        self._min_interval: float = 1.0 / max(1.0, settings.kis_rate_per_sec)
 
     @property
     def enabled(self) -> bool:
@@ -119,19 +123,39 @@ class KISClient:
                            body.get("msg1"))
         return body
 
-    async def fetch_price(self, client: httpx.AsyncClient, code: str) -> dict:
+    async def _throttle(self) -> None:
+        """전 루프 공유 레이트리밋 — 요청 간 최소 간격 유지(버스트 500 방지)."""
+        async with self._throttle_lock:
+            wait = self._min_interval - (time.monotonic() - self._last_call)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call = time.monotonic()
+
+    async def _get(self, client: httpx.AsyncClient, path: str, tr_id: str,
+                   params: dict, ctx: str, retries: int = 2) -> dict:
+        """throttle + GET + 일시적 5xx 재시도 → _check_rt된 응답 dict."""
         token = await self._token_value(client)
-        params = {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code}
-        r = await client.get(
-            f"{self.base}/uapi/domestic-stock/v1/quotations/inquire-price",
-            headers=self._headers(token, "FHKST01010100"), params=params)
-        r.raise_for_status()
-        return parse_price(self._check_rt(r.json(), f"현재가 {code}").get("output", {}))
+        for attempt in range(retries + 1):
+            await self._throttle()
+            r = await client.get(f"{self.base}{path}",
+                                 headers=self._headers(token, tr_id), params=params)
+            if r.status_code >= 500 and attempt < retries:
+                await asyncio.sleep(0.3 * (attempt + 1))   # KIS 일시적 500 → 재시도
+                continue
+            r.raise_for_status()
+            return self._check_rt(r.json(), ctx)
+        raise RuntimeError(f"KIS {ctx} 반복 실패")
+
+    async def fetch_price(self, client: httpx.AsyncClient, code: str) -> dict:
+        body = await self._get(
+            client, "/uapi/domestic-stock/v1/quotations/inquire-price",
+            "FHKST01010100", {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code},
+            f"현재가 {code}")
+        return parse_price(body.get("output", {}))
 
     async def fetch_daily(self, client: httpx.AsyncClient, code: str,
                           days: int = 120) -> list[dict]:
         """일봉 시계열(최근 days영업일). 시그널 계산용. 오래된→최신 순."""
-        token = await self._token_value(client)
         import datetime as _dt
         end = _dt.date.today()
         start = end - _dt.timedelta(days=int(days * 1.6) + 10)  # 영업일 여유
@@ -141,15 +165,13 @@ class KISClient:
             "fid_input_date_2": end.strftime("%Y%m%d"),
             "fid_period_div_code": "D", "fid_org_adj_prc": "0",
         }
-        r = await client.get(
-            f"{self.base}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
-            headers=self._headers(token, "FHKST03010100"), params=params)
-        r.raise_for_status()
-        return parse_daily(self._check_rt(r.json(), f"일봉 {code}").get("output2", []))[-days:]
+        body = await self._get(
+            client, "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+            "FHKST03010100", params, f"일봉 {code}")
+        return parse_daily(body.get("output2", []))[-days:]
 
     async def fetch_dividend(self, client: httpx.AsyncClient, code: str) -> dict:
         """배당 일정/배당금. 실패/미지원이면 빈 items."""
-        token = await self._token_value(client)
         import datetime as _dt
         today = _dt.date.today()
         params = {
@@ -158,12 +180,10 @@ class KISClient:
             "t_dt": (today + _dt.timedelta(days=120)).strftime("%Y%m%d"),
             "sht_cd": code,
         }
-        r = await client.get(
-            f"{self.base}/uapi/domestic-stock/v1/ksdinfo/dividend",
-            headers=self._headers(token, "HHKDB669102C0"), params=params)
-        r.raise_for_status()
-        return {"code": code, "items": parse_dividend(
-            self._check_rt(r.json(), f"배당 {code}").get("output1", []))}
+        body = await self._get(
+            client, "/uapi/domestic-stock/v1/ksdinfo/dividend",
+            "HHKDB669102C0", params, f"배당 {code}")
+        return {"code": code, "items": parse_dividend(body.get("output1", []))}
 
 
 def _f(v) -> float | None:

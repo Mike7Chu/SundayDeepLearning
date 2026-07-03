@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # 이 앱은 KIS를 조회로만 쓰므로(매매=토스) 기본 True=실전 도메인 조회. 모의 앱키만
     # 있으면 False로. True면 kis_paper와 무관하게 조회를 실전 도메인으로.
     kis_quote_real: bool = True
+    kis_rate_per_sec: float = 8.0        # KIS 조회 초당 요청 상한(버스트 500 방지, 전 루프 공유)
     stock_interval_sec: float = 15.0
     stock_history_interval_sec: float = 21600.0   # 일봉/배당 수집 주기(기본 6시간)
 
