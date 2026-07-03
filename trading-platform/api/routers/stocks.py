@@ -12,7 +12,7 @@ from api.services.stock_dividend import dividend_view
 from api.services.stock_signal import signals_for
 from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
-from collector.stock.kis import load_watchlist
+from collector.stock.kis import effective_watchlist
 from fastapi import HTTPException
 from shared.redis_keys import STOCK_QUOTE_KEY, stock_ohlcv_key
 
@@ -30,7 +30,7 @@ async def stocks() -> dict:
 @router.get("/stocks/all")
 async def stocks_all() -> dict:
     """전체 시장 시세(수집된 유니버스 stock:market ∪ 관심종목 stock:quote). 등락률 정렬."""
-    rows = await load_quotes(get_redis())
+    rows = [r for r in await load_quotes(get_redis()) if r.get("price")]
     rows.sort(key=lambda r: r.get("change_pct") or 0, reverse=True)
     return {"rows": rows, "total": len(rows)}
 
@@ -46,7 +46,7 @@ async def stocks_signals() -> dict:
     """관심종목 기술적 시그널(일봉 시계열 수집분 기준)."""
     redis = get_redis()
     rows = []
-    for w in load_watchlist():
+    for w in await effective_watchlist(redis):
         s = await signals_for(redis, w["code"], w.get("name", ""))
         if s:
             rows.append(s)

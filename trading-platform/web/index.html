@@ -145,6 +145,34 @@ function tableHTML(head, body){
   return `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead>
     <tbody>${body||`<tr><td colspan="${head.length}" class="empty">데이터 없음</td></tr>`}</tbody></table>`;
 }
+
+// ===== 정렬 가능한 데이터 테이블 =====
+// cols: [{label, key, fmt?(r)->html, cls?(r)->class, num?}] · opts: {rowClick?(r)->js, empty?, sort?{key,dir}}
+const _dt={};
+const qesc=(s)=>String(s==null?"":s).replace(/'/g,"\\'");
+function dataTable(id, cols, rows, opts){
+  const prev=_dt[id];
+  _dt[id]={cols, rows, opts:opts||{}, sort:(prev&&prev.sort)||(opts&&opts.sort)||null};
+  drawTable(id);
+}
+function drawTable(id){
+  const s=_dt[id]; let rows=s.rows.slice();
+  if(s.sort){ const {key,dir}=s.sort;
+    rows.sort((a,b)=>{ let x=a[key], y=b[key];
+      const xn=(x==null||x===""), yn=(y==null||y===""); if(xn&&yn) return 0; if(xn) return 1; if(yn) return -1;
+      if(typeof x==="number"&&typeof y==="number") return dir*(x-y);
+      return dir*String(x).localeCompare(String(y),"ko"); }); }
+  const head=s.cols.map((c,i)=>{ const a=(s.sort&&s.sort.key===c.key)?`<span class="arrow">${s.sort.dir<0?"▼":"▲"}</span>`:"";
+    return `<th onclick="sortBy('${id}',${i})">${c.label}${a}</th>`; }).join("");
+  const body=rows.length? rows.map(r=>{
+      const clk=s.opts.rowClick?` class="clk" onclick="${s.opts.rowClick(r)}"`:"";
+      const tds=s.cols.map(c=>`<td class="${c.cls?c.cls(r):(c.num===false?"":"num")}">${c.fmt?c.fmt(r):(r[c.key]??"–")}</td>`).join("");
+      return `<tr${clk}>${tds}</tr>`; }).join("")
+    : `<tr><td colspan="${s.cols.length}" class="empty">${s.opts.empty||"데이터 없음"}</td></tr>`;
+  document.getElementById(id).innerHTML=`<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+function sortBy(id,i){ const s=_dt[id]; const key=s.cols[i].key; if(!key) return;
+  const dir=(s.sort&&s.sort.key===key&&s.sort.dir===-1)?1:-1; s.sort={key,dir}; drawTable(id); }
 const jget=(u)=>fetch(u).then(r=>r.json()).catch(()=>({}));
 
 function switchTab(t){
@@ -165,7 +193,7 @@ async function render(){
     else if(activeTab==="dividend") await renderDividend();
     else if(activeTab==="news") await renderNews();
     else if(activeTab==="research") await renderResearch();
-    else if(activeTab==="settings") renderSettings();
+    else if(activeTab==="settings") await renderSettings();
     setStatus("live","실시간");
   }catch(e){ setStatus("err","오류: "+e.message); }
   finally{ busy=false; }
@@ -219,15 +247,7 @@ async function renderPortfolio(){
       실보유·평가액·수익률이 채워집니다. (발급: developers.tossinvest.com)</div>`;
     return;
   }
-  const hs=(pf.holdings||[]).slice().sort((a,b)=>(b.eval_amount||0)-(a.eval_amount||0));
-  const body=hs.map(r=>{
-    const c=(r.pnl_pct||0)>=0?"pos":"neg", sg=(r.pnl||0)>=0?"+":"";
-    return `<tr class="clk" onclick="openStock('${r.symbol}','${(r.name||'').replace(/'/g,'')}')">
-      <td>${r.name||r.symbol}<span class="num" style="opacity:.6"> ${r.symbol}</span></td>
-      <td class="num">${fmt(r.qty)}</td><td class="num">${won(r.avg_price)}</td>
-      <td class="num">${won(r.cur_price)}</td><td class="num">${won(r.eval_amount)}</td>
-      <td class="num ${c}">${sg}${won(r.pnl)} (${sg}${numC(r.pnl_pct)}%)</td></tr>`;
-  }).join("");
+  const hs=pf.holdings||[];
   const kpi=(k,v,cls="")=>`<div class="card" style="min-width:150px"><h3>${k}</h3><div class="kpi ${cls}">${v}</div></div>`;
   const pcls=(pf.pnl||0)>=0?"pos":"neg";
   $("portfolioBox").innerHTML=`
@@ -238,7 +258,17 @@ async function renderPortfolio(){
       ${kpi("매수여력", won(pf.buying_power))}
     </div>
     ${orderPanelHTML(pf)}
-    <div class="scroll">${tableHTML(["종목","수량","평단","현재가","평가액","평가손익"], body)}</div>`;
+    <div class="scroll" id="pfTable"></div>`;
+  dataTable("pfTable", [
+    {label:"종목", key:"name", num:false, fmt:r=>`${r.name||r.symbol}<span class="num" style="opacity:.6"> ${r.symbol}</span>`},
+    {label:"수량", key:"qty", fmt:r=>fmt(r.qty)},
+    {label:"평단", key:"avg_price", fmt:r=>won(r.avg_price)},
+    {label:"현재가", key:"cur_price", fmt:r=>won(r.cur_price)},
+    {label:"평가액", key:"eval_amount", fmt:r=>won(r.eval_amount)},
+    {label:"평가손익", key:"pnl_pct", cls:r=>"num "+((r.pnl_pct||0)>=0?"pos":"neg"),
+     fmt:r=>`${(r.pnl||0)>=0?"+":""}${won(r.pnl)} (${(r.pnl_pct||0)>=0?"+":""}${numC(r.pnl_pct)}%)`},
+  ], hs, {rowClick:r=>`openStock('${qesc(r.symbol)}','${qesc(r.name)}')`,
+          sort:{key:"eval_amount",dir:-1}, empty:"보유 종목 없음"});
   $("metaInfo").textContent=`보유 ${hs.length}종목 · 평가 ${eok(pf.total_eval)}`;
 }
 
@@ -273,42 +303,59 @@ async function submitOrder(side){
   }catch(e){ alert("주문 오류: "+e.message); }
 }
 
+const nameCell=(r)=>`${r.name||r.code}<span class="num" style="opacity:.5"> ${r.code}</span>`;
+const rowOpen=(r)=>`openStock('${qesc(r.code)}','${qesc(r.name)}')`;
+const pctCls=(k)=>(r)=>"num strong "+((r[k]||0)>=0?"pos":"neg");
+const pctFmt=(k)=>(r)=>r[k]==null?"–":`${r[k]>=0?"+":""}${numC(r[k])}%`;
+
 async function renderStocks(){
-  const all=(await jget("/stocks/all")).rows||[];
-  const rows=all.filter(r=>match(r.name)||match(r.code));
-  $("stocksBox").innerHTML=tableHTML(["종목","현재가","등락률","PER","PBR","상세"],
-    rows.map(r=>{const c=(r.change_pct||0)>=0?"pos":"neg";
-      return `<tr><td class="name clk" onclick="openStock('${r.code}','${r.name}')">${r.name}<span class="num" style="opacity:.5"> ${r.code}</span></td>
-        <td class="strong">${fmt(r.price)}</td><td class="strong ${c}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</td>
-        <td class="num">${numC(r.per)}</td><td class="num">${numC(r.pbr)}</td>
-        <td><button class="btn" onclick="openStock('${r.code}','${r.name}')">보기</button></td></tr>`;}).join(""));
-  $("metaInfo").textContent=`${rows.length}종목 · 전체 시장${term()?' (검색)':''}`;
+  const rows=((await jget("/stocks/all")).rows||[]).filter(r=>match(r.name)||match(r.code));
+  dataTable("stocksBox", [
+    {label:"종목", key:"name", num:false, fmt:nameCell},
+    {label:"현재가", key:"price", fmt:r=>fmt(r.price), cls:()=>"num strong"},
+    {label:"등락률", key:"change_pct", fmt:pctFmt("change_pct"), cls:pctCls("change_pct")},
+    {label:"PER", key:"per", fmt:r=>numC(r.per)},
+    {label:"PBR", key:"pbr", fmt:r=>numC(r.pbr)},
+    {label:"ROE%", key:"roe", fmt:r=>numC(r.roe)},
+    {label:"52주고", key:"high_52w", fmt:r=>fmt(r.high_52w)},
+    {label:"시총(억)", key:"market_cap", fmt:r=>fmt(r.market_cap)},
+  ], rows, {rowClick:rowOpen, sort:{key:"change_pct",dir:-1}, empty:"수집 대기 (시세 없음)"});
+  $("metaInfo").textContent=`${rows.length}종목 · 전체 시장${term()?" (검색)":""}`;
 }
 async function renderValue(){
   const rows=((await jget("/stocks/value")).rows||[]).filter(r=>match(r.name)||match(r.code));
-  $("valueBox").innerHTML=tableHTML(["#","종목","PER","PBR","ROE%","이익수익%","마법랭크","품질"],
-    rows.map(r=>`<tr><td class="num">${r.value_rank}</td><td class="name clk" onclick="openStock('${r.code}','${r.name}')">${r.name}</td>
-      <td class="num">${numC(r.per)}</td><td class="num">${numC(r.pbr)}</td><td class="num">${numC(r.roe)}</td>
-      <td class="num">${numC(r.earnings_yield)}</td><td class="num">${r.magic_rank??"–"}</td><td>${"★".repeat(r.quality||0)||"–"}</td></tr>`).join(""));
-  $("metaInfo").textContent=`전체시장 스크리너 · 상위 ${rows.length}`;
+  dataTable("valueBox", [
+    {label:"종목", key:"name", num:false, fmt:nameCell},
+    {label:"PER", key:"per", fmt:r=>numC(r.per)},
+    {label:"PBR", key:"pbr", fmt:r=>numC(r.pbr)},
+    {label:"ROE%", key:"roe", fmt:r=>numC(r.roe)},
+    {label:"이익수익%", key:"earnings_yield", fmt:r=>numC(r.earnings_yield)},
+    {label:"마법랭크", key:"magic_rank", fmt:r=>r.magic_rank??"–"},
+    {label:"품질", key:"quality", fmt:r=>"★".repeat(r.quality||0)||"–"},
+  ], rows, {rowClick:rowOpen, sort:{key:"magic_rank",dir:1}, empty:"펀더멘털 수집 대기 (KIS 키 필요)"});
+  $("metaInfo").textContent=`전체시장 스크리너 · ${rows.length}종목`;
 }
 async function renderSignal(){
   const rows=((await jget("/stocks/signals")).rows||[]).filter(r=>match(r.name)||match(r.code));
-  $("signalBox").innerHTML=tableHTML(["종목","시그널","RSI","SMA교차","모멘텀60%","점수","백테스트"],
-    rows.map(r=>`<tr><td class="name clk" onclick="openStock('${r.code}','${r.name}')">${r.name}</td>
-      <td>${SIG[r.signal]||r.signal}</td><td class="num">${numC(r.rsi)}</td><td>${r.sma_cross||"–"}</td>
-      <td class="strong ${(r.momentum_pct||0)>=0?'pos':'neg'}">${numC(r.momentum_pct)}</td><td class="num">${r.score}</td>
-      <td><button class="btn" onclick="openStock('${r.code}','${r.name}')">📈</button></td></tr>`).join("")
-    || `<tr><td colspan="7" class="empty">일봉 수집 대기 (KIS 키 필요)</td></tr>`);
+  dataTable("signalBox", [
+    {label:"종목", key:"name", num:false, fmt:nameCell},
+    {label:"시그널", key:"signal", num:false, fmt:r=>SIG[r.signal]||r.signal},
+    {label:"RSI", key:"rsi", fmt:r=>numC(r.rsi)},
+    {label:"SMA교차", key:"sma_cross", num:false, fmt:r=>r.sma_cross||"–"},
+    {label:"모멘텀60%", key:"momentum_pct", fmt:pctFmt("momentum_pct"), cls:pctCls("momentum_pct")},
+    {label:"점수", key:"score", fmt:r=>r.score},
+  ], rows, {rowClick:rowOpen, sort:{key:"score",dir:-1}, empty:"일봉 수집 대기"});
   $("metaInfo").textContent=`${rows.length}종목 · 시그널`;
 }
 async function renderDividend(){
   const rows=((await jget("/stocks/dividend")).rows||[]).filter(r=>match(r.name)||match(r.code));
-  $("dividendBox").innerHTML=tableHTML(["종목","현재가","연배당","배당수익%","다음기준일"],
-    rows.map(r=>`<tr><td class="name clk" onclick="openStock('${r.code}','${r.name}')">${r.name}</td>
-      <td class="strong">${fmt(r.price)}</td><td class="num">${numC(r.annual_per_share,0)}</td>
-      <td class="strong pos">${r.yield_pct!=null?r.yield_pct+"%":"–"}</td><td>${r.next_ex_date||"–"}</td></tr>`).join("")
-    || `<tr><td colspan="5" class="empty">배당 데이터 대기 (KIS 키 필요)</td></tr>`);
+  dataTable("dividendBox", [
+    {label:"종목", key:"name", num:false, fmt:nameCell},
+    {label:"현재가", key:"price", fmt:r=>fmt(r.price), cls:()=>"num strong"},
+    {label:"연배당", key:"annual_per_share", fmt:r=>numC(r.annual_per_share,0)},
+    {label:"배당수익%", key:"yield_pct", fmt:r=>r.yield_pct!=null?r.yield_pct+"%":"–", cls:()=>"num strong pos"},
+    {label:"다음기준일", key:"next_ex_date", num:false, fmt:r=>r.next_ex_date||"–"},
+  ], rows, {rowClick:rowOpen, sort:{key:"yield_pct",dir:-1}, empty:"배당 데이터 대기 (KIS 키 필요)"});
   $("metaInfo").textContent=`${rows.length}종목 · 배당`;
 }
 async function renderNews(){
@@ -337,9 +384,20 @@ async function renderResearch(){
     ${list||'<div class="empty">아직 리포트 없음 — 종목 상세에서 🧠 AI 분석</div>'}`;
   $("metaInfo").textContent=`리서치 ${rows.length}건`;
 }
-function renderSettings(){
+async function renderSettings(){
   const cur=Number(localStorage.getItem("curAsset")||0);
+  const wl=(await jget("/watchlist")).rows||[];
+  const wlRows=wl.map(w=>`<div class="row"><span>${w.name||''} <b class="num">${w.code}</b></span>
+    <button class="btn" onclick="delWatch('${qesc(w.code)}')">✕ 삭제</button></div>`).join("")
+    ||'<div class="empty">관심종목 없음</div>';
   $("settingsBox").innerHTML=`<div class="grid">
+    <div class="card" style="grid-column:1/-1"><h3>관심종목 편집 (${wl.length})</h3>
+      <div class="arow" style="gap:8px;flex-wrap:wrap">
+        <input id="wCode" placeholder="종목코드 6자리(예:005930)" style="width:180px" maxlength="6">
+        <input id="wName" placeholder="이름(선택)" style="width:140px">
+        <button class="btn buy" onclick="addWatch()">＋ 추가</button>
+        <span class="num">추가/삭제 즉시 수집 반영(다음 주기)</span></div>
+      <div style="margin-top:8px">${wlRows}</div></div>
     <div class="card"><h3>목표 · 자산</h3>
       <div class="row"><span>목표 자산</span><b>${eok(TARGET)}</b></div>
       <div class="row"><span>현재 평가자산</span><b>${won(cur)}</b></div>
@@ -359,6 +417,19 @@ function renderSettings(){
       <div class="row"><span>문서</span><a class="clk" href="/docs" target="_blank">/docs</a></div>
       <div class="row"><span>헬스</span><a class="clk" href="/health" target="_blank">/health</a></div></div></div>`;
   $("metaInfo").textContent="설정";
+}
+async function addWatch(){
+  const code=$("wCode").value.trim(), name=$("wName").value.trim();
+  if(!/^\d{6}$/.test(code)){ alert("종목코드는 6자리 숫자"); return; }
+  const r=await fetch("/watchlist",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({code,name})});
+  if(!r.ok){ const d=await r.json().catch(()=>({})); alert("추가 실패: "+(d.detail||r.status)); return; }
+  renderSettings();
+}
+async function delWatch(code){
+  if(!confirm(code+" 관심종목에서 삭제할까요?")) return;
+  await fetch("/watchlist/"+encodeURIComponent(code),{method:"DELETE"});
+  renderSettings();
 }
 
 // ===== 종목 상세 모달 =====

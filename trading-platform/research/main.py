@@ -12,7 +12,7 @@ import time
 
 import redis.asyncio as aioredis
 
-from collector.stock.kis import load_watchlist
+from collector.stock.kis import effective_watchlist
 from notifier.telegram import TelegramSender
 from research.analyst import Analyst
 from research.data import StockData, gather
@@ -68,7 +68,7 @@ async def run() -> None:
                 analyst.model, settings.research_interval_sec)
     try:
         while True:
-            watch = load_watchlist()
+            watch = await effective_watchlist(redis)
             for item in watch:
                 try:
                     await run_one(redis, analyst, sender, item)

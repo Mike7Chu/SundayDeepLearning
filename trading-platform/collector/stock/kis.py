@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from functools import lru_cache
@@ -14,6 +15,7 @@ from pathlib import Path
 import httpx
 import yaml
 
+from shared.redis_keys import WATCHLIST_KEY
 from shared.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,33 @@ _WATCHLIST = Path(__file__).resolve().parent.parent.parent / "config" / "stocks.
 @lru_cache(maxsize=1)
 def load_watchlist() -> list[dict]:
     return yaml.safe_load(_WATCHLIST.read_text()).get("watchlist", [])
+
+
+async def effective_watchlist(redis) -> list[dict]:
+    """대시보드에서 편집한 관심종목(Redis stock:watchlist) 우선, 없으면 config/stocks.yaml.
+
+    사용자가 UI에서 전부 삭제하면 빈 리스트로 저장되며, 그 경우 빈 리스트를 존중한다.
+    """
+    try:
+        raw = await redis.get(WATCHLIST_KEY)
+    except Exception:
+        raw = None
+    if raw is not None:
+        try:
+            items = json.loads(raw)
+            if isinstance(items, list):
+                return items
+        except (ValueError, TypeError):
+            pass
+    return load_watchlist()
+
+
+def normalize_watch_item(code: str, name: str = "") -> dict | None:
+    """관심종목 입력 정규화. 6자리 숫자 코드만 허용(아니면 None)."""
+    code = (code or "").strip()
+    if not (code.isdigit() and len(code) == 6):
+        return None
+    return {"code": code, "name": (name or "").strip()}
 
 
 class KISClient:

@@ -13,7 +13,7 @@ import time
 import httpx
 import redis.asyncio as aioredis
 
-from collector.stock.kis import KISClient, load_watchlist
+from collector.stock.kis import KISClient, effective_watchlist, load_watchlist
 from collector.stock.kis_master import fetch_universe
 from collector.stock.toss import TossClient, candle_metrics
 from shared.redis_keys import (
@@ -63,9 +63,9 @@ async def stock_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     if not kis.enabled:
         logger.info("KIS 미설정 → 주식 수집 비활성 (.env KIS_APP_KEY/SECRET)")
         return
-    watch = load_watchlist()
-    logger.info("stock collector start: %d종목 (paper=%s)", len(watch), settings.kis_paper)
+    logger.info("stock collector start (paper=%s)", settings.kis_paper)
     while True:
+        watch = await effective_watchlist(redis)   # 매 주기 재조회(UI 편집 반영)
         n = 0
         async with httpx.AsyncClient(timeout=10) as client:
             for item in watch:
@@ -87,8 +87,8 @@ async def stock_history_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     """관심종목 일봉(시그널용) + 배당(배당주용) — 느린 주기. 키 없으면 비활성."""
     if not kis.enabled:
         return
-    watch = load_watchlist()
     while True:
+        watch = await effective_watchlist(redis)
         async with httpx.AsyncClient(timeout=15) as client:
             divs: dict[str, str] = {}
             for item in watch:
@@ -222,9 +222,9 @@ async def toss_history_loop(redis: aioredis.Redis, toss: TossClient) -> None:
     """
     if not toss.enabled:
         return
-    watch = load_watchlist()
     while True:
         try:
+            watch = await effective_watchlist(redis)
             codes = [w["code"] for w in watch]
             async with httpx.AsyncClient(timeout=20) as client:
                 info = await toss.fetch_stocks(client, codes)
@@ -260,11 +260,10 @@ async def toss_price_loop(redis: aioredis.Redis, toss: TossClient) -> None:
     """토스 현재가(다건) → stock:quote 실시간 갱신. 전일종가 기준 등락률 재계산."""
     if not toss.enabled:
         return
-    watch = load_watchlist()
-    codes = [w["code"] for w in watch]
     await asyncio.sleep(10)   # 최초 일봉(prev_close) 적재 여유
     while True:
         try:
+            codes = [w["code"] for w in await effective_watchlist(redis)]
             async with httpx.AsyncClient(timeout=15) as client:
                 prices = await toss.fetch_prices(client, codes)
             n = 0

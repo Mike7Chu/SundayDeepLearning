@@ -8,8 +8,9 @@ import fakeredis.aioredis
 
 from api.services.stock_value import load_quotes, value_screener
 from collector.news.dart import format_disclosure, parse_disclosure_list
+from collector.stock.kis import effective_watchlist, normalize_watch_item
 from collector.stock.kis_master import parse_mst
-from shared.redis_keys import STOCK_MARKET_KEY, STOCK_QUOTE_KEY
+from shared.redis_keys import STOCK_MARKET_KEY, STOCK_QUOTE_KEY, WATCHLIST_KEY
 
 
 # ---------- DART ----------
@@ -40,6 +41,31 @@ def test_parse_mst_fixedwidth():
     assert rows[0]["name"] == "삼성전자" and rows[0]["market"] == "KOSPI"
     # 너무 짧은 줄은 무시
     assert parse_mst("short", trailing) == []
+
+
+def test_normalize_watch_item():
+    assert normalize_watch_item("005930", "삼성전자") == {"code": "005930", "name": "삼성전자"}
+    assert normalize_watch_item(" 000660 ")["code"] == "000660"
+    assert normalize_watch_item("12345") is None      # 5자리
+    assert normalize_watch_item("AAPL") is None        # 비숫자
+    assert normalize_watch_item("") is None
+
+
+def test_effective_watchlist_redis_override_and_fallback():
+    async def run():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        # Redis 미설정 → yaml 폴백(비어있지 않음)
+        base = await effective_watchlist(redis)
+        assert isinstance(base, list) and base
+        # Redis 오버라이드 → 그 목록 반환
+        await redis.set(WATCHLIST_KEY, json.dumps([{"code": "005930", "name": "삼성전자"}]))
+        ov = await effective_watchlist(redis)
+        assert ov == [{"code": "005930", "name": "삼성전자"}]
+        # 빈 리스트도 존중(전부 삭제)
+        await redis.set(WATCHLIST_KEY, json.dumps([]))
+        assert await effective_watchlist(redis) == []
+        await redis.aclose()
+    asyncio.run(run())
 
 
 def test_parse_mst_filters_non_stock_codes():
