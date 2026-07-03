@@ -11,12 +11,14 @@ from collector.stock.toss import (
     TossError,
     _json_or_raise,
     _unwrap,
+    candle_metrics,
     parse_accounts,
     parse_buying_power,
     parse_candles,
     parse_holdings,
     parse_order,
     parse_prices,
+    parse_stocks,
 )
 
 
@@ -113,6 +115,38 @@ def test_parse_candles_sorted_and_skips_empty():
     rows = parse_candles(res)
     assert [r["date"] for r in rows] == ["20240101", "20240102"]
     assert rows[1]["high"] == 115
+
+
+def test_parse_stocks():
+    res = [
+        {"symbol": "005930", "name": "삼성전자", "market": "KOSPI",
+         "sharesOutstanding": "5919637922", "currency": "KRW"},
+        {"symbol": "AAPL", "name": "애플", "market": "NASDAQ",
+         "sharesOutstanding": "14702703000", "currency": "USD"},
+    ]
+    out = parse_stocks(res)
+    assert out["005930"]["name"] == "삼성전자"
+    assert out["005930"]["shares"] == 5919637922
+    assert out["AAPL"]["market"] == "NASDAQ"
+
+
+def test_candle_metrics():
+    candles = [
+        {"date": "20240101", "high": 100, "low": 90, "close": 95},
+        {"date": "20240102", "high": 120, "low": 95, "close": 100},   # 전일종가
+        {"date": "20240103", "high": 130, "low": 98, "close": 110},   # 마지막(+10%)
+    ]
+    m = candle_metrics(candles)
+    assert m["change_pct"] == 10.0        # (110-100)/100
+    assert m["high_52w"] == 130
+    assert m["low_52w"] == 90
+    assert m["prev_close"] == 100
+    assert m["last_close"] == 110
+
+
+def test_candle_metrics_empty():
+    m = candle_metrics([])
+    assert m["change_pct"] is None and m["high_52w"] is None and m["last_close"] is None
 
 
 def test_parse_order_normalizes():

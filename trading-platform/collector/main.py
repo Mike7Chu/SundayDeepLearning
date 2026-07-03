@@ -15,7 +15,7 @@ import redis.asyncio as aioredis
 
 from collector.stock.kis import KISClient, load_watchlist
 from collector.stock.kis_master import fetch_universe
-from collector.stock.toss import TossClient
+from collector.stock.toss import TossClient, candle_metrics
 from shared.redis_keys import (
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
@@ -35,6 +35,29 @@ logging.basicConfig(
 logger = logging.getLogger("collector")
 
 
+async def merge_quote(redis: aioredis.Redis, code: str, name: str,
+                      fields: dict) -> None:
+    """stock:quote[code]를 읽어 넘어온 필드(비-None)만 갱신 후 저장.
+
+    KIS(펀더멘털)와 Toss(시세·52주)가 서로의 필드를 지우지 않도록 병합 기록.
+    """
+    raw = await redis.hget(STOCK_QUOTE_KEY, code)
+    rec: dict = {}
+    if raw:
+        try:
+            rec = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            rec = {}
+    rec["code"] = code
+    if name:
+        rec["name"] = name
+    for k, v in fields.items():
+        if v is not None:
+            rec[k] = v
+    rec["ts"] = time.time()
+    await redis.hset(STOCK_QUOTE_KEY, code, json.dumps(rec, ensure_ascii=False))
+
+
 async def stock_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     """KIS 관심종목 현재가(+PER/PBR/EPS/BPS) 수집. 키 미설정이면 비활성."""
     if not kis.enabled:
@@ -43,19 +66,20 @@ async def stock_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     watch = load_watchlist()
     logger.info("stock collector start: %d종목 (paper=%s)", len(watch), settings.kis_paper)
     while True:
-        out: dict[str, str] = {}
+        n = 0
         async with httpx.AsyncClient(timeout=10) as client:
             for item in watch:
                 try:
                     q = await kis.fetch_price(client, item["code"])
-                    out[item["code"]] = json.dumps(
-                        {"code": item["code"], "name": item["name"],
-                         "ts": time.time(), **q})
+                    # 병합 기록(Toss 시세 필드 보존). KIS 현재가가 0이면 price는 덮지 않음.
+                    if not q.get("price"):
+                        q.pop("price", None)
+                    await merge_quote(redis, item["code"], item["name"], q)
+                    n += 1
                 except Exception as exc:
                     logger.warning("[stock %s] 실패: %s", item["code"], exc)
-        if out:
-            await replace_hash(redis, STOCK_QUOTE_KEY, out)
-            logger.info("[stock] %d종목 수집", len(out))
+        if n:
+            logger.info("[stock] %d종목 수집(KIS)", n)
         await asyncio.sleep(settings.stock_interval_sec)
 
 
@@ -191,6 +215,81 @@ async def portfolio_loop(redis: aioredis.Redis, toss: TossClient) -> None:
         await asyncio.sleep(settings.toss_interval_sec)
 
 
+async def toss_history_loop(redis: aioredis.Redis, toss: TossClient) -> None:
+    """토스 일봉·종목정보 → stock:ohlcv(시그널/백테스트) + stock:quote 52주/시총/이름.
+
+    KIS가 시세를 못 채워도 대시보드·리서치가 데이터를 갖도록 하는 주 소스.
+    """
+    if not toss.enabled:
+        return
+    watch = load_watchlist()
+    while True:
+        try:
+            codes = [w["code"] for w in watch]
+            async with httpx.AsyncClient(timeout=20) as client:
+                info = await toss.fetch_stocks(client, codes)
+                for w in watch:
+                    code = w["code"]
+                    try:
+                        candles = await toss.fetch_daily_history(client, code)
+                    except Exception as exc:
+                        logger.warning("[toss hist %s] 실패: %s", code, exc)
+                        continue
+                    if not candles:
+                        continue
+                    await redis.set(stock_ohlcv_key(code),
+                                    json.dumps(candles, ensure_ascii=False))
+                    m = candle_metrics(candles)
+                    meta = info.get(code, {})
+                    shares = meta.get("shares")
+                    last = m.get("last_close")
+                    mktcap = round(last * shares / 1e8, 1) if (last and shares) else None
+                    await merge_quote(redis, code, meta.get("name") or w.get("name", ""), {
+                        "price": last, "change_pct": m["change_pct"],
+                        "high_52w": m["high_52w"], "low_52w": m["low_52w"],
+                        "prev_close": m["prev_close"], "shares": shares,
+                        "market_cap": mktcap,
+                    })
+            logger.info("[toss] 일봉/종목정보 수집 %d종목", len(watch))
+        except Exception as exc:
+            logger.warning("[toss] 일봉 수집 실패: %s", exc)
+        await asyncio.sleep(settings.stock_history_interval_sec)
+
+
+async def toss_price_loop(redis: aioredis.Redis, toss: TossClient) -> None:
+    """토스 현재가(다건) → stock:quote 실시간 갱신. 전일종가 기준 등락률 재계산."""
+    if not toss.enabled:
+        return
+    watch = load_watchlist()
+    codes = [w["code"] for w in watch]
+    await asyncio.sleep(10)   # 최초 일봉(prev_close) 적재 여유
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                prices = await toss.fetch_prices(client, codes)
+            n = 0
+            for p in prices:
+                price = p.get("price")
+                if price is None:
+                    continue
+                raw = await redis.hget(STOCK_QUOTE_KEY, p["symbol"])
+                rec = json.loads(raw) if raw else {}
+                prev = rec.get("prev_close")
+                shares = rec.get("shares")
+                fields = {"price": price}
+                if prev:
+                    fields["change_pct"] = round((price - prev) / prev * 100, 2)
+                if shares:
+                    fields["market_cap"] = round(price * shares / 1e8, 1)
+                await merge_quote(redis, p["symbol"], "", fields)
+                n += 1
+            if n:
+                logger.info("[toss] 시세 %d종목", n)
+        except Exception as exc:
+            logger.warning("[toss] 시세 수집 실패: %s", exc)
+        await asyncio.sleep(settings.stock_interval_sec)
+
+
 async def main() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     logger.info("collector start (stock-only)")
@@ -203,6 +302,8 @@ async def main() -> None:
             universe_loop(redis, kis),
             market_loop(redis, kis),
             portfolio_loop(redis, toss),
+            toss_history_loop(redis, toss),
+            toss_price_loop(redis, toss),
         )
         # 여기 도달 = 모든 루프가 키 미설정으로 종료. 프로세스가 그냥 끝나면
         # restart 정책이 20초마다 재기동(크래시 루프처럼 보임) → idle로 살아있게 대기.

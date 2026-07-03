@@ -125,8 +125,30 @@ class TossClient:
 
     async def fetch_candles(self, client: httpx.AsyncClient, symbol: str,
                             interval: str = "1d") -> list[dict]:
-        params = {"symbol": symbol, "interval": interval}
+        params = {"symbol": symbol, "interval": interval, "count": 200}
         return parse_candles(await self._get(client, "/api/v1/candles", params=params))
+
+    async def fetch_daily_history(self, client: httpx.AsyncClient, symbol: str,
+                                  target: int = 260) -> list[dict]:
+        """일봉 ~target개(최대 2페이지, nextBefore 페이지네이션). 52주·시그널용. 오래된→최신."""
+        collected: list[dict] = []
+        before: str | None = None
+        for _ in range(2):
+            params: dict = {"symbol": symbol, "interval": "1d", "count": 200}
+            if before:
+                params["before"] = before
+            res = await self._get(client, "/api/v1/candles", params=params)
+            collected.extend(parse_candles(res))
+            before = res.get("nextBefore") if isinstance(res, dict) else None
+            if not before or len(collected) >= target:
+                break
+        uniq = {c["date"]: c for c in collected}
+        return sorted(uniq.values(), key=lambda c: c["date"])[-target:]
+
+    async def fetch_stocks(self, client: httpx.AsyncClient,
+                           symbols: list[str]) -> dict:
+        params = {"symbols": ",".join(symbols[:200])}
+        return parse_stocks(await self._get(client, "/api/v1/stocks", params=params))
 
     async def fetch_exchange_rate(self, client: httpx.AsyncClient,
                                   base: str = "USD", quote: str = "KRW") -> dict:
@@ -335,6 +357,44 @@ def parse_candles(res) -> list[dict]:
         })
     rows.sort(key=lambda r: r["date"])
     return rows
+
+
+def parse_stocks(res) -> dict:
+    """종목 기본정보(StockInfo[]) → {symbol: {name, shares, market, currency}}."""
+    out: dict[str, dict] = {}
+    rows = res if isinstance(res, list) else _as_list(res, "stocks", "items")
+    for s in rows:
+        sym = str(_first(s, "symbol", "code") or "")
+        if not sym:
+            continue
+        out[sym] = {
+            "name": _first(s, "name", "symbolName") or "",
+            "shares": _f(_first(s, "sharesOutstanding", "shares")),
+            "market": _first(s, "market") or "",
+            "currency": _first(s, "currency") or "KRW",
+        }
+    return out
+
+
+def candle_metrics(candles: list[dict]) -> dict:
+    """일봉(오래된→최신) → {change_pct, high_52w, low_52w, prev_close, last_close}.
+
+    change_pct = (마지막 종가 − 전일 종가)/전일 종가 ×100. 52주 = 보유 캔들의 고/저.
+    prev_close(전일 종가)는 현재가 기반 등락률 재계산용.
+    """
+    closes = [c["close"] for c in candles if c.get("close")]
+    highs = [c["high"] for c in candles if c.get("high") is not None]
+    lows = [c["low"] for c in candles if c.get("low") is not None]
+    prev = closes[-2] if len(closes) >= 2 else None
+    last = closes[-1] if closes else None
+    change = round((last - prev) / prev * 100, 2) if (last and prev) else None
+    return {
+        "change_pct": change,
+        "high_52w": round(max(highs), 2) if highs else None,
+        "low_52w": round(min(lows), 2) if lows else None,
+        "prev_close": prev,
+        "last_close": last,
+    }
 
 
 def parse_order(res) -> dict:
