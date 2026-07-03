@@ -32,9 +32,10 @@ class Settings(BaseSettings):
     kis_app_secret: str = ""
     kis_account: str = ""
     kis_paper: bool = True               # True=모의투자 도메인
-    # 시세/일봉/배당은 조회 전용이라 실전 도메인이 더 완전(예탁원 배당 등은 모의도메인 미제공).
-    # True면 kis_paper와 무관하게 조회를 실전 도메인으로. (실전 앱키 필요)
-    kis_quote_real: bool = False
+    # 시세/일봉/배당은 조회 전용이라 실전 도메인이 완전(예탁원 배당 등은 모의도메인 미제공).
+    # 이 앱은 KIS를 조회로만 쓰므로(매매=토스) 기본 True=실전 도메인 조회. 모의 앱키만
+    # 있으면 False로. True면 kis_paper와 무관하게 조회를 실전 도메인으로.
+    kis_quote_real: bool = True
     stock_interval_sec: float = 15.0
     stock_history_interval_sec: float = 21600.0   # 일봉/배당 수집 주기(기본 6시간)
 
