@@ -42,6 +42,15 @@ def test_parse_mst_fixedwidth():
     assert parse_mst("short", trailing) == []
 
 
+def test_parse_mst_filters_non_stock_codes():
+    # ELW·파생 등 9자리 영숫자 코드(F74701B9A)는 제외, 6자리 숫자만 유지.
+    trailing = 5
+    stock = "005930   " + "KR7005930003" + "삼성전자" + "XXXXX"
+    elw = "F74701B9A" + "KRXELW000001" + "엘더블유" + "XXXXX"
+    rows = parse_mst(stock + "\n" + elw, trailing, "KOSPI")
+    assert [r["code"] for r in rows] == ["005930"]
+
+
 # ---------- 병합 스크리너(전체시장 ∪ 관심) ----------
 def test_load_quotes_merge_and_value():
     async def run():

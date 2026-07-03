@@ -31,7 +31,9 @@ def parse_mst(content: str, trailing: int, market: str = "") -> list[dict]:
             continue
         code = line[0:9].strip()
         name = line[21:len(line) - trailing].strip()
-        if code:
+        # 정규 상장주식/ETF/ETN은 6자리 숫자 단축코드만. ELW·신주인수권 등
+        # 9자리 영숫자 코드(F74701B9A 등)는 inquire-price에서 500을 유발하므로 제외.
+        if code.isdigit() and len(code) == 6:
             out.append({"code": code, "name": name, "market": market})
     return out
 
