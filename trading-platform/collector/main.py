@@ -32,6 +32,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s | %(message)s",
 )
+# httpx는 매 요청을 INFO로 찍어 KIS 간헐 500(자동 재시도로 복구됨) 로그가 시끄러움 → WARNING만.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("collector")
 
 
