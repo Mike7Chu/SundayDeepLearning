@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from functools import lru_cache
@@ -32,6 +33,8 @@ class KISClient:
         self.base = _PAPER if settings.kis_paper else _REAL
         self._token: str | None = None
         self._exp: float = 0.0
+        self._lock = asyncio.Lock()   # 토큰 발급 직렬화(동시 발급 → KIS 1분당 1회 제한 위반)
+        self._retry_after: float = 0.0
 
     @property
     def enabled(self) -> bool:
@@ -40,20 +43,30 @@ class KISClient:
     async def _token_value(self, client: httpx.AsyncClient) -> str:
         if self._token and time.time() < self._exp - 60:
             return self._token
-        r = await client.post(f"{self.base}/oauth2/tokenP", json={
-            "grant_type": "client_credentials",
-            "appkey": settings.kis_app_key,
-            "appsecret": settings.kis_app_secret,
-        })
-        d = r.json()
-        if "access_token" not in d:
-            # KIS 토큰 에러는 HTTP 200에 error_description(EGW…)로 오기도 함
-            logger.warning("KIS 토큰 발급 실패: %s",
-                           d.get("error_description") or d.get("msg1") or d)
-            r.raise_for_status()
-        self._token = d["access_token"]
-        self._exp = time.time() + int(d.get("expires_in", 86400))
-        return self._token
+        # 여러 루프가 공유하는 클라이언트라, 락으로 한 번만 발급(나머지는 캐시 재사용).
+        async with self._lock:
+            if self._token and time.time() < self._exp - 60:
+                return self._token
+            now = time.time()
+            if now < self._retry_after:
+                # KIS는 토큰 발급을 1분당 1회로 제한 → 실패 후 60초는 재요청 금지(스팸 방지).
+                raise RuntimeError("KIS 토큰 재발급 대기(1분당 1회 제한)")
+            r = await client.post(f"{self.base}/oauth2/tokenP", json={
+                "grant_type": "client_credentials",
+                "appkey": settings.kis_app_key,
+                "appsecret": settings.kis_app_secret,
+            })
+            d = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+            if "access_token" not in d:
+                # KIS 토큰 에러는 HTTP 200/403에 error_description(EGW…)로 옴. 60초 백오프.
+                self._retry_after = now + 60
+                logger.warning("KIS 토큰 발급 실패(60s 대기): %s",
+                               d.get("error_description") or d.get("msg1") or r.status_code)
+                raise RuntimeError("KIS 토큰 발급 실패")
+            self._token = d["access_token"]
+            self._exp = now + int(d.get("expires_in", 86400))
+            self._retry_after = 0.0
+            return self._token
 
     def _headers(self, token: str, tr_id: str) -> dict:
         return {
