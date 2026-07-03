@@ -45,8 +45,12 @@ class KISClient:
             "appkey": settings.kis_app_key,
             "appsecret": settings.kis_app_secret,
         })
-        r.raise_for_status()
         d = r.json()
+        if "access_token" not in d:
+            # KIS 토큰 에러는 HTTP 200에 error_description(EGW…)로 오기도 함
+            logger.warning("KIS 토큰 발급 실패: %s",
+                           d.get("error_description") or d.get("msg1") or d)
+            r.raise_for_status()
         self._token = d["access_token"]
         self._exp = time.time() + int(d.get("expires_in", 86400))
         return self._token
@@ -60,6 +64,18 @@ class KISClient:
             "custtype": "P",
         }
 
+    @staticmethod
+    def _check_rt(body: dict, ctx: str) -> dict:
+        """KIS는 HTTP 200에 rt_cd!='0'(업무에러)을 담아 조용히 실패한다.
+
+        rt_cd가 '0'이 아니면 msg_cd/msg1을 경고 로그(권한·도메인·tr_id 즉시 진단).
+        """
+        if isinstance(body, dict) and body.get("rt_cd") not in (None, "0"):
+            logger.warning("KIS %s 실패: rt_cd=%s msg_cd=%s msg=%s",
+                           ctx, body.get("rt_cd"), body.get("msg_cd"),
+                           body.get("msg1"))
+        return body
+
     async def fetch_price(self, client: httpx.AsyncClient, code: str) -> dict:
         token = await self._token_value(client)
         params = {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": code}
@@ -67,7 +83,7 @@ class KISClient:
             f"{self.base}/uapi/domestic-stock/v1/quotations/inquire-price",
             headers=self._headers(token, "FHKST01010100"), params=params)
         r.raise_for_status()
-        return parse_price(r.json().get("output", {}))
+        return parse_price(self._check_rt(r.json(), f"현재가 {code}").get("output", {}))
 
     async def fetch_daily(self, client: httpx.AsyncClient, code: str,
                           days: int = 120) -> list[dict]:
@@ -86,7 +102,7 @@ class KISClient:
             f"{self.base}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
             headers=self._headers(token, "FHKST03010100"), params=params)
         r.raise_for_status()
-        return parse_daily(r.json().get("output2", []))[-days:]
+        return parse_daily(self._check_rt(r.json(), f"일봉 {code}").get("output2", []))[-days:]
 
     async def fetch_dividend(self, client: httpx.AsyncClient, code: str) -> dict:
         """배당 일정/배당금. 실패/미지원이면 빈 items."""
@@ -103,7 +119,8 @@ class KISClient:
             f"{self.base}/uapi/domestic-stock/v1/ksdinfo/dividend",
             headers=self._headers(token, "HHKDB669102C0"), params=params)
         r.raise_for_status()
-        return {"code": code, "items": parse_dividend(r.json().get("output1", []))}
+        return {"code": code, "items": parse_dividend(
+            self._check_rt(r.json(), f"배당 {code}").get("output1", []))}
 
 
 def _f(v) -> float | None:

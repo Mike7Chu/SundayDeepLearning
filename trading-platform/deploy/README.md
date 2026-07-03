@@ -81,6 +81,7 @@ sudo docker compose up -d --build --remove-orphans
 
 - 주식 플랫폼(피벗 완료) — 서비스: `redis, collector, api, dart, research, briefing`. 코인 기능은 제거됨.
 - KIS 키가 없으면 수집은 idle(대시보드 셸만). `.env`에 `KIS_APP_KEY/SECRET` 넣으면 시세·일봉·배당 채워짐.
+- 토스 키(`TOSS_CLIENT_ID/SECRET`)를 넣으면 **포트폴리오 탭**에 실보유·평가액·수익률이 채워지고 홈 100억 진행률이 자동. (아래 토스 연동 참고.)
 - DART 공시 알림은 `DART_API_KEY`(무료, opendart.fss.or.kr), AI 리서치는 `ANTHROPIC_API_KEY` 또는 `RESEARCH_USE_CLI`.
 - 자동 재시작: compose에 `restart: unless-stopped` 적용됨(재부팅 후 자동 기동).
 - **재배포 시 항상 `--remove-orphans`** — 옛 서비스 컨테이너 잔재로 인한 엉뚱한 알림 방지.
@@ -119,3 +120,34 @@ sudo docker compose up -d --build --remove-orphans
 - 대시보드 **주식 탭** → 종목 옆 `🧠 분석` 클릭 → 리포트 생성, `📄 보기`로 재열람.
 - API: `POST /research/005930/run`, `GET /research/005930`.
 - 키/로그인 둘 다 없으면 안전하게 idle(안내 리포트만).
+
+## 토스증권 연동 (포트폴리오·실매매)
+
+토스가 KIS엔 없는 **실보유(잔고)·매수여력·실주문**을 제공. KIS(시세·펀더멘털)와 상호보완이라 둘 다 켜두면 좋다.
+발급: [developers.tossinvest.com](https://developers.tossinvest.com/docs) → OpenAPI 앱 등록 → `client_id`/`client_secret`.
+
+### (1) 읽기전용 — 포트폴리오/100억 자동 트래킹 (안전, 추천 우선)
+```bash
+# .env
+TOSS_CLIENT_ID=...
+TOSS_CLIENT_SECRET=...
+# TOSS_ACCOUNT_SEQ=      # 비우면 대표계좌 자동탐색
+```
+```bash
+sudo docker compose up -d --build --remove-orphans
+sudo docker compose logs -f collector | grep toss     # [toss] N보유 · 평가 …원 이면 정상
+```
+- 대시보드 **포트폴리오 탭**: 보유종목·평단·현재가·평가액·수익률 + 총평가/현금/매수여력.
+- **홈 100억 진행률**이 토스 실평가액으로 자동(수동 입력 대체).
+- API: `GET /portfolio`, `GET /portfolio/orders`.
+
+### (2) 실매매 — 게이트 (⚠️ 실제 돈이 나감)
+기본 잠금(`TOSS_TRADING_ENABLED=false`)이라 주문 API는 403, 대시보드 매수/매도 버튼도 숨김. 켜려면:
+```bash
+# .env  — 소액·페이퍼 검증 후에만
+TOSS_TRADING_ENABLED=true
+TOSS_MAX_ORDER_KRW=100000     # 주문당 상한(예상금액 초과 시 403)
+```
+- 포트폴리오 탭에 **주문 패널** 노출(지정가만) → 확인 다이얼로그 후 접수. `POST /portfolio/order`(BUY/SELL, symbol/quantity/price), `POST /portfolio/order/{id}/cancel`.
+- **이중 게이트**: `TOSS_TRADING_ENABLED=true` **AND** `예상금액 ≤ TOSS_MAX_ORDER_KRW`. 하나라도 실패면 403.
+- 권장: 먼저 **1주 소액**으로 주문·취소를 검증한 뒤 한도를 올린다. (스크리너·시그널은 판단 보조 — 매매 신호 아님, 면책.)

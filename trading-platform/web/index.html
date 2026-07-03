@@ -94,6 +94,7 @@
   </div>
   <div class="tabs">
     <button data-tab="home" class="active">홈</button>
+    <button data-tab="portfolio">포트폴리오</button>
     <button data-tab="stocks">종목</button>
     <button data-tab="value">가치</button>
     <button data-tab="signal">시그널</button>
@@ -110,6 +111,7 @@
 
 <div class="wrap">
   <div id="panel-home" class="panel active"><div class="grid" id="homeGrid"><div class="empty">불러오는 중…</div></div></div>
+  <div id="panel-portfolio" class="panel"><div id="portfolioBox"><div class="empty">불러오는 중…</div></div></div>
   <div id="panel-stocks" class="panel"><div class="scroll" id="stocksBox"><div class="empty">불러오는 중…</div></div></div>
   <div id="panel-value" class="panel"><div class="scroll" id="valueBox"><div class="empty">불러오는 중…</div></div></div>
   <div id="panel-signal" class="panel"><div class="scroll" id="signalBox"><div class="empty">불러오는 중…</div></div></div>
@@ -156,6 +158,7 @@ async function render(){
   if(busy) return; busy=true;
   try{
     if(activeTab==="home") await renderHome();
+    else if(activeTab==="portfolio") await renderPortfolio();
     else if(activeTab==="stocks") await renderStocks();
     else if(activeTab==="value") await renderValue();
     else if(activeTab==="signal") await renderSignal();
@@ -169,12 +172,14 @@ async function render(){
 }
 
 async function renderHome(){
-  const [q,v,s,d,n]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/signals"),jget("/stocks/dividend"),jget("/news")]);
+  const [q,v,s,d,n,pf]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/signals"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio")]);
   const quotes=q.rows||[], sigs=s.rows||[];
   const buys=sigs.filter(r=>r.signal==="buy"), sells=sigs.filter(r=>r.signal==="sell");
   const up=quotes.filter(r=>(r.change_pct||0)>0).length, dn=quotes.filter(r=>(r.change_pct||0)<0).length;
   $("stCount").textContent=quotes.length; $("stBuy").textContent=buys.length; $("stTarget").textContent=eok(TARGET);
-  const cur=Number(localStorage.getItem("curAsset")||0);
+  // 100억 진행률: 토스 실평가액(+현금) 있으면 자동, 없으면 수동입력(localStorage) 폴백
+  const autoEval=(pf&&pf.total_eval!=null)?(Number(pf.total_eval)+Number(pf.cash||0)):null;
+  const cur=autoEval!=null?autoEval:Number(localStorage.getItem("curAsset")||0);
   const pct=Math.min(100,(cur/TARGET*100));
   const movers=[...quotes].sort((a,b)=>Math.abs(b.change_pct||0)-Math.abs(a.change_pct||0)).slice(0,5);
   const topval=(v.rows||[]).filter(r=>r.magic_rank!=null).slice(0,4);
@@ -184,9 +189,12 @@ async function renderHome(){
       <h3>🎯 100억 프로젝트 진행률</h3>
       <div class="kpi">${eok(cur)} <span class="u">/ ${eok(TARGET)} · ${pct.toFixed(2)}%</span></div>
       <div class="prog"><i style="width:${pct}%"></i></div>
-      <div class="arow"><label>현재 평가자산(원) <input id="curAsset" type="number" style="width:180px" value="${cur||''}" placeholder="예: 50000000"></label>
-        <button class="btn" onclick="saveAsset()">저장</button>
-        <span class="badge">목표까지 ${eok(Math.max(0,TARGET-cur))}</span></div>
+      ${autoEval!=null
+        ? `<div class="arow"><span class="badge pos">토스 실평가 자동</span>
+             <span class="badge">목표까지 ${eok(Math.max(0,TARGET-cur))}</span></div>`
+        : `<div class="arow"><label>현재 평가자산(원) <input id="curAsset" type="number" style="width:180px" value="${cur||''}" placeholder="예: 50000000"></label>
+             <button class="btn" onclick="saveAsset()">저장</button>
+             <span class="badge">목표까지 ${eok(Math.max(0,TARGET-cur))}</span></div>`}
     </div>
     <div class="card"><h3>시장 온도</h3>
       <div class="row"><span>관심종목</span><b>${quotes.length}</b></div>
@@ -202,6 +210,68 @@ async function renderHome(){
   $("metaInfo").textContent=`관심종목 ${quotes.length} · 매수 ${buys.length}`;
 }
 function saveAsset(){ localStorage.setItem("curAsset", $("curAsset").value||0); renderHome(); }
+
+async function renderPortfolio(){
+  const pf=await jget("/portfolio");
+  if(!pf.enabled){
+    $("portfolioBox").innerHTML=`<div class="empty">토스증권 키가 필요합니다.
+      <br>.env 에 <b>TOSS_CLIENT_ID / TOSS_CLIENT_SECRET</b> 설정 후 재배포하면
+      실보유·평가액·수익률이 채워집니다. (발급: developers.tossinvest.com)</div>`;
+    return;
+  }
+  const hs=(pf.holdings||[]).slice().sort((a,b)=>(b.eval_amount||0)-(a.eval_amount||0));
+  const body=hs.map(r=>{
+    const c=(r.pnl_pct||0)>=0?"pos":"neg", sg=(r.pnl||0)>=0?"+":"";
+    return `<tr class="clk" onclick="openStock('${r.symbol}','${(r.name||'').replace(/'/g,'')}')">
+      <td>${r.name||r.symbol}<span class="num" style="opacity:.6"> ${r.symbol}</span></td>
+      <td class="num">${fmt(r.qty)}</td><td class="num">${won(r.avg_price)}</td>
+      <td class="num">${won(r.cur_price)}</td><td class="num">${won(r.eval_amount)}</td>
+      <td class="num ${c}">${sg}${won(r.pnl)} (${sg}${numC(r.pnl_pct)}%)</td></tr>`;
+  }).join("");
+  const kpi=(k,v,cls="")=>`<div class="card" style="min-width:150px"><h3>${k}</h3><div class="kpi ${cls}">${v}</div></div>`;
+  const pcls=(pf.pnl||0)>=0?"pos":"neg";
+  $("portfolioBox").innerHTML=`
+    <div class="grid" style="margin-bottom:12px">
+      ${kpi("총 평가액", won(pf.total_eval))}
+      ${kpi("평가손익", ((pf.pnl||0)>=0?"+":"")+won(pf.pnl)+" ("+numC(pf.pnl_pct)+"%)", pcls)}
+      ${kpi("현금", won(pf.cash))}
+      ${kpi("매수여력", won(pf.buying_power))}
+    </div>
+    ${orderPanelHTML(pf)}
+    <div class="scroll">${tableHTML(["종목","수량","평단","현재가","평가액","평가손익"], body)}</div>`;
+  $("metaInfo").textContent=`보유 ${hs.length}종목 · 평가 ${eok(pf.total_eval)}`;
+}
+
+function orderPanelHTML(pf){
+  if(!pf.trading_enabled){
+    return `<div class="card" style="grid-column:1/-1;margin-bottom:12px">
+      <h3>주문</h3><div class="empty">실매매 비활성 — 설정에서
+      <b>TOSS_TRADING_ENABLED=true</b>로 켜야 매수/매도할 수 있습니다.
+      (안전을 위해 기본 잠금 · 주문당 한도 ${won(pf.max_order_krw)})</div></div>`;
+  }
+  return `<div class="card" style="grid-column:1/-1;margin-bottom:12px">
+    <h3>주문 <span class="badge">⚠️ 실매매 · 한도 ${won(pf.max_order_krw)}</span></h3>
+    <div class="arow" style="flex-wrap:wrap;gap:8px">
+      <input id="oSym" placeholder="종목코드(005930)" style="width:150px">
+      <input id="oQty" type="number" placeholder="수량" style="width:100px">
+      <input id="oPrice" type="number" placeholder="지정가(원)" style="width:130px">
+      <button class="btn buy" onclick="submitOrder('BUY')">매수</button>
+      <button class="btn sell" onclick="submitOrder('SELL')">매도</button>
+    </div></div>`;
+}
+
+async function submitOrder(side){
+  const symbol=$("oSym").value.trim(), quantity=Number($("oQty").value), price=Number($("oPrice").value);
+  if(!symbol||!(quantity>0)||!(price>0)){ alert("종목코드·수량·지정가를 입력하세요"); return; }
+  if(!confirm(`${side==="BUY"?"매수":"매도"} ${symbol} ${quantity}주 @ ${won(price)}\n예상금액 ${won(price*quantity)} — 실제 주문이 나갑니다. 진행할까요?`)) return;
+  try{
+    const r=await fetch("/portfolio/order",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({symbol,side,quantity,price})});
+    const d=await r.json();
+    if(!r.ok){ alert("주문 실패: "+(d.detail||r.status)); return; }
+    alert("주문 접수: "+(d.order&&d.order.order_id||"OK")); renderPortfolio();
+  }catch(e){ alert("주문 오류: "+e.message); }
+}
 
 async function renderStocks(){
   const rows=((await jget("/stocks")).rows||[]).filter(r=>match(r.name)||match(r.code));
@@ -275,10 +345,15 @@ function renderSettings(){
       <div class="arow"><label>현재 자산(원) <input id="setAsset" type="number" style="width:180px" value="${cur||''}"></label>
         <button class="btn" onclick="localStorage.setItem('curAsset',$('setAsset').value||0);renderSettings()">저장</button></div></div>
     <div class="card"><h3>연동 (.env, Pi)</h3>
-      <div class="row"><span>KIS_APP_KEY / SECRET</span><b>한국투자증권 시세·잔고</b></div>
+      <div class="row"><span>KIS_APP_KEY / SECRET</span><b>한국투자증권 시세·펀더멘털</b></div>
+      <div class="row"><span>TOSS_CLIENT_ID / SECRET</span><b>토스 실보유·매수여력·주문</b></div>
       <div class="row"><span>ANTHROPIC_API_KEY / RESEARCH_USE_CLI</span><b>AI 리서치</b></div>
       <div class="row"><span>TELEGRAM_BOT_TOKEN / CHAT_ID</span><b>일일 브리핑·알림</b></div>
       <div class="num" style="margin-top:8px">키는 Pi의 .env에 설정 후 재기동. deploy/set-anthropic.sh 참고.</div></div>
+    <div class="card"><h3>실매매 (토스, 게이트)</h3>
+      <div class="row"><span>TOSS_TRADING_ENABLED</span><b>기본 false (잠금)</b></div>
+      <div class="row"><span>TOSS_MAX_ORDER_KRW</span><b>주문당 한도(소액)</b></div>
+      <div class="num" style="margin-top:8px">⚠️ 실제 돈이 나갑니다. 페이퍼→소액 원칙. true로 켜야 포트폴리오 탭에서 주문 가능.</div></div>
     <div class="card"><h3>API</h3>
       <div class="row"><span>문서</span><a class="clk" href="/docs" target="_blank">/docs</a></div>
       <div class="row"><span>헬스</span><a class="clk" href="/health" target="_blank">/health</a></div></div></div>`;

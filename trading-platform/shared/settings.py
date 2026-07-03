@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     stock_interval_sec: float = 15.0
     stock_history_interval_sec: float = 21600.0   # 일봉/배당 수집 주기(기본 6시간)
 
+    # 토스증권 Open API — 실보유(잔고)·매수여력·실주문. 키 없으면 포트폴리오 비활성
+    toss_client_id: str = ""
+    toss_client_secret: str = ""
+    toss_account_seq: str = ""            # 빈값이면 /accounts로 대표계좌 자동탐색
+    toss_interval_sec: float = 30.0       # 보유/잔고 수집 주기
+    toss_trading_enabled: bool = False    # 실주문 하드 게이트(기본 잠금). True라야 주문 허용
+    toss_max_order_krw: float = 100_000.0  # 주문당 안전 상한(소액 실전)
+
     # 텔레그램 일일 브리핑(주식 시세·시그널·가치·배당 요약). 키 없으면 로그만
     briefing_interval_sec: float = 86400.0        # 브리핑 주기(기본 1일)
     briefing_drip_budget: float = 0.0             # 배당 정기적립 월예산(원). 0=미사용

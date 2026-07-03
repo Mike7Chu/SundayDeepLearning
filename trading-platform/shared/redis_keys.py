@@ -21,6 +21,14 @@ STOCK_MARKET_KEY = "stock:market"       # field=code, value=json(quote+밸류에
 DART_RECENT_KEY = "dart:recent"
 DART_SEEN_KEY = "dart:seen"
 
+# 토스증권 포트폴리오. json{holdings:[{symbol,name,qty,avg_price,cur_price,eval_amount,pnl,pnl_pct}],
+#   cash, total_eval, pnl, pnl_pct, ts}
+TOSS_HOLDINGS_KEY = "toss:holdings"
+# 토스 계좌 요약. json{accountSeq, buying_power, ts}
+TOSS_ACCOUNT_KEY = "toss:account"
+# 토스 미체결 주문 스냅샷. json{orders:[...], ts}
+TOSS_ORDERS_KEY = "toss:orders"
+
 
 def stock_ohlcv_key(code: str) -> str:
     """종목 일봉 시계열. value=json[{date, close, high, low, volume}] (오래된→최신)."""

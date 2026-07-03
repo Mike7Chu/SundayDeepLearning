@@ -24,9 +24,13 @@
 - ✅ **AI 리서치**(`research/`): 4대 거장 렌즈 → Claude(모델 `claude-opus-4-8`). 백엔드 2종 — API 키 or 구독 CLI(`RESEARCH_USE_CLI`).
   `/research`, `/research/{code}`, `POST /research/{code}/run`. 키 없으면 idle.
 - ✅ **일일 브리핑**(`briefing/`): 시세·시그널·가치·배당 요약 텔레그램 1일 발송(`compose.py` 순수). 키 없으면 로그.
-- ✅ **주식 대시보드**(`web/index.html`, `GET /`): 탭 = 홈(100억 진행률·시장온도·하이라이트) / 종목 / 가치 /
-  시그널 / 배당 / 리서치 / 설정. 종목명 클릭 → **종목 상세 모달**(펀더멘털·시그널·배당·백테스트·AI분석). 노드 빌드 X.
-- ⏭️ **다음(로드맵)**: Phase2 관심종목 UI 관리 + 전체시장 스크리너 + 뉴스/공시(DART) / Phase3 포트폴리오(KIS 잔고)·목표 트래킹 / Phase4 자동매매 게이트(페이퍼→소액).
+- ✅ **토스증권 연동**(`collector/stock/toss.py`, `api/routers/portfolio.py`): 실보유·매수여력 수집(`portfolio_loop`
+  → `toss:holdings`/`toss:account`) + **실매매 게이트**(`TOSS_TRADING_ENABLED`+`TOSS_MAX_ORDER_KRW` 이중 검증).
+  `GET /portfolio`, `POST /portfolio/order|.../cancel`. 홈 100억 진행률이 토스 실평가액으로 자동. 키 없으면 idle.
+  KIS(펀더멘털)와 상호보완 — 토스엔 PER/PBR 없음. (KIS 토큰 공유·rt_cd 에러 로깅도 이때 안정화.)
+- ✅ **주식 대시보드**(`web/index.html`, `GET /`): 탭 = 홈(100억 진행률·시장온도·하이라이트) / **포트폴리오** / 종목 / 가치 /
+  시그널 / 배당 / 공시 / 리서치 / 설정. 종목명 클릭 → **종목 상세 모달**(펀더멘털·시그널·배당·백테스트·AI분석). 노드 빌드 X.
+- ⏭️ **다음(로드맵)**: 자동매매 규칙화(시그널·가치·배당 DRIP → 게이트 주문), 미국주식(토스 US 티커)·환율 대시보드.
 
 전체 계획은 승인된 플랜(`~/.claude/plans/toasty-wobbling-truffle.md`), 진행 기록은 `docs/PROGRESS.md`.
 
@@ -35,6 +39,8 @@
 |------|------|
 | `collector/main.py` | KIS 관심종목 현재가(15s) + 일봉·배당(6h) 수집 → Redis |
 | `collector/stock/kis.py` | KIS 클라이언트(`fetch_price`/`fetch_daily`/`fetch_dividend`, `parse_*`). `config/stocks.yaml` 관심종목 |
+| `collector/stock/toss.py` | 토스 클라이언트(OAuth2·`fetch_holdings`/`fetch_buying_power`/`place_order`, `parse_*`) — 실보유·실매매 |
+| `api/routers/portfolio.py` | 포트폴리오·매수여력·(게이트)주문 REST |
 | `api/services/stock_value.py` | 마법공식 가치 스크리너 |
 | `api/services/stock_signal.py` | 기술적 시그널(SMA/RSI/모멘텀/볼린저) |
 | `api/services/stock_dividend.py` | 배당수익률·캘린더·DRIP |
@@ -64,6 +70,7 @@ pytest tests/ -q                    # 23 passed
 
 ## 연동 키 (.env, Pi)
 - **KIS**: `KIS_APP_KEY/SECRET/ACCOUNT/PAPER` — 주식 시세·일봉·배당(모의투자 도메인 지원).
+- **토스**: `TOSS_CLIENT_ID/SECRET`(+선택 `TOSS_ACCOUNT_SEQ`) — 실보유·매수여력. 실매매는 `TOSS_TRADING_ENABLED=true`+`TOSS_MAX_ORDER_KRW` 게이트.
 - **AI 리서치**: `ANTHROPIC_API_KEY`(종량) 또는 `RESEARCH_USE_CLI=true`+Claude Code 로그인(구독 무과금, `deploy/run-research-host.sh` 호스트 구동).
 - **텔레그램**: `TELEGRAM_BOT_TOKEN/CHAT_ID` — 일일 브리핑.
 - **목표**: `TARGET_ASSET_KRW`(기본 100억) — 홈 진행률.

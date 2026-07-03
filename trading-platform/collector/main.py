@@ -15,11 +15,14 @@ import redis.asyncio as aioredis
 
 from collector.stock.kis import KISClient, load_watchlist
 from collector.stock.kis_master import fetch_universe
+from collector.stock.toss import TossClient
 from shared.redis_keys import (
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
     STOCK_UNIVERSE_KEY,
+    TOSS_ACCOUNT_KEY,
+    TOSS_HOLDINGS_KEY,
     stock_ohlcv_key,
 )
 from shared.redis_store import replace_hash
@@ -32,9 +35,8 @@ logging.basicConfig(
 logger = logging.getLogger("collector")
 
 
-async def stock_loop(redis: aioredis.Redis) -> None:
+async def stock_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     """KIS 관심종목 현재가(+PER/PBR/EPS/BPS) 수집. 키 미설정이면 비활성."""
-    kis = KISClient()
     if not kis.enabled:
         logger.info("KIS 미설정 → 주식 수집 비활성 (.env KIS_APP_KEY/SECRET)")
         return
@@ -57,9 +59,8 @@ async def stock_loop(redis: aioredis.Redis) -> None:
         await asyncio.sleep(settings.stock_interval_sec)
 
 
-async def stock_history_loop(redis: aioredis.Redis) -> None:
+async def stock_history_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     """관심종목 일봉(시그널용) + 배당(배당주용) — 느린 주기. 키 없으면 비활성."""
-    kis = KISClient()
     if not kis.enabled:
         return
     watch = load_watchlist()
@@ -86,9 +87,8 @@ async def stock_history_loop(redis: aioredis.Redis) -> None:
         await asyncio.sleep(settings.stock_history_interval_sec)
 
 
-async def universe_loop(redis: aioredis.Redis) -> None:
+async def universe_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     """전체 시장 유니버스(코스피/코스닥 종목마스터) — 하루 1회 갱신. 실패 시 관심종목 폴백."""
-    kis = KISClient()
     if not kis.enabled:
         return
     while True:
@@ -114,9 +114,8 @@ async def _universe_codes(redis: aioredis.Redis) -> list[dict]:
     return load_watchlist()   # 폴백
 
 
-async def market_loop(redis: aioredis.Redis) -> None:
+async def market_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     """유니버스 펀더멘털을 배치로 순회 수집 → stock:market (전체 시장 스크리너). 키 없으면 비활성."""
-    kis = KISClient()
     if not kis.enabled:
         return
     cursor = 0
@@ -147,15 +146,47 @@ async def market_loop(redis: aioredis.Redis) -> None:
         await asyncio.sleep(max(10, settings.market_scan_interval_sec / n))
 
 
+async def portfolio_loop(redis: aioredis.Redis, toss: TossClient) -> None:
+    """토스증권 실보유(잔고)·매수여력 수집 → toss:holdings / toss:account. 키 없으면 비활성."""
+    if not toss.enabled:
+        logger.info("토스 미설정 → 포트폴리오 수집 비활성 (.env TOSS_CLIENT_ID/SECRET)")
+        return
+    account: str | None = None
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                if account is None:
+                    account = await toss.resolve_account_seq(client)
+                    if account is None:
+                        logger.warning("[toss] 계좌 조회 실패 — 재시도 대기")
+                        await asyncio.sleep(60)
+                        continue
+                    logger.info("[toss] account=%s", account)
+                snap = await toss.fetch_holdings(client, account)
+                bp = await toss.fetch_buying_power(client, account)
+            await redis.set(TOSS_HOLDINGS_KEY, json.dumps(snap, ensure_ascii=False))
+            await redis.set(TOSS_ACCOUNT_KEY, json.dumps(
+                {"accountSeq": account, "buying_power": bp.get("buying_power"),
+                 "ts": time.time()}, ensure_ascii=False))
+            logger.info("[toss] %d보유 · 평가 %.0f원", len(snap.get("holdings", [])),
+                        snap.get("total_eval", 0) or 0)
+        except Exception as exc:
+            logger.warning("[toss] 포트폴리오 수집 실패: %s", exc)
+        await asyncio.sleep(settings.toss_interval_sec)
+
+
 async def main() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     logger.info("collector start (stock-only)")
+    kis = KISClient()       # 토큰 1회 발급·공유(4개 루프 주입 — 과발급 방지)
+    toss = TossClient()
     try:
         await asyncio.gather(
-            stock_loop(redis),
-            stock_history_loop(redis),
-            universe_loop(redis),
-            market_loop(redis),
+            stock_loop(redis, kis),
+            stock_history_loop(redis, kis),
+            universe_loop(redis, kis),
+            market_loop(redis, kis),
+            portfolio_loop(redis, toss),
         )
     finally:
         await redis.aclose()
