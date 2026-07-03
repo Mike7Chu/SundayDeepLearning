@@ -188,6 +188,10 @@ async def main() -> None:
             market_loop(redis, kis),
             portfolio_loop(redis, toss),
         )
+        # 여기 도달 = 모든 루프가 키 미설정으로 종료. 프로세스가 그냥 끝나면
+        # restart 정책이 20초마다 재기동(크래시 루프처럼 보임) → idle로 살아있게 대기.
+        logger.info("활성 수집 루프 없음(KIS/TOSS 키 미설정) — idle 대기. .env 설정 후 재기동")
+        await asyncio.Event().wait()
     finally:
         await redis.aclose()
 

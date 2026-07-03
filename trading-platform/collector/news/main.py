@@ -33,6 +33,9 @@ async def run() -> None:
     dart = DartClient()
     if not dart.enabled:
         logger.info("DART 미설정 → 공시 수집 비활성 (.env DART_API_KEY)")
+        # 그냥 return하면 컨테이너가 exit 0 → restart 정책이 재기동 반복(크래시 루프처럼 보임).
+        # idle로 살아있게 영구 대기.
+        await asyncio.Event().wait()
         return
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     sender = TelegramSender()
