@@ -10,7 +10,8 @@ from datetime import date
 
 import redis.asyncio as aioredis
 
-from shared.redis_keys import STOCK_DIVIDEND_KEY, STOCK_QUOTE_KEY
+from api.services.stock_value import load_quotes
+from shared.redis_keys import STOCK_DIVIDEND_KEY
 
 
 def _today_str() -> str:
@@ -60,15 +61,9 @@ def drip_plan(rows: list[dict], monthly_budget: float) -> list[dict]:
 
 
 async def dividend_view(redis: aioredis.Redis, monthly_budget: float = 0.0) -> dict:
-    quotes_raw = await redis.hgetall(STOCK_QUOTE_KEY)
+    # 전체시장(stock:market) ∪ 관심(stock:quote) 병합 → 배당 데이터 있는 종목 전부 랭킹.
+    quotes = {q["code"]: q for q in await load_quotes(redis) if q.get("code")}
     div_raw = await redis.hgetall(STOCK_DIVIDEND_KEY)
-    quotes = {}
-    for v in quotes_raw.values():
-        try:
-            q = json.loads(v)
-            quotes[q.get("code")] = q
-        except (json.JSONDecodeError, TypeError):
-            continue
     rows: list[dict] = []
     for code, q in quotes.items():
         items = []

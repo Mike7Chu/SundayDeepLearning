@@ -150,7 +150,14 @@ class KISClient:
                 await asyncio.sleep(0.4 * (attempt + 1))   # KIS 일시적 500 → 재시도
                 continue
             r.raise_for_status()
-            return self._check_rt(r.json(), ctx)
+            try:
+                body = r.json()
+            except ValueError:
+                # 비-JSON 응답(HTML 에러 페이지 등) → 스니펫 로깅 후 실패
+                snippet = r.text[:200].replace("\n", " ")
+                logger.warning("KIS %s 비-JSON 응답: %s", ctx, snippet)
+                raise RuntimeError(f"KIS {ctx} 비-JSON 응답")
+            return self._check_rt(body, ctx)
         raise RuntimeError(f"KIS {ctx} 반복 실패")
 
     async def fetch_price(self, client: httpx.AsyncClient, code: str) -> dict:
