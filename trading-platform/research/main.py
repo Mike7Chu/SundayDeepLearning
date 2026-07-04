@@ -16,7 +16,12 @@ from collector.stock.kis import effective_watchlist
 from notifier.telegram import TelegramSender
 from research.analyst import Analyst
 from research.data import StockData, gather
-from shared.redis_keys import RESEARCH_KEY, RESEARCH_REQ_KEY
+from shared.redis_keys import (
+    RESEARCH_INV_KEY,
+    RESEARCH_INV_REQ_KEY,
+    RESEARCH_KEY,
+    RESEARCH_REQ_KEY,
+)
 from shared.settings import settings
 
 logging.basicConfig(
@@ -88,9 +93,25 @@ async def run() -> None:
         return bool(r.get("enabled") and r.get("report")
                     and time.time() - (r.get("ts") or 0) < settings.research_interval_sec)
 
+    async def inversion_code(code: str) -> None:
+        """매매 엔진의 역방향(감점) 검증 요청 처리 → research:inversion 저장."""
+        try:
+            data = await gather(redis, code) or StockData(code=code)
+            result = await analyst.analyze_inversion(data)
+            await redis.hset(RESEARCH_INV_KEY, code,
+                             json.dumps(result, ensure_ascii=False))
+            logger.info("[inversion] %s 감점 %s/30", code, result.get("penalty"))
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] %s 역방향 검증 실패: %s", code, exc)
+
     last_full = 0.0
     try:
         while True:
+            # 0) 매매 엔진의 역방향 검증 요청(감점) — 매수 판단에 직결되므로 최우선
+            inv = await redis.spop(RESEARCH_INV_REQ_KEY, 5)
+            for code in (inv or []):
+                await inversion_code(code)
+                await asyncio.sleep(2)
             # 1) 온디맨드 요청(대시보드 🧠 '다시 분석' → API가 큐에 넣음)은 무조건 처리
             reqs = await redis.spop(RESEARCH_REQ_KEY, 5)
             for code in (reqs or []):

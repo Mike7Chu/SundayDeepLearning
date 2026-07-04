@@ -33,6 +33,15 @@ TOSS_ACCOUNT_KEY = "toss:account"
 # 토스 미체결 주문 스냅샷. json{orders:[...], ts}
 TOSS_ORDERS_KEY = "toss:orders"
 
+# 매매 엔진(멍거 리스크 실드). peak=자산 최고점(float str), risk=json{buy_lock,mdd_pct,...},
+# buylist=json{rows:[...], ts} — 2단계 필터 통과 종목(실주문 아님, 리스트만)
+ENGINE_PEAK_KEY = "engine:peak_asset"
+ENGINE_RISK_KEY = "engine:risk"
+ENGINE_BUYLIST_KEY = "engine:buylist"
+# 역방향(Inversion) AI 분석. inv_requests=set(요청 큐), inversion=hash{code: json{penalty,report,ts}}
+RESEARCH_INV_REQ_KEY = "research:inv_requests"
+RESEARCH_INV_KEY = "research:inversion"
+
 
 def stock_ohlcv_key(code: str) -> str:
     """종목 일봉 시계열. value=json[{date, close, high, low, volume}] (오래된→최신)."""

@@ -215,7 +215,7 @@ async function render(){
 }
 
 async function renderHome(){
-  const [q,v,sc,d,n,pf]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio")]);
+  const [q,v,sc,d,n,pf,eng]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine")]);
   const quotes=q.rows||[], scores=sc.rows||[];
   const buys=scores.filter(r=>r.score>=60), sells=scores.filter(r=>r.score<45);
   const up=quotes.filter(r=>(r.change_pct||0)>0).length, dn=quotes.filter(r=>(r.change_pct||0)<0).length;
@@ -247,6 +247,13 @@ async function renderHome(){
     <div class="card"><h3>등락 TOP</h3>${movers.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span>
       <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</b></div>`).join("")||'<div class="empty">데이터 없음(KIS 키 필요)</div>'}</div>
     <div class="card"><h3>🎯 오늘의 매수 후보 (매력도)</h3>${buys.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name} <span class="badge">${r.verdict}</span></span><b class="num strong ${VC(r.score)}">${numC(r.score,0)}</b></div>`).join("")||'<div class="empty">후보 없음 (KIS 키 필요)</div>'}</div>
+    ${eng&&eng.enabled?`<div class="card"><h3>🛡️ 리스크 실드 ${eng.risk.buy_lock?'<span class="badge sell">매수 잠금</span>':'<span class="badge pos">정상</span>'}</h3>
+      <div class="row"><span>최고점 대비(MDD)</span><b class="${(eng.risk.mdd_pct||0)>=10?'neg':'num'}">${eng.risk.mdd_pct!=null?'-'+numC(eng.risk.mdd_pct,1)+'%':'–'} <span class="num">(한도 -${numC(eng.rules.mdd_limit_pct,0)}%)</span></b></div>
+      <div class="row"><span>현금 비중</span><b class="${(eng.risk.cash_pct||0)<eng.rules.cash_floor_pct?'neg':'pos'}">${eng.risk.cash_pct!=null?numC(eng.risk.cash_pct,1)+'%':'–'} <span class="num">(바닥 ${numC(eng.rules.cash_floor_pct,0)}%)</span></b></div>
+      <div class="row"><span>종목당 매수 한도</span><b class="num">${eng.risk.per_stock_cap?won(eng.risk.per_stock_cap):'–'} <span class="num">(자산의 ${numC(eng.rules.max_stock_pct,0)}%)</span></b></div>
+      <div class="num" style="margin-top:6px">${(eng.risk.reasons||[]).join(' · ')}</div></div>
+    <div class="card"><h3>✅ 2단계 필터 통과 (${numC(eng.rules.buy_score_min,0)}점↑)</h3>
+      ${(eng.buylist||[]).slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name} <span class="badge">감점 ${r.penalty}</span></span><b class="num strong buy">${numC(r.final,0)}</b></div>`).join("")||'<div class="empty">통과 종목 없음 — 정량 필터(ROE·PBR·PER) + AI 리스크 검증 대기</div>'}</div>`:''}
     <div class="card"><h3>💎 저평가 상위</h3>${topval.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="num">PER ${numC(r.per)} · ROE ${numC(r.roe)}%</b></div>`).join("")||'<div class="empty">데이터 없음</div>'}</div>
     <div class="card"><h3>💰 배당 상위</h3>${topdiv.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="pos">${r.yield_pct}%</b></div>`).join("")||'<div class="empty">데이터 없음</div>'}</div>
     <div class="card" style="grid-column:1/-1"><h3>📢 최근 공시</h3>${(n.rows||[]).slice(0,6).map(r=>`<div class="row"><a class="clk" href="${r.url}" target="_blank">${r.corp_name} · ${r.report_nm}</a><span class="num">${r.rcept_dt||''}</span></div>`).join("")||'<div class="empty">공시 없음 (DART 키 필요)</div>'}</div>`;

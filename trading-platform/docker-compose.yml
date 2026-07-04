@@ -64,3 +64,16 @@ services:
     depends_on:
       - redis
     mem_limit: 256m
+
+  # 매매 엔진: 1시간 주기 리스크 실드(MDD·현금·한도) + 2단계 필터 매수리스트.
+  # 주문은 내지 않음 — 수동 주문 API의 게이트/알림/리스트만 담당.
+  engine:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    command: ["python", "-m", "engine.main"]
+    depends_on:
+      - redis
+    mem_limit: 256m

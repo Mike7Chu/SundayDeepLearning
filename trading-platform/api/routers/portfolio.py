@@ -14,7 +14,8 @@ from pydantic import BaseModel
 
 from api.redis_client import get_redis
 from collector.stock.toss import TossClient, TossError
-from shared.redis_keys import TOSS_ACCOUNT_KEY, TOSS_HOLDINGS_KEY
+from engine.risk import order_allowed
+from shared.redis_keys import ENGINE_RISK_KEY, TOSS_ACCOUNT_KEY, TOSS_HOLDINGS_KEY
 from shared.settings import settings
 
 router = APIRouter()
@@ -68,8 +69,8 @@ class OrderRequest(BaseModel):
     order_type: str = "LIMIT"
 
 
-def _assert_trading_allowed(est_amount: float) -> None:
-    """실주문 이중 게이트. 실패 시 403."""
+async def _assert_trading_allowed(est_amount: float, side: str = "BUY") -> None:
+    """실주문 삼중 게이트(키·한도 + 멍거 리스크 실드). 실패 시 403."""
     if not _toss.enabled:
         raise HTTPException(403, "토스 키 미설정 (.env TOSS_CLIENT_ID/SECRET)")
     if not settings.toss_trading_enabled:
@@ -79,6 +80,17 @@ def _assert_trading_allowed(est_amount: float) -> None:
         raise HTTPException(
             403, f"주문금액 {est_amount:,.0f}원 > 한도 {settings.toss_max_order_krw:,.0f}원 "
                  f"(.env TOSS_MAX_ORDER_KRW)")
+    # 멍거 리스크 실드(엔진 가동 시): MDD 서킷브레이커·현금 바닥·종목당 5% 한도.
+    raw = await get_redis().get(ENGINE_RISK_KEY)
+    risk = {}
+    if raw:
+        try:
+            risk = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            risk = {}
+    ok, reason = order_allowed(risk, side, est_amount)
+    if not ok:
+        raise HTTPException(403, reason)
 
 
 @router.post("/portfolio/order")
@@ -88,7 +100,7 @@ async def place_order(req: OrderRequest) -> dict:
         raise HTTPException(400, "side는 BUY 또는 SELL")
     if req.quantity <= 0 or req.price <= 0:
         raise HTTPException(400, "quantity·price는 양수")
-    _assert_trading_allowed(req.price * req.quantity)
+    await _assert_trading_allowed(req.price * req.quantity, req.side)
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             account = await _toss.resolve_account_seq(client)

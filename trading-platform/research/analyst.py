@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 import time
 
@@ -20,6 +21,16 @@ from shared.settings import settings
 logger = logging.getLogger(__name__)
 
 _CLI_TIMEOUT = 180.0   # CLI 분석 1건 최대 대기(초)
+
+
+def parse_penalty(text: str) -> int:
+    """리포트에서 '감점: N/30' 추출(순수 함수). 못 찾으면 보수적으로 30."""
+    m = None
+    for m in re.finditer(r"감점\s*[:：]?\s*(\d{1,2})\s*/\s*30", text or ""):
+        pass                     # 마지막 매치 사용(요약에 재언급될 수 있음)
+    if not m:
+        return 30
+    return max(0, min(30, int(m.group(1))))
 
 
 class Analyst:
@@ -77,6 +88,37 @@ class Analyst:
             return self._wrap(data, enabled=True,
                               report=f"⚠️ 분석 실패 (백엔드={mode})\n{exc}")
         return self._wrap(data, enabled=True, report=report)
+
+    async def analyze_inversion(self, data: StockData) -> dict:
+        """멍거 역방향 사고: '지금 사면 망하는 이유'만 집중 분석 → 감점(0~30) 산출.
+
+        2단계 필터용. 마지막 줄 '감점: N/30'을 파싱한다. 실패 시 보수적으로 감점 30
+        (검증 못 한 종목은 사지 않는다 — 능력 범위).
+        """
+        mode = self.mode
+        if mode is None:
+            return {"code": data.code, "name": data.name, "penalty": None,
+                    "report": "리서치 비활성", "ts": time.time()}
+        prompt = (
+            "역방향 사고(Inversion) 리스크 검증: 아래 종목을 '좋은 이유'가 아니라 "
+            "**'지금 사면 망하는 이유'만** 집중 분석하세요.\n"
+            "- 리스크 3~5가지(사이클 하강, 경쟁 심화, 재무 악화, 밸류에이션 함정, "
+            "규제·지배구조)를 근거와 함께 간결히.\n"
+            "[데이터 신뢰 원칙] 제공 수치는 실측 시장 데이터입니다. 당신의 기억 속 과거 "
+            "주가 수준과 달라도(시장 대세 상승 등) 데이터 오류로 단정하지 마세요.\n"
+            "- 마지막 줄에 반드시 정확히 이 형식으로: 감점: N/30  (N=0~30 정수, "
+            "리스크가 클수록 큼. 치명적 결함이면 25~30, 경미하면 0~10)\n\n"
+            f"{format_for_prompt(data)}"
+        )
+        try:
+            report = await (self._via_api(prompt) if mode == "api" else self._via_cli(prompt))
+        except Exception as exc:
+            logger.warning("[inversion %s] 실패: %s", data.code, exc)
+            return {"code": data.code, "name": data.name, "penalty": 30,
+                    "report": f"검증 실패({exc}) — 보수적 감점 30", "ts": time.time()}
+        return {"code": data.code, "name": data.name,
+                "penalty": parse_penalty(report), "report": report.strip(),
+                "ts": time.time()}
 
     async def _via_api(self, prompt: str) -> str:
         # 지연 import: 키 있는 환경에서만 anthropic 필요

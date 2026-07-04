@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from api.redis_client import close_redis
-from api.routers import news, portfolio, research, stocks, watchlist
+from api.routers import engine, news, portfolio, research, stocks, watchlist
 
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -37,6 +37,7 @@ app.include_router(research.router)
 app.include_router(news.router)
 app.include_router(portfolio.router)
 app.include_router(watchlist.router)
+app.include_router(engine.router)
 
 
 @app.get("/health")

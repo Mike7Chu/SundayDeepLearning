@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     briefing_interval_sec: float = 86400.0        # 브리핑 주기(기본 1일)
     briefing_drip_budget: float = 0.0             # 배당 정기적립 월예산(원). 0=미사용
 
+    # ===== 매매 엔진(멍거 리스크 실드) — 1시간 주기 검증. 실주문은 별도 게이트 =====
+    engine_interval_sec: float = 3600.0   # 잔고·리스크·시그널 점검 주기
+    mdd_limit_pct: float = 15.0           # 최고점 대비 -15% → BUY_LOCK(서킷 브레이커)
+    max_stock_pct: float = 5.0            # 단일 종목 최대 매수금액 = 자산의 5%
+    cash_floor_pct: float = 25.0          # 현금 비중 25% 미만이면 매수 시그널 무시
+    buy_score_min: float = 70.0           # 2단계 필터 최종 점수 컷(이상만 매수 리스트)
+    inversion_max_per_cycle: int = 5      # 사이클당 AI 역방향 분석 요청 상한(토큰 절약)
+
     # AI 가치투자 리서치 (Addendum 9) — 키 없으면 비활성(idle)
     anthropic_api_key: str = ""
     research_model: str = "claude-opus-4-8"
