@@ -34,7 +34,7 @@ def margin_of_safety(price: float | None, eps: float | None, bps: float | None) 
 
 
 def _value_axis(q: dict) -> tuple[float, list[str]]:
-    """가치 40점: 이익수익률·ROE·PBR·안전마진."""
+    """가치 30점: 이익수익률·ROE·PBR·안전마진 (트레일링 기준 — 성장 축이 보완)."""
     price, per, pbr = q.get("price"), q.get("per"), q.get("pbr")
     eps, bps = q.get("eps"), q.get("bps")
     ey = (eps / price * 100) if (eps and price) else (100 / per if (per and per > 0) else None)
@@ -44,7 +44,7 @@ def _value_axis(q: dict) -> tuple[float, list[str]]:
     s_roe = _clamp(roe / 15) if roe is not None else 0.0       # ROE 15%+ 만점
     s_pbr = _clamp((3 - pbr) / 2.2) if (pbr and pbr > 0) else 0.0  # PBR 0.8↓ 만점, 3↑ 0
     s_mos = _clamp(mos / 30) if mos is not None else 0.0       # 안전마진 30%+ 만점
-    score = 40 * (0.35 * s_ey + 0.25 * s_roe + 0.20 * s_pbr + 0.20 * s_mos)
+    score = 30 * (0.35 * s_ey + 0.25 * s_roe + 0.20 * s_pbr + 0.20 * s_mos)
     reasons = []
     if ey is not None and ey >= 8:
         reasons.append(f"이익수익률 {ey:.1f}%")
@@ -56,7 +56,7 @@ def _value_axis(q: dict) -> tuple[float, list[str]]:
 
 
 def _quality_axis(q: dict) -> tuple[float, list[str]]:
-    """품질 25점: 흑자·ROE·PBR·PER·안전마진 체크리스트."""
+    """품질 20점: 흑자·ROE·PBR·PER·안전마진 체크리스트."""
     price, per, pbr = q.get("price"), q.get("per"), q.get("pbr")
     eps, bps = q.get("eps"), q.get("bps")
     roe = (eps / bps * 100) if (eps and bps) else None
@@ -69,7 +69,25 @@ def _quality_axis(q: dict) -> tuple[float, list[str]]:
         (mos is not None and mos > 0, "그레이엄 저평가"),
     ]
     passed = [label for ok, label in checks if ok]
-    return round(25 * len(passed) / len(checks), 1), passed
+    return round(20 * len(passed) / len(checks), 1), passed
+
+
+def _growth_axis(q: dict) -> tuple[float, list[str]]:
+    """성장 15점: 순이익 YoY(DART 공식) — 트레일링 PER 함정 보정.
+
+    이익이 급증하는 변곡점(예: AI·HBM 사이클)에서는 트레일링 PER이 높아도
+    시장이 미래 이익을 반영 중일 수 있다. 데이터 없으면 중립(5점).
+    """
+    g = q.get("ni_growth_pct")
+    if g is None:
+        return 5.0, []                          # 미수집 → 중립(가점·감점 없음)
+    s = _clamp((g + 10) / 60)                    # -10%↓=0점, +50%↑=만점
+    reasons = []
+    if g >= 15:
+        reasons.append(f"순이익 {g:+.0f}%")
+    elif g < 0:
+        reasons.append(f"이익 감소 {g:.0f}%")
+    return round(15 * s, 1), reasons
 
 
 def _momentum_axis(closes: list[float]) -> tuple[float, list[str], dict]:
@@ -129,20 +147,26 @@ def _verdict(score: float) -> str:
 
 
 def compute_score(quote: dict, closes: list[float] | None = None) -> dict:
-    """merged quote(+일봉 종가) → 투자 매력도 0~100 + 판정 + 축별 근거."""
+    """merged quote(+일봉 종가) → 투자 매력도 0~100 + 판정 + 축별 근거.
+
+    가치30 + 품질20 + 성장15 + 추세25 + 타이밍10. 성장 축이 트레일링 가치
+    지표의 사이클 함정(이익 급증기에 '비싸 보임')을 보정한다.
+    """
     closes = closes or []
     v, vr = _value_axis(quote)
     ql, qr = _quality_axis(quote)
+    gr, grr = _growth_axis(quote)
     mo, mr, sig = _momentum_axis(closes)
     tm, tr = _timing_axis(quote, closes, sig)
-    total = round(v + ql + mo + tm, 1)
-    reasons = vr + qr + mr + tr
+    total = round(v + ql + gr + mo + tm, 1)
+    reasons = vr + qr + grr + mr + tr
     return {
         "code": quote.get("code"), "name": quote.get("name"), "price": quote.get("price"),
         "score": total, "verdict": _verdict(total),
-        "value": v, "quality": ql, "momentum": mo, "timing": tm,
+        "value": v, "quality": ql, "growth": gr, "momentum": mo, "timing": tm,
         "margin_pct": margin_of_safety(quote.get("price"), quote.get("eps"), quote.get("bps")),
         "graham": graham_number(quote.get("eps"), quote.get("bps")),
+        "ni_growth_pct": quote.get("ni_growth_pct"),
         "has_chart": bool(closes),
         "reasons": reasons,
     }

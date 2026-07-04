@@ -134,7 +134,8 @@
 <script>
 const $=(id)=>document.getElementById(id);
 const fmt=(n)=> n==null?"–":Number(n).toLocaleString("ko-KR",{maximumFractionDigits:2});
-const numC=(v,d=2)=> v==null?"–":Number(v).toFixed(d);
+const numC=(v,d=2)=> v==null?"–":Number(v).toLocaleString("ko-KR",{maximumFractionDigits:d});
+const capF=(e)=> e==null?"–":(e>=10000? Number(e/10000).toLocaleString("ko-KR",{maximumFractionDigits:0})+"조" : Number(e).toLocaleString("ko-KR",{maximumFractionDigits:0})+"억");
 const won=(n)=> n==null?"–":Number(n).toLocaleString("ko-KR")+"원";
 const eok=(n)=> n==null?"–":(n/1e8).toLocaleString("ko-KR",{maximumFractionDigits:1})+"억";
 let activeTab="home", busy=false;
@@ -340,7 +341,7 @@ async function renderStocks(){
     {label:"PBR", key:"pbr", hint:HELP.pbr, fmt:r=>numC(r.pbr)},
     {label:"ROE%", key:"roe", hint:"자본으로 얼마 버는지", fmt:r=>numC(r.roe)},
     {label:"1년 최고가", key:"high_52w", hint:HELP.w52, fmt:r=>fmt(r.high_52w)},
-    {label:"시가총액(억)", key:"market_cap", hint:HELP.cap, fmt:r=>fmt(r.market_cap)},
+    {label:"시가총액", key:"market_cap", hint:HELP.cap, fmt:r=>capF(r.market_cap)},
   ], rows, {rowClick:rowOpen, sort:{key:"change_pct",dir:-1}, empty:"수집 대기 (시세 없음)"});
   $("metaInfo").textContent=`${rows.length}종목 · 전체 시장${term()?" (검색)":""}`;
 }
@@ -369,6 +370,7 @@ async function renderSignal(){
     {label:"판정", key:"score", num:false, cls:r=>VC(r.score), fmt:r=>r.verdict},
     {label:"싼가", key:"value", hint:HELP.value, fmt:r=>numC(r.value,0)},
     {label:"튼튼한가", key:"quality", hint:HELP.quality, fmt:r=>numC(r.quality,0)},
+    {label:"크는가", key:"growth", hint:"순이익이 늘고 있는가(공식 사업보고서)", fmt:r=>numC(r.growth,0)},
     {label:"오르는가", key:"momentum", hint:HELP.momentum, fmt:r=>numC(r.momentum,0)},
     {label:"살 때인가", key:"timing", hint:HELP.timing, fmt:r=>numC(r.timing,0)},
     {label:"싼 정도", key:"margin_pct", hint:HELP.margin, cls:r=>"num "+((r.margin_pct||0)>0?"pos":"neg"), fmt:r=>r.margin_pct!=null?numC(r.margin_pct,0)+"%":"–"},
@@ -474,16 +476,18 @@ async function openStock(code,name){
     const Q=d.quote||{}, S=d.signal, D=d.dividend;
     const fund=`<div class="cgrid">${kv("현재가",fmt(Q.price)+"원",HELP.price)}${kv("등락률",Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–",HELP.change)}
       ${kv("PER",numC(Q.per),HELP.per)}${kv("PBR",numC(Q.pbr),HELP.pbr)}${kv("EPS",numC(Q.eps,0),HELP.eps)}${kv("BPS",numC(Q.bps,0),HELP.bps)}
-      ${kv("시가총액(억)",numC(Q.market_cap,0),HELP.cap)}${kv("1년 최저~최고",numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0),HELP.w52)}</div>`;
+      ${kv("시가총액",capF(Q.market_cap),HELP.cap)}${kv("1년 최저~최고",numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0)+"원",HELP.w52)}
+      ${Q.ni_growth_pct!=null?kv("순이익 성장(작년比)",(Q.ni_growth_pct>=0?"+":"")+numC(Q.ni_growth_pct,0)+"%","공식 사업보고서 기준"):""}</div>`;
     const collectHint=d.in_watchlist?'수집 대기':'관심종목 추가 시 수집';
     const SC=d.score||{};
     const bar=(lab,val,max)=>`<div class="row"><span style="width:56px">${lab}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:${Math.max(0,Math.min(100,(val||0)/max*100))}%"></i></div><b class="num">${numC(val,0)}/${max}</b></div>`;
-    const marginTxt=SC.margin_pct==null?"":(SC.margin_pct>0?`<b class="pos">적정가보다 ${numC(SC.margin_pct,0)}% 싸요</b>`:`<b class="neg">적정가보다 ${numC(-SC.margin_pct,0)}% 비싸요</b>`);
+    const growCaveat=(SC.margin_pct!=null&&SC.margin_pct<0&&(SC.ni_growth_pct||0)>=15)?' <span class="num">(이익이 크게 느는 성장주는 가치 기준으로 비싸 보일 수 있어요)</span>':'';
+    const marginTxt=SC.margin_pct==null?"":(SC.margin_pct>0?`<b class="pos">적정가보다 ${numC(SC.margin_pct,0)}% 싸요</b>`:`<b class="neg">그레이엄 가치 기준 ${numC(-SC.margin_pct,0)}% 비싸요</b>${growCaveat}`);
     const scoreH=SC.score!=null?`<div class="card" style="margin-bottom:10px">
       <div class="kpi ${VC(SC.score)}">${numC(SC.score,0)}<span class="u">점 / 100 · ${SC.verdict||''}</span></div>
       <div class="num" style="margin:2px 0 8px">${HELP.score}. ${marginTxt}</div>
-      ${bar("가치",SC.value,40)}${bar("품질",SC.quality,25)}${bar("추세",SC.momentum,25)}${bar("타이밍",SC.timing,10)}
-      <div class="num" style="margin-top:6px">싼가·튼튼한가·오르는가·살 때인가를 종합. ${(SC.reasons||[]).join(" · ")}</div>
+      ${bar("가치",SC.value,30)}${bar("품질",SC.quality,20)}${bar("성장",SC.growth,15)}${bar("추세",SC.momentum,25)}${bar("타이밍",SC.timing,10)}
+      <div class="num" style="margin-top:6px">싼가·튼튼한가·크는가·오르는가·살 때인가를 종합. ${(SC.reasons||[]).join(" · ")}</div>
       ${SC.has_chart?"":'<div class="num" style="opacity:.7">※ 차트 미수집 — 관심종목 추가하면 추세·타이밍도 반영돼요</div>'}</div>`:'';
     // 주가흐름은 위 종합점수의 '추세' 축과 같은 기준으로 표시(판정 이중화 방지).
     const align=(S&&S.sma20!=null&&S.sma60!=null)?(S.sma20>S.sma60?'정배열(상승 배열)':'역배열(하락 배열)'):'–';

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 _LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 _CORP_URL = "https://opendart.fss.or.kr/api/corpCode.xml"
 _ALOT_URL = "https://opendart.fss.or.kr/api/alotMatter.json"   # 배당에 관한 사항
+_FNLTT_URL = "https://opendart.fss.or.kr/api/fnlttSinglAcnt.json"  # 단일회사 주요계정(재무)
 
 
 def parse_disclosure_list(payload: dict) -> list[dict]:
@@ -85,6 +86,33 @@ def parse_alot_matter(payload: dict, year: int) -> list[dict]:
     return out
 
 
+def parse_net_income_growth(payload: dict) -> float | None:
+    """fnlttSinglAcnt → 순이익 YoY 성장률 %(순수 함수). 연결(CFS) 우선.
+
+    성장 변곡점 판별용 — 트레일링 PER 함정(이익 급증기에 비싸 보임) 보정.
+    """
+    if not isinstance(payload, dict) or payload.get("status") != "000":
+        return None
+
+    def _num(v) -> float | None:
+        try:
+            s = str(v).replace(",", "").strip()
+            return float(s) if s and s != "-" else None
+        except (TypeError, ValueError):
+            return None
+
+    rows = [r for r in payload.get("list", []) or []
+            if (r.get("account_nm") or "").strip() == "당기순이익"]
+    if not rows:
+        return None
+    pref = [r for r in rows if r.get("fs_div") == "CFS"] or rows   # 연결 우선
+    row = pref[0]
+    cur, prev = _num(row.get("thstrm_amount")), _num(row.get("frmtrm_amount"))
+    if cur is None or not prev:
+        return None
+    return round((cur - prev) / abs(prev) * 100, 1)
+
+
 class DartClient:
     @property
     def enabled(self) -> bool:
@@ -107,6 +135,15 @@ class DartClient:
         r = await client.get(_ALOT_URL, params=params, timeout=5)
         r.raise_for_status()
         return parse_alot_matter(r.json(), year)
+
+    async def fetch_net_income_growth(self, client: httpx.AsyncClient,
+                                      corp_code: str, year: int) -> float | None:
+        """사업보고서 기준 순이익 YoY 성장률 %. 타임아웃 5초."""
+        params = {"crtfc_key": settings.dart_api_key, "corp_code": corp_code,
+                  "bsns_year": str(year), "reprt_code": "11011"}
+        r = await client.get(_FNLTT_URL, params=params, timeout=5)
+        r.raise_for_status()
+        return parse_net_income_growth(r.json())
 
     async def fetch_recent(self, client: httpx.AsyncClient, page_count: int = 100) -> list[dict]:
         """오늘자 최근 공시(전 종목) 목록. 최신순으로 page_count건."""

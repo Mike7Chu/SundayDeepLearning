@@ -50,6 +50,19 @@ def test_compute_score_no_chart_partial():
     assert out["timing"] == 5.0         # 중립
 
 
+def test_growth_axis_offsets_trailing_value_trap():
+    # 이익 급증(+80%) 성장주: 가치 축은 낮아도 성장 축이 보정
+    hot = {"code": "005930", "name": "삼성전자", "price": 314500,
+           "per": 47.9, "pbr": 4.9, "eps": 6564, "bps": 63997,
+           "ni_growth_pct": 80.0, "high_52w": 380000, "low_52w": 56900}
+    out = compute_score(hot, [100 + i for i in range(130)])
+    assert out["growth"] == 15.0          # +50% 이상 → 만점
+    cold = {**hot, "ni_growth_pct": -20.0}
+    assert compute_score(cold, [])["growth"] == 0.0   # 이익 감소 → 0
+    neutral = {k: v for k, v in hot.items() if k != "ni_growth_pct"}
+    assert compute_score(neutral, [])["growth"] == 5.0  # 미수집 → 중립
+
+
 def test_compute_score_loss_making_low():
     q = {"code": "111111", "name": "적자", "price": 5000, "per": -5, "pbr": 3,
          "eps": -400, "bps": 1000}

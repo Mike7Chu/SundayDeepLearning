@@ -12,6 +12,7 @@ from collector.news.dart import (
     parse_alot_matter,
     parse_corp_map,
     parse_disclosure_list,
+    parse_net_income_growth,
 )
 from collector.stock.kis import effective_watchlist, normalize_watch_item
 from collector.stock.kis_master import parse_mst
@@ -83,6 +84,21 @@ def test_parse_alot_matter_error_or_empty():
     payload = {"status": "000", "list": [
         {"se": "주당 현금배당금(원)", "thstrm": "-", "frmtrm": "100", "lwfr": "-"}]}
     assert parse_alot_matter(payload, 2025) == [{"date": "2024", "per_share": 100.0}]
+
+
+def test_parse_net_income_growth():
+    payload = {"status": "000", "list": [
+        {"account_nm": "당기순이익", "fs_div": "OFS",
+         "thstrm_amount": "10,000", "frmtrm_amount": "20,000"},   # 별도(-50%)
+        {"account_nm": "당기순이익", "fs_div": "CFS",
+         "thstrm_amount": "54,000,000,000,000", "frmtrm_amount": "30,000,000,000,000"},
+    ]}
+    assert parse_net_income_growth(payload) == 80.0   # 연결(CFS) 우선: +80%
+    assert parse_net_income_growth({"status": "013"}) is None
+    # 전기 0/누락이면 계산 불가
+    z = {"status": "000", "list": [{"account_nm": "당기순이익", "fs_div": "CFS",
+                                    "thstrm_amount": "100", "frmtrm_amount": "-"}]}
+    assert parse_net_income_growth(z) is None
 
 
 def test_normalize_watch_item():

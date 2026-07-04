@@ -26,6 +26,7 @@ class StockData(BaseModel):
     market_cap: float | None = None   # 억원
     high_52w: float | None = None
     low_52w: float | None = None
+    ni_growth_pct: float | None = None  # 순이익 YoY %(DART 공식)
     score: float | None = None        # 투자 매력도 0~100
     verdict: str | None = None        # 판정
     margin_pct: float | None = None   # 안전마진 %
@@ -50,6 +51,7 @@ def from_quote(quote: dict, news: list[str] | None = None) -> StockData:
         market_cap=quote.get("market_cap"),
         high_52w=quote.get("high_52w"),
         low_52w=quote.get("low_52w"),
+        ni_growth_pct=quote.get("ni_growth_pct"),
         news=news or [],
     )
 
@@ -98,10 +100,14 @@ def format_for_prompt(d: StockData) -> str:
         _fmt("시가총액", d.market_cap, "억원"),
         _fmt("52주최고", d.high_52w, "원"),
         _fmt("52주최저", d.low_52w, "원"),
+        _fmt("순이익 YoY(공식 사업보고서)", d.ni_growth_pct, "%"),
         _fmt("투자매력도(0~100)", d.score),
         _fmt("판정", d.verdict),
         _fmt("안전마진(그레이엄 대비)", d.margin_pct, "%"),
     ]
+    if d.price and d.low_52w:
+        up = (d.price / d.low_52w - 1) * 100
+        lines.append(f"- 최근 1년 저점 대비 등락: {up:+.0f}% (실측 — 시장 대세를 반영한 실제 수치)")
     if d.score_reasons:
         lines.append("정량 근거: " + " · ".join(d.score_reasons))
     if d.news:
