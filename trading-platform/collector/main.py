@@ -27,7 +27,6 @@ from shared.redis_keys import (
     TOSS_HOLDINGS_KEY,
     stock_ohlcv_key,
 )
-from shared.redis_store import replace_hash
 from shared.settings import settings
 
 logging.basicConfig(
@@ -142,34 +141,54 @@ async def _dart_dividend(dart: DartClient, client: httpx.AsyncClient,
     return []
 
 
+async def _merge_market_field(redis: aioredis.Redis, code: str, fields: dict) -> None:
+    """stock:market 레코드에 필드 병합(레코드 없으면 스킵 — market_loop가 곧 생성)."""
+    raw = await redis.hget(STOCK_MARKET_KEY, code)
+    if not raw:
+        return
+    try:
+        rec = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return
+    rec.update({k: v for k, v in fields.items() if v is not None})
+    await redis.hset(STOCK_MARKET_KEY, code, json.dumps(rec, ensure_ascii=False))
+
+
 async def stock_history_loop(redis: aioredis.Redis,
                              dart: DartClient) -> None:
-    """관심종목 배당 3개년(DART 사업보고서) — 느린 주기.
+    """배당 3개년 + 순이익 성장(DART 사업보고서) — 관심종목 우선, 전체 유니버스까지.
 
-    일봉(차트)은 toss_history_loop가 담당(검증된 소스). KIS 일봉·예탁원은 이 환경에서
-    연결 불가라 제거. 실패는 [DATA_ERROR] 기록 후 다음 종목 — 절대 멈추지 않는다.
+    일봉(차트)은 toss_history_loop 담당. DART 무료 키 한도(일 2만건) 존중을 위해
+    호출 간 0.15초 페이싱(유니버스 900종목 × 2콜 ≈ 5분/사이클, 하루 4사이클 ≈ 7,200콜).
+    실패는 기록 후 다음 종목 — 절대 멈추지 않는다. 유니버스 무배당은 조용히 스킵.
     """
     if not dart.enabled:
         logger.info("[div] DART_API_KEY 미설정 → 배당 수집 비활성")
         return
     while True:
         watch = await effective_watchlist(redis)
-        divs: dict[str, str] = {}
+        wset = {w["code"] for w in watch}
+        uni = await _universe_codes(redis)
+        targets = list(watch) + [u for u in uni if u.get("code") not in wset]
+        got = 0
         async with httpx.AsyncClient(timeout=15) as dclient:
             cmap = await _dart_corp_map(redis, dart, dclient)
-            for item in watch:
+            for item in targets:
                 code, name = item["code"], item.get("name", "")
+                is_watch = code in wset
                 corp = cmap.get(code)
                 if not corp:
-                    logger.warning("[DATA_ERROR] %s 배당금 수집 실패(corp_code 없음)",
-                                   name or code)
+                    if is_watch:   # 유니버스 매핑 누락은 흔함(스팩·리츠 등) — 조용히
+                        logger.warning("[DATA_ERROR] %s 배당금 수집 실패(corp_code 없음)",
+                                       name or code)
                     continue
                 items = await _dart_dividend(dart, dclient, corp)
                 if items:
-                    divs[code] = json.dumps(
+                    await redis.hset(STOCK_DIVIDEND_KEY, code, json.dumps(
                         {"code": code, "items": items, "src": "dart",
-                         "ts": time.time()}, ensure_ascii=False)
-                else:
+                         "ts": time.time()}, ensure_ascii=False))
+                    got += 1
+                elif is_watch:
                     logger.warning("[DATA_ERROR] %s 배당금 수집 실패(응답 없음/무배당)",
                                    name or code)
                 # 순이익 성장률(YoY) — 트레일링 PER 함정 보정용 성장 축 데이터.
@@ -177,13 +196,17 @@ async def stock_history_loop(redis: aioredis.Redis,
                     g = await dart.fetch_net_income_growth(
                         dclient, corp, _latest_report_year())
                     if g is not None:
-                        await merge_quote(redis, code, name, {"ni_growth_pct": g})
+                        if is_watch:
+                            await merge_quote(redis, code, name, {"ni_growth_pct": g})
+                        else:
+                            await _merge_market_field(redis, code, {"ni_growth_pct": g})
                 except Exception:
-                    logger.warning("[DATA_ERROR] %s 순이익 성장률 수집 실패", name or code)
-        if divs:
-            await replace_hash(redis, STOCK_DIVIDEND_KEY, divs)
-        logger.info("[stock] 배당 수집 완료(%d종목 중 %d종목)", len(watch), len(divs))
-        await asyncio.sleep(settings.stock_history_interval_sec if divs else 600)
+                    if is_watch:
+                        logger.warning("[DATA_ERROR] %s 순이익 성장률 수집 실패", name or code)
+                await asyncio.sleep(0.15)   # DART 페이싱(무료 키 레이트 존중)
+        logger.info("[stock] 배당/재무 수집 완료(대상 %d종목, 배당 %d종목)",
+                    len(targets), got)
+        await asyncio.sleep(settings.stock_history_interval_sec if got else 600)
 
 
 async def universe_loop(redis: aioredis.Redis, kis: KISClient) -> None:
