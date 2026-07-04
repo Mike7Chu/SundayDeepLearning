@@ -478,8 +478,11 @@ async function openStock(code,name){
       ${bar("가치",SC.value,40)}${bar("품질",SC.quality,25)}${bar("추세",SC.momentum,25)}${bar("타이밍",SC.timing,10)}
       <div class="num" style="margin-top:6px">싼가·튼튼한가·오르는가·살 때인가를 종합. ${(SC.reasons||[]).join(" · ")}</div>
       ${SC.has_chart?"":'<div class="num" style="opacity:.7">※ 차트 미수집 — 관심종목 추가하면 추세·타이밍도 반영돼요</div>'}</div>`:'';
-    const smaTxt=!S?'':(S.sma_cross==='golden'?'골든(상승 전환)':S.sma_cross==='dead'?'데드(하락 전환)':'교차 없음');
-    const sgH=S?`<div class="cgrid">${kv("신호",SIG[S.signal]||S.signal,"단기 매수/매도 참고")}${kv("RSI",numC(S.rsi),HELP.rsi)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
+    // 주가흐름은 위 종합점수의 '추세' 축과 같은 기준으로 표시(판정 이중화 방지).
+    const align=(S&&S.sma20!=null&&S.sma60!=null)?(S.sma20>S.sma60?'정배열(상승 배열)':'역배열(하락 배열)'):'–';
+    const smaTxt=align+(S&&S.sma_cross==='golden'?' · 골든크로스':S&&S.sma_cross==='dead'?' · 데드크로스':'');
+    const trTxt=!S?['–','num']:(SC.momentum>=18?['상승 흐름','pos']:SC.momentum>=10?['혼조','num']:['약세 흐름','neg']);
+    const sgH=S?`<div class="cgrid">${kv("흐름",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"위 종합점수의 '추세'와 같은 기준")}${kv("RSI",numC(S.rsi),HELP.rsi)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
     const hist=(D&&D.history&&D.history.length)?`<div class="scroll" style="margin-top:8px">${tableHTML(["연도","1주당 배당금","수익률"], D.history.map(h=>`<tr><td>${h.year}년</td><td class="num">${numC(h.per_share,0)}원</td><td class="num pos">${h.yield_pct!=null?h.yield_pct+"%":"–"}</td></tr>`).join(""))}</div>`:'';
     const dvH=(D&&(D.yield_pct!=null||hist))?`<div class="cgrid">${kv("배당수익률",D.yield_pct!=null?D.yield_pct+"%":"–",HELP.divy)}${kv("1주당 배당금",numC(D.annual_per_share,0)+"원",HELP.div)}${kv("다음 배당일",D.next_ex_date||"–")}</div>${hist}`:`<div class="empty">배당금 ${collectHint}</div>`;
     const wbtn=d.in_watchlist?'<span class="badge pos">✓ 내 관심종목</span>':`<button class="btn buy" onclick="addWatchModal('${qesc(code)}','${qesc(name)}')">＋ 관심종목에 담기</button>`;
