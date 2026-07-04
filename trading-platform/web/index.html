@@ -478,7 +478,8 @@ async function mResearch(code){
       e.innerHTML='<div class="empty">🧠 분석 요청됨 — 호스트에서 처리 중… (최대 1~2분)</div>';
       pollResearch(code, e, 0); return;
     }
-    e.innerHTML=`<pre class="rbody">${(r.report||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</pre>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
+    const note=r.cached?`<div class="num" style="margin:4px 0">📌 최근 분석 결과 (${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}) · 관심종목은 매일 갱신</div>`:'';
+    e.innerHTML=note+`<pre class="rbody">${(r.report||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</pre>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
 }
 async function pollResearch(code, e, tries){

@@ -7,14 +7,17 @@ POST /research/{code}/run 즉시 분석 실행(키 없으면 비활성 리포트
 from __future__ import annotations
 
 import json
+import time
 
 from fastapi import APIRouter, HTTPException
 
 from api.redis_client import get_redis
-from collector.stock.kis import load_watchlist
+from collector.stock.kis import effective_watchlist, load_watchlist
 from research.analyst import Analyst
 from research.data import StockData, gather
 from shared.redis_keys import RESEARCH_KEY, RESEARCH_REQ_KEY
+
+_WEEK = 7 * 86400
 
 router = APIRouter()
 
@@ -54,6 +57,19 @@ async def research_get(code: str) -> dict:
 async def research_run(code: str) -> dict:
     redis = get_redis()
     analyst = Analyst()
+    # 관심종목은 항상 새로 분석. 그 외 종목은 1주 이내 리포트가 있으면 그걸 재사용(비용·속도).
+    wl = await effective_watchlist(redis)
+    is_watch = any(w.get("code") == code for w in wl)
+    if not is_watch:
+        existing_raw = await redis.hget(RESEARCH_KEY, code)
+        if existing_raw:
+            try:
+                existing = json.loads(existing_raw)
+            except (json.JSONDecodeError, TypeError):
+                existing = None
+            if (existing and existing.get("enabled")
+                    and time.time() - (existing.get("ts") or 0) < _WEEK):
+                return {**existing, "cached": True}
     # 구독 CLI 모드는 이 API 컨테이너에서 못 돎(호스트 로그인 필요) → 호스트 research가
     # 처리하도록 큐에 넣고 반환. API 키(api) 모드는 컨테이너에서 바로 실행.
     if analyst.mode != "api":
