@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 import datetime as _dt
+import io
 import logging
+import xml.etree.ElementTree as ET
+import zipfile
 
 import httpx
 
@@ -15,6 +18,8 @@ from shared.settings import settings
 logger = logging.getLogger(__name__)
 
 _LIST_URL = "https://opendart.fss.or.kr/api/list.json"
+_CORP_URL = "https://opendart.fss.or.kr/api/corpCode.xml"
+_ALOT_URL = "https://opendart.fss.or.kr/api/alotMatter.json"   # 배당에 관한 사항
 
 
 def parse_disclosure_list(payload: dict) -> list[dict]:
@@ -38,10 +43,70 @@ def parse_disclosure_list(payload: dict) -> list[dict]:
     return out
 
 
+def parse_corp_map(xml_bytes: bytes) -> dict[str, str]:
+    """DART CORPCODE.xml → {6자리 종목코드: corp_code} (상장사만, 순수 함수)."""
+    out: dict[str, str] = {}
+    root = ET.fromstring(xml_bytes)
+    for el in root.iter("list"):
+        stock = (el.findtext("stock_code") or "").strip()
+        corp = (el.findtext("corp_code") or "").strip()
+        if len(stock) == 6 and stock.isdigit() and corp:
+            out[stock] = corp
+    return out
+
+
+def parse_alot_matter(payload: dict, year: int) -> list[dict]:
+    """DART alotMatter(배당에 관한 사항) → 3개년 주당 현금배당 리스트(순수 함수).
+
+    사업보고서 1건에 당기(thstrm)/전기(frmtrm)/전전기(lwfr) 3개년이 담긴다.
+    보통주 행 우선. 값의 쉼표 제거. 반환: [{date:"2025", per_share:1444.0}, ...]
+    """
+    if not isinstance(payload, dict) or payload.get("status") != "000":
+        return []
+
+    def _num(v) -> float | None:
+        try:
+            s = str(v).replace(",", "").strip()
+            return float(s) if s and s != "-" else None
+        except (TypeError, ValueError):
+            return None
+
+    rows = [r for r in payload.get("list", []) or []
+            if "주당" in (r.get("se") or "") and "현금배당" in (r.get("se") or "")]
+    if not rows:
+        return []
+    pref = [r for r in rows if "보통주" in (r.get("stock_knd") or "")]
+    row = (pref or rows)[0]
+    out: list[dict] = []
+    for key, y in (("thstrm", year), ("frmtrm", year - 1), ("lwfr", year - 2)):
+        v = _num(row.get(key))
+        if v:
+            out.append({"date": str(y), "per_share": v})
+    return out
+
+
 class DartClient:
     @property
     def enabled(self) -> bool:
         return bool(settings.dart_api_key)
+
+    async def fetch_corp_map(self, client: httpx.AsyncClient) -> dict[str, str]:
+        """종목코드→corp_code 매핑(zip 다운로드, 주 1회 캐시 권장)."""
+        r = await client.get(_CORP_URL, params={"crtfc_key": settings.dart_api_key},
+                             timeout=15)
+        r.raise_for_status()
+        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+            xml = z.read(z.namelist()[0])
+        return parse_corp_map(xml)
+
+    async def fetch_dividend_years(self, client: httpx.AsyncClient,
+                                   corp_code: str, year: int) -> list[dict]:
+        """사업보고서(11011) 기준 3개년 주당 현금배당. 타임아웃 5초(무한대기 금지)."""
+        params = {"crtfc_key": settings.dart_api_key, "corp_code": corp_code,
+                  "bsns_year": str(year), "reprt_code": "11011"}
+        r = await client.get(_ALOT_URL, params=params, timeout=5)
+        r.raise_for_status()
+        return parse_alot_matter(r.json(), year)
 
     async def fetch_recent(self, client: httpx.AsyncClient, page_count: int = 100) -> list[dict]:
         """오늘자 최근 공시(전 종목) 목록. 최신순으로 page_count건."""

@@ -7,7 +7,12 @@ import json
 import fakeredis.aioredis
 
 from api.services.stock_value import load_quotes, value_screener
-from collector.news.dart import format_disclosure, parse_disclosure_list
+from collector.news.dart import (
+    format_disclosure,
+    parse_alot_matter,
+    parse_corp_map,
+    parse_disclosure_list,
+)
 from collector.stock.kis import effective_watchlist, normalize_watch_item
 from collector.stock.kis_master import parse_mst
 from shared.redis_keys import STOCK_MARKET_KEY, STOCK_QUOTE_KEY, WATCHLIST_KEY
@@ -41,6 +46,43 @@ def test_parse_mst_fixedwidth():
     assert rows[0]["name"] == "삼성전자" and rows[0]["market"] == "KOSPI"
     # 너무 짧은 줄은 무시
     assert parse_mst("short", trailing) == []
+
+
+def test_parse_corp_map():
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <result>
+      <list><corp_code>00126380</corp_code><corp_name>삼성전자</corp_name>
+        <stock_code>005930</stock_code></list>
+      <list><corp_code>00999999</corp_code><corp_name>비상장사</corp_name>
+        <stock_code> </stock_code></list>
+    </result>""".encode("utf-8")
+    m = parse_corp_map(xml)
+    assert m == {"005930": "00126380"}   # 비상장(빈 stock_code) 제외
+
+
+def test_parse_alot_matter_three_years():
+    payload = {"status": "000", "list": [
+        {"se": "주당 현금배당금(원)", "stock_knd": "보통주",
+         "thstrm": "1,444", "frmtrm": "1,444", "lwfr": "2,994"},
+        {"se": "주당 현금배당금(원)", "stock_knd": "우선주",
+         "thstrm": "1,445", "frmtrm": "1,445", "lwfr": "2,995"},
+    ]}
+    items = parse_alot_matter(payload, 2025)
+    # 보통주 행 우선, 3개년(당기/전기/전전기) + 쉼표 제거
+    assert items == [
+        {"date": "2025", "per_share": 1444.0},
+        {"date": "2024", "per_share": 1444.0},
+        {"date": "2023", "per_share": 2994.0},
+    ]
+
+
+def test_parse_alot_matter_error_or_empty():
+    assert parse_alot_matter({"status": "013"}, 2025) == []            # 데이터 없음
+    assert parse_alot_matter({"status": "000", "list": []}, 2025) == []
+    # 무배당('-') 연도는 제외
+    payload = {"status": "000", "list": [
+        {"se": "주당 현금배당금(원)", "thstrm": "-", "frmtrm": "100", "lwfr": "-"}]}
+    assert parse_alot_matter(payload, 2025) == [{"date": "2024", "per_share": 100.0}]
 
 
 def test_normalize_watch_item():

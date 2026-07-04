@@ -13,10 +13,12 @@ import time
 import httpx
 import redis.asyncio as aioredis
 
+from collector.news.dart import DartClient
 from collector.stock.kis import KISClient, effective_watchlist, load_watchlist
 from collector.stock.kis_master import fetch_universe
 from collector.stock.toss import TossClient, candle_metrics
 from shared.redis_keys import (
+    DART_CORP_KEY,
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
@@ -99,14 +101,80 @@ async def stock_loop(redis: aioredis.Redis, kis: KISClient) -> None:
         await asyncio.sleep(settings.stock_interval_sec)
 
 
-async def stock_history_loop(redis: aioredis.Redis, kis: KISClient) -> None:
-    """관심종목 일봉(시그널용) + 배당(배당주용) — 느린 주기. 키 없으면 비활성."""
+def _latest_report_year() -> int:
+    """가장 최근 '사업보고서' 연도(작년). 예: 2026년 7월 → 2025년 보고서."""
+    import datetime as _dt
+    return _dt.date.today().year - 1
+
+
+async def _dart_corp_map(redis: aioredis.Redis, dart: DartClient,
+                         client: httpx.AsyncClient) -> dict:
+    """종목코드→corp_code 매핑. Redis 7일 캐시, 실패 시 빈 dict(다음 주기 재시도)."""
+    raw = await redis.get(DART_CORP_KEY)
+    if raw:
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    try:
+        m = await dart.fetch_corp_map(client)
+    except Exception as exc:
+        logger.warning("[DATA_ERROR] DART corp_code 매핑 다운로드 실패: %s", exc)
+        return {}
+    if m:
+        await redis.set(DART_CORP_KEY, json.dumps(m), ex=7 * 86400)
+    return m
+
+
+async def _dart_dividend(dart: DartClient, client: httpx.AsyncClient,
+                         corp: str) -> list[dict]:
+    """3개년 배당 조회 — 재시도 최대 2회, 실패/빈값은 [] (무한 대기·루프 금지)."""
+    year = _latest_report_year()
+    for attempt in range(2):
+        try:
+            items = await dart.fetch_dividend_years(client, corp, year)
+            if not items:   # 최신 사업보고서 미공시면 한 해 전으로 폴백
+                items = await dart.fetch_dividend_years(client, corp, year - 1)
+            return items
+        except Exception:
+            if attempt == 0:
+                await asyncio.sleep(1)
+    return []
+
+
+async def stock_history_loop(redis: aioredis.Redis, kis: KISClient,
+                             dart: DartClient) -> None:
+    """관심종목 일봉(KIS) + 배당 3개년(DART 사업보고서) — 느린 주기.
+
+    배당은 KIS 예탁원(이 환경에서 연결 불가 확인) 대신 DART alotMatter(공식) 사용.
+    실패는 [DATA_ERROR]로 기록하고 다음 종목으로 — 프로세스는 절대 멈추지 않는다.
+    """
     if not kis.enabled:
         return
-    client = kis.http()   # 공유 커넥션
+    client = kis.http()   # KIS 공유 커넥션(일봉)
     while True:
         watch = await effective_watchlist(redis)
         divs: dict[str, str] = {}
+        if dart.enabled:
+            async with httpx.AsyncClient(timeout=15) as dclient:
+                cmap = await _dart_corp_map(redis, dart, dclient)
+                for item in watch:
+                    code, name = item["code"], item.get("name", "")
+                    corp = cmap.get(code)
+                    if not corp:
+                        logger.warning("[DATA_ERROR] %s 배당금 수집 실패(corp_code 없음)",
+                                       name or code)
+                        continue
+                    items = await _dart_dividend(dart, dclient, corp)
+                    if items:
+                        divs[code] = json.dumps(
+                            {"code": code, "items": items, "src": "dart",
+                             "ts": time.time()}, ensure_ascii=False)
+                    else:
+                        logger.warning("[DATA_ERROR] %s 배당금 수집 실패(응답 없음/무배당)",
+                                       name or code)
+        else:
+            logger.info("[div] DART_API_KEY 미설정 → 배당 수집 생략")
         for item in watch:
             code = item["code"]
             try:
@@ -114,22 +182,11 @@ async def stock_history_loop(redis: aioredis.Redis, kis: KISClient) -> None:
                 if candles:
                     await redis.set(stock_ohlcv_key(code), json.dumps(candles))
             except Exception as exc:
-                logger.warning("[stock daily %s] 실패: %s", code, exc)
-            try:
-                dv = await kis.fetch_dividend(client, code)
-                if dv.get("items"):
-                    divs[code] = json.dumps({**dv, "ts": time.time()})
-            except Exception as exc:
-                logger.warning("[stock div %s] 실패: %s", code, exc)
+                logger.warning("[DATA_ERROR] %s 일봉 수집 실패: %s", code, exc)
         if divs:
             await replace_hash(redis, STOCK_DIVIDEND_KEY, divs)
         logger.info("[stock] 일봉/배당 수집 완료(%d종목, 배당 %d종목)", len(watch), len(divs))
-        if not divs:
-            # 배당 0건이면 원인 진단 로그([div ...])가 위에 찍힘. 일시적 실패 대비 30분 뒤 재시도.
-            logger.warning("[stock] 배당 0건 — [div] 진단 로그 확인. 10분 뒤 재시도")
-            await asyncio.sleep(600)
-        else:
-            await asyncio.sleep(settings.stock_history_interval_sec)
+        await asyncio.sleep(settings.stock_history_interval_sec if divs else 600)
 
 
 async def universe_loop(redis: aioredis.Redis, kis: KISClient) -> None:
@@ -336,10 +393,11 @@ async def main() -> None:
     logger.info("collector start (stock-only)")
     kis = KISClient()       # 토큰 1회 발급·공유(4개 루프 주입 — 과발급 방지)
     toss = TossClient()
+    dart = DartClient()     # 배당 3개년(사업보고서) 소스
     try:
         await asyncio.gather(
             stock_loop(redis, kis),
-            stock_history_loop(redis, kis),
+            stock_history_loop(redis, kis, dart),
             universe_loop(redis, kis),
             market_loop(redis, kis, toss),
             portfolio_loop(redis, toss),

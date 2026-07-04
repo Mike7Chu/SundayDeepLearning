@@ -22,6 +22,8 @@ STOCK_MARKET_KEY = "stock:market"       # field=code, value=json(quote+밸류에
 # DART 공시. dart:recent=list(json 최근공시), dart:seen=set(접수번호 rcept_no)
 DART_RECENT_KEY = "dart:recent"
 DART_SEEN_KEY = "dart:seen"
+# DART 종목코드→corp_code 매핑 캐시(json, 7일 TTL)
+DART_CORP_KEY = "dart:corpmap"
 
 # 토스증권 포트폴리오. json{holdings:[{symbol,name,qty,avg_price,cur_price,eval_amount,pnl,pnl_pct}],
 #   cash, total_eval, pnl, pnl_pct, ts}
