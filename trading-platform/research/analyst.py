@@ -97,6 +97,7 @@ class Analyst:
         proc = await asyncio.create_subprocess_exec(
             settings.research_cli_bin, "-p", full,
             "--model", self.model, "--output-format", "text",
+            stdin=asyncio.subprocess.DEVNULL,   # stdin 대기(no stdin data…) → rc=129 방지
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         try:

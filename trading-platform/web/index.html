@@ -70,6 +70,9 @@
   .cgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
   .ccard{ border:1px solid var(--line); border-radius:var(--r-sm); padding:11px; background:var(--bg2); }
   .ccard .mk{ font-size:11px; color:var(--muted); } .ccard .pr{ font-size:17px; font-weight:800; margin-top:4px; font-variant-numeric:tabular-nums; }
+  .ccard .sub{ font-size:10.5px; color:var(--muted); opacity:.8; margin-top:3px; line-height:1.35; }
+  .helpbar{ margin:0 16px 10px; padding:10px 12px; background:var(--bg2); border:1px solid var(--line); border-radius:var(--r-sm); font-size:12.5px; color:var(--muted); line-height:1.5; }
+  th[title]{ text-decoration:underline dotted var(--line); text-underline-offset:3px; }
   .rbody{ white-space:pre-wrap; font-family:inherit; font-size:13.5px; line-height:1.65; margin:0; color:var(--text); }
   .rdisc{ margin-top:10px; color:var(--muted); font-size:11px; border-top:1px solid var(--line); padding-top:8px; }
   .arow{ display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; margin:8px 0; }
@@ -94,13 +97,13 @@
   </div>
   <div class="tabs">
     <button data-tab="home" class="active">홈</button>
-    <button data-tab="portfolio">포트폴리오</button>
-    <button data-tab="stocks">종목</button>
-    <button data-tab="value">가치</button>
-    <button data-tab="signal">투자판단</button>
-    <button data-tab="dividend">배당</button>
+    <button data-tab="portfolio">내 주식</button>
+    <button data-tab="signal">살까 말까</button>
+    <button data-tab="stocks">전체 종목</button>
+    <button data-tab="value">저평가</button>
+    <button data-tab="dividend">배당금</button>
     <button data-tab="news">공시</button>
-    <button data-tab="research">리서치</button>
+    <button data-tab="research">AI 분석</button>
     <button data-tab="settings">설정</button>
   </div>
   <div class="toolbar">
@@ -139,6 +142,18 @@ const term=()=>$("search").value.trim();
 const match=(s)=>{ const t=term(); return !t || (s||"").toLowerCase().includes(t.toLowerCase()); };
 function setStatus(c,t){ $("status").className="dot "+c; $("statusText").textContent=t; }
 const SIG={buy:'🟢매수',sell:'🔴매도',neutral:'⚪중립'};
+// 쉬운 말 사전 (누가 봐도 이해되게)
+const HELP={
+  price:"지금 1주 가격", change:"어제보다 오른/내린 정도",
+  per:"이익 대비 주가 · 낮을수록 저렴", pbr:"자산 대비 주가 · 1 미만이면 자산보다 쌈",
+  eps:"1주가 1년에 버는 돈", bps:"1주가 가진 자산",
+  cap:"회사 전체 값어치", w52:"최근 1년 최저~최고가",
+  margin:"적정가보다 싼 정도 · +면 쌈(안전)", score:"살 만한지 종합점수(0~100)",
+  value:"이익·자산 대비 싼가", quality:"돈 잘 버는 튼튼한 회사인가",
+  momentum:"주가가 오르는 추세인가", timing:"지금 사기 좋은 때인가",
+  rsi:"과열(70↑)·침체(30↓) 정도", sma:"평균선 교차 · 골든=상승 신호",
+  divy:"1년 배당을 주가로 나눈 비율", div:"1주당 받는 배당금",
+};
 const TARGET=10000000000;   // 100억
 
 function tableHTML(head, body){
@@ -163,7 +178,7 @@ function drawTable(id){
       if(typeof x==="number"&&typeof y==="number") return dir*(x-y);
       return dir*String(x).localeCompare(String(y),"ko"); }); }
   const head=s.cols.map((c,i)=>{ const a=(s.sort&&s.sort.key===c.key)?`<span class="arrow">${s.sort.dir<0?"▼":"▲"}</span>`:"";
-    return `<th onclick="sortBy('${id}',${i})">${c.label}${a}</th>`; }).join("");
+    return `<th ${c.hint?`title="${c.hint}"`:""} onclick="sortBy('${id}',${i})">${c.label}${a}</th>`; }).join("");
   const body=rows.length? rows.map(r=>{
       const clk=s.opts.rowClick?` class="clk" onclick="${s.opts.rowClick(r)}"`:"";
       const tds=s.cols.map(c=>`<td class="${c.cls?c.cls(r):(c.num===false?"":"num")}">${c.fmt?c.fmt(r):(r[c.key]??"–")}</td>`).join("");
@@ -232,7 +247,7 @@ async function renderHome(){
     <div class="card"><h3>등락 TOP</h3>${movers.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span>
       <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</b></div>`).join("")||'<div class="empty">데이터 없음(KIS 키 필요)</div>'}</div>
     <div class="card"><h3>🎯 오늘의 매수 후보 (매력도)</h3>${buys.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name} <span class="badge">${r.verdict}</span></span><b class="num strong ${VC(r.score)}">${numC(r.score,0)}</b></div>`).join("")||'<div class="empty">후보 없음 (KIS 키 필요)</div>'}</div>
-    <div class="card"><h3>💎 가치 상위(마법공식)</h3>${topval.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="num">PER ${numC(r.per)} · ROE ${numC(r.roe)}%</b></div>`).join("")||'<div class="empty">데이터 없음</div>'}</div>
+    <div class="card"><h3>💎 저평가 상위</h3>${topval.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="num">PER ${numC(r.per)} · ROE ${numC(r.roe)}%</b></div>`).join("")||'<div class="empty">데이터 없음</div>'}</div>
     <div class="card"><h3>💰 배당 상위</h3>${topdiv.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="pos">${r.yield_pct}%</b></div>`).join("")||'<div class="empty">데이터 없음</div>'}</div>
     <div class="card" style="grid-column:1/-1"><h3>📢 최근 공시</h3>${(n.rows||[]).slice(0,6).map(r=>`<div class="row"><a class="clk" href="${r.url}" target="_blank">${r.corp_name} · ${r.report_nm}</a><span class="num">${r.rcept_dt||''}</span></div>`).join("")||'<div class="empty">공시 없음 (DART 키 필요)</div>'}</div>`;
   $("metaInfo").textContent=`관심종목 ${quotes.length} · 매수후보 ${buys.length}`;
@@ -312,54 +327,58 @@ async function renderStocks(){
   const rows=((await jget("/stocks/all")).rows||[]).filter(r=>match(r.name)||match(r.code));
   dataTable("stocksBox", [
     {label:"종목", key:"name", num:false, fmt:nameCell},
-    {label:"현재가", key:"price", fmt:r=>fmt(r.price), cls:()=>"num strong"},
-    {label:"등락률", key:"change_pct", fmt:pctFmt("change_pct"), cls:pctCls("change_pct")},
-    {label:"PER", key:"per", fmt:r=>numC(r.per)},
-    {label:"PBR", key:"pbr", fmt:r=>numC(r.pbr)},
-    {label:"ROE%", key:"roe", fmt:r=>numC(r.roe)},
-    {label:"52주고", key:"high_52w", fmt:r=>fmt(r.high_52w)},
-    {label:"시총(억)", key:"market_cap", fmt:r=>fmt(r.market_cap)},
+    {label:"현재가", key:"price", hint:HELP.price, fmt:r=>fmt(r.price), cls:()=>"num strong"},
+    {label:"등락률", key:"change_pct", hint:HELP.change, fmt:pctFmt("change_pct"), cls:pctCls("change_pct")},
+    {label:"PER", key:"per", hint:HELP.per, fmt:r=>numC(r.per)},
+    {label:"PBR", key:"pbr", hint:HELP.pbr, fmt:r=>numC(r.pbr)},
+    {label:"ROE%", key:"roe", hint:"자본으로 얼마 버는지", fmt:r=>numC(r.roe)},
+    {label:"1년 최고가", key:"high_52w", hint:HELP.w52, fmt:r=>fmt(r.high_52w)},
+    {label:"시가총액(억)", key:"market_cap", hint:HELP.cap, fmt:r=>fmt(r.market_cap)},
   ], rows, {rowClick:rowOpen, sort:{key:"change_pct",dir:-1}, empty:"수집 대기 (시세 없음)"});
   $("metaInfo").textContent=`${rows.length}종목 · 전체 시장${term()?" (검색)":""}`;
 }
 async function renderValue(){
   const rows=((await jget("/stocks/value")).rows||[]).filter(r=>match(r.name)||match(r.code));
-  dataTable("valueBox", [
+  $("valueBox").innerHTML=`<div class="helpbar">💡 <b>저평가 주식</b> — 이익·자산에 비해 <b>싸게 거래되는</b> 종목이에요(가치투자). 순위가 앞설수록 저평가. 종목을 누르면 자세히 나와요.</div><div id="valueTbl"></div>`;
+  dataTable("valueTbl", [
     {label:"종목", key:"name", num:false, fmt:nameCell},
-    {label:"PER", key:"per", fmt:r=>numC(r.per)},
-    {label:"PBR", key:"pbr", fmt:r=>numC(r.pbr)},
-    {label:"ROE%", key:"roe", fmt:r=>numC(r.roe)},
-    {label:"이익수익%", key:"earnings_yield", fmt:r=>numC(r.earnings_yield)},
-    {label:"마법랭크", key:"magic_rank", fmt:r=>r.magic_rank??"–"},
-    {label:"품질", key:"quality", fmt:r=>"★".repeat(r.quality||0)||"–"},
-  ], rows, {rowClick:rowOpen, sort:{key:"magic_rank",dir:1}, empty:"펀더멘털 수집 대기 (KIS 키 필요)"});
-  $("metaInfo").textContent=`전체시장 스크리너 · ${rows.length}종목`;
+    {label:"저평가 순위", key:"magic_rank", hint:"이익·자산 대비 쌀수록 앞순위", fmt:r=>r.magic_rank??"–"},
+    {label:"PER", key:"per", hint:HELP.per, fmt:r=>numC(r.per)},
+    {label:"PBR", key:"pbr", hint:HELP.pbr, fmt:r=>numC(r.pbr)},
+    {label:"ROE%", key:"roe", hint:"자본으로 얼마 버는지 · 높을수록 좋음", fmt:r=>numC(r.roe)},
+    {label:"이익률%", key:"earnings_yield", hint:"주가 대비 이익 · 높을수록 저렴", fmt:r=>numC(r.earnings_yield)},
+    {label:"우량도", key:"quality", hint:"흑자·저부채 등 체크 통과 수", fmt:r=>"★".repeat(r.quality||0)||"–"},
+  ], rows, {rowClick:rowOpen, sort:{key:"magic_rank",dir:1}, empty:"저평가 데이터 수집 대기 (KIS 키 필요)"});
+  $("metaInfo").textContent=`저평가 · ${rows.length}종목`;
 }
 const VC=(s)=>s>=75?"buy":s>=60?"pos":s>=45?"num":"neg";   // 판정 색
 async function renderSignal(){
   const rows=((await jget("/stocks/score")).rows||[]).filter(r=>match(r.name)||match(r.code));
-  dataTable("signalBox", [
+  $("signalBox").innerHTML=`<div class="helpbar">💡 <b>살까 말까?</b> — 싼가(가치)·튼튼한가(품질)·오르는가(추세)·살 때인가(타이밍)를 100점으로 합산했어요.
+    <b class="buy">75↑ 적극 검토</b> · <b class="pos">60↑ 관심</b> · <b>45↑ 관찰</b> · <b class="neg">그 아래 관망</b>. 종목을 누르면 자세히 나와요.</div><div id="signalTbl"></div>`;
+  dataTable("signalTbl", [
     {label:"종목", key:"name", num:false, fmt:nameCell},
-    {label:"매력도", key:"score", cls:r=>"num strong "+VC(r.score), fmt:r=>`${numC(r.score,0)}`},
+    {label:"점수", key:"score", hint:HELP.score, cls:r=>"num strong "+VC(r.score), fmt:r=>`${numC(r.score,0)}`},
     {label:"판정", key:"score", num:false, cls:r=>VC(r.score), fmt:r=>r.verdict},
-    {label:"가치40", key:"value", fmt:r=>numC(r.value,0)},
-    {label:"품질25", key:"quality", fmt:r=>numC(r.quality,0)},
-    {label:"모멘텀25", key:"momentum", fmt:r=>numC(r.momentum,0)},
-    {label:"타이밍10", key:"timing", fmt:r=>numC(r.timing,0)},
-    {label:"안전마진%", key:"margin_pct", cls:r=>"num "+((r.margin_pct||0)>0?"pos":"neg"), fmt:r=>r.margin_pct!=null?numC(r.margin_pct,0)+"%":"–"},
+    {label:"싼가", key:"value", hint:HELP.value, fmt:r=>numC(r.value,0)},
+    {label:"튼튼한가", key:"quality", hint:HELP.quality, fmt:r=>numC(r.quality,0)},
+    {label:"오르는가", key:"momentum", hint:HELP.momentum, fmt:r=>numC(r.momentum,0)},
+    {label:"살 때인가", key:"timing", hint:HELP.timing, fmt:r=>numC(r.timing,0)},
+    {label:"싼 정도", key:"margin_pct", hint:HELP.margin, cls:r=>"num "+((r.margin_pct||0)>0?"pos":"neg"), fmt:r=>r.margin_pct!=null?numC(r.margin_pct,0)+"%":"–"},
   ], rows, {rowClick:rowOpen, sort:{key:"score",dir:-1}, empty:"수집 대기 (KIS 키 필요)"});
-  $("metaInfo").textContent=`${rows.length}종목 · 투자 매력도(가치+품질+모멘텀+타이밍)`;
+  $("metaInfo").textContent=`${rows.length}종목 · 살까 말까`;
 }
 async function renderDividend(){
   const rows=((await jget("/stocks/dividend")).rows||[]).filter(r=>match(r.name)||match(r.code));
-  dataTable("dividendBox", [
+  $("dividendBox").innerHTML=`<div class="helpbar">💡 <b>배당금</b> — 주식을 <b>갖고만 있어도</b> 회사가 나눠주는 돈이에요. 수익률이 높을수록 주가 대비 배당을 많이 줘요.</div><div id="divTbl"></div>`;
+  dataTable("divTbl", [
     {label:"종목", key:"name", num:false, fmt:nameCell},
     {label:"현재가", key:"price", fmt:r=>fmt(r.price), cls:()=>"num strong"},
-    {label:"연배당", key:"annual_per_share", fmt:r=>numC(r.annual_per_share,0)},
-    {label:"배당수익%", key:"yield_pct", fmt:r=>r.yield_pct!=null?r.yield_pct+"%":"–", cls:()=>"num strong pos"},
-    {label:"다음기준일", key:"next_ex_date", num:false, fmt:r=>r.next_ex_date||"–"},
-  ], rows, {rowClick:rowOpen, sort:{key:"yield_pct",dir:-1}, empty:"배당 데이터 대기 (KIS 키 필요)"});
-  $("metaInfo").textContent=`${rows.length}종목 · 배당`;
+    {label:"1주당 배당금", key:"annual_per_share", hint:HELP.div, fmt:r=>numC(r.annual_per_share,0)},
+    {label:"배당수익률", key:"yield_pct", hint:HELP.divy, fmt:r=>r.yield_pct!=null?r.yield_pct+"%":"–", cls:()=>"num strong pos"},
+    {label:"다음 배당일", key:"next_ex_date", num:false, fmt:r=>r.next_ex_date||"–"},
+  ], rows, {rowClick:rowOpen, sort:{key:"yield_pct",dir:-1}, empty:"배당금 데이터 대기 (KIS 키 필요)"});
+  $("metaInfo").textContent=`배당금 · ${rows.length}종목`;
 }
 async function renderNews(){
   const rows=((await jget("/news")).rows||[]).filter(r=>match(r.corp_name)||match(r.stock_code)||match(r.report_nm));
@@ -439,35 +458,38 @@ async function delWatch(code){
 }
 
 // ===== 종목 상세 모달 =====
-function kv(k,v){ return `<div class="ccard"><div class="mk">${k}</div><div class="pr">${v}</div></div>`; }
+function kv(k,v,sub){ return `<div class="ccard"><div class="mk">${k}</div><div class="pr">${v}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`; }
 function closeModal(){ $("modal").style.display="none"; }
 async function openStock(code,name){
   $("modal").style.display="flex"; $("mTitle").textContent=`${name} (${code})`; $("mBody").innerHTML='<div class="empty">불러오는 중…</div>';
   try{
     const d=await jget("/stocks/"+encodeURIComponent(code));
     const Q=d.quote||{}, S=d.signal, D=d.dividend;
-    const fund=`<div class="cgrid">${kv("현재가",fmt(Q.price)+"원")}${kv("등락률",Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–")}
-      ${kv("PER",numC(Q.per))}${kv("PBR",numC(Q.pbr))}${kv("EPS",numC(Q.eps,0))}${kv("BPS",numC(Q.bps,0))}
-      ${kv("시총(억)",numC(Q.market_cap,0))}${kv("52주",numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0))}</div>`;
+    const fund=`<div class="cgrid">${kv("현재가",fmt(Q.price)+"원",HELP.price)}${kv("등락률",Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–",HELP.change)}
+      ${kv("PER",numC(Q.per),HELP.per)}${kv("PBR",numC(Q.pbr),HELP.pbr)}${kv("EPS",numC(Q.eps,0),HELP.eps)}${kv("BPS",numC(Q.bps,0),HELP.bps)}
+      ${kv("시가총액(억)",numC(Q.market_cap,0),HELP.cap)}${kv("1년 최저~최고",numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0),HELP.w52)}</div>`;
     const collectHint=d.in_watchlist?'수집 대기':'관심종목 추가 시 수집';
     const SC=d.score||{};
     const bar=(lab,val,max)=>`<div class="row"><span style="width:56px">${lab}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:${Math.max(0,Math.min(100,(val||0)/max*100))}%"></i></div><b class="num">${numC(val,0)}/${max}</b></div>`;
+    const marginTxt=SC.margin_pct==null?"":(SC.margin_pct>0?`<b class="pos">적정가보다 ${numC(SC.margin_pct,0)}% 싸요</b>`:`<b class="neg">적정가보다 ${numC(-SC.margin_pct,0)}% 비싸요</b>`);
     const scoreH=SC.score!=null?`<div class="card" style="margin-bottom:10px">
-      <div class="kpi ${VC(SC.score)}">${numC(SC.score,0)}<span class="u">/100 · ${SC.verdict||''}</span></div>
-      ${bar("가치",SC.value,40)}${bar("품질",SC.quality,25)}${bar("모멘텀",SC.momentum,25)}${bar("타이밍",SC.timing,10)}
-      <div class="num" style="margin-top:6px">${(SC.reasons||[]).join(" · ")}${SC.margin_pct!=null?` · <b class="${SC.margin_pct>0?'pos':'neg'}">안전마진 ${numC(SC.margin_pct,0)}%</b>(그레이엄 ${fmt(SC.graham)}원)`:""}</div>
-      ${SC.has_chart?"":'<div class="num" style="opacity:.7">※ 일봉 미수집 — 관심종목 추가 시 모멘텀·타이밍 반영</div>'}</div>`:'';
-    const sgH=S?`<div class="cgrid">${kv("시그널",SIG[S.signal]||S.signal)}${kv("RSI",numC(S.rsi))}${kv("SMA교차",S.sma_cross||"–")}${kv("모멘텀60",numC(S.momentum_pct)+"%")}</div>`:`<div class="empty">일봉 ${collectHint}</div>`;
-    const hist=(D&&D.history&&D.history.length)?`<div class="scroll" style="margin-top:8px">${tableHTML(["연도","주당배당","수익률"], D.history.map(h=>`<tr><td>${h.year}</td><td class="num">${numC(h.per_share,0)}원</td><td class="num pos">${h.yield_pct!=null?h.yield_pct+"%":"–"}</td></tr>`).join(""))}</div>`:'';
-    const dvH=(D&&(D.yield_pct!=null||hist))?`<div class="cgrid">${kv("연배당수익률",D.yield_pct!=null?D.yield_pct+"%":"–")}${kv("연배당",numC(D.annual_per_share,0)+"원")}${kv("다음기준일",D.next_ex_date||"–")}</div>${hist}`:`<div class="empty">배당 ${collectHint}</div>`;
-    const wbtn=d.in_watchlist?'<span class="badge pos">✓ 관심종목</span>':`<button class="btn buy" onclick="addWatchModal('${qesc(code)}','${qesc(name)}')">＋ 관심종목 추가</button>`;
+      <div class="kpi ${VC(SC.score)}">${numC(SC.score,0)}<span class="u">점 / 100 · ${SC.verdict||''}</span></div>
+      <div class="num" style="margin:2px 0 8px">${HELP.score}. ${marginTxt}</div>
+      ${bar("가치",SC.value,40)}${bar("품질",SC.quality,25)}${bar("추세",SC.momentum,25)}${bar("타이밍",SC.timing,10)}
+      <div class="num" style="margin-top:6px">싼가·튼튼한가·오르는가·살 때인가를 종합. ${(SC.reasons||[]).join(" · ")}</div>
+      ${SC.has_chart?"":'<div class="num" style="opacity:.7">※ 차트 미수집 — 관심종목 추가하면 추세·타이밍도 반영돼요</div>'}</div>`:'';
+    const smaTxt=!S?'':(S.sma_cross==='golden'?'골든(상승 전환)':S.sma_cross==='dead'?'데드(하락 전환)':'교차 없음');
+    const sgH=S?`<div class="cgrid">${kv("신호",SIG[S.signal]||S.signal,"단기 매수/매도 참고")}${kv("RSI",numC(S.rsi),HELP.rsi)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
+    const hist=(D&&D.history&&D.history.length)?`<div class="scroll" style="margin-top:8px">${tableHTML(["연도","1주당 배당금","수익률"], D.history.map(h=>`<tr><td>${h.year}년</td><td class="num">${numC(h.per_share,0)}원</td><td class="num pos">${h.yield_pct!=null?h.yield_pct+"%":"–"}</td></tr>`).join(""))}</div>`:'';
+    const dvH=(D&&(D.yield_pct!=null||hist))?`<div class="cgrid">${kv("배당수익률",D.yield_pct!=null?D.yield_pct+"%":"–",HELP.divy)}${kv("1주당 배당금",numC(D.annual_per_share,0)+"원",HELP.div)}${kv("다음 배당일",D.next_ex_date||"–")}</div>${hist}`:`<div class="empty">배당금 ${collectHint}</div>`;
+    const wbtn=d.in_watchlist?'<span class="badge pos">✓ 내 관심종목</span>':`<button class="btn buy" onclick="addWatchModal('${qesc(code)}','${qesc(name)}')">＋ 관심종목에 담기</button>`;
     $("mBody").innerHTML=`<div class="arow" style="margin-bottom:8px">${wbtn}</div>
-      <div class="modal-sec">투자 매력도</div>${scoreH}
-      <div class="modal-sec">펀더멘털</div>${fund}
-      <div class="modal-sec">기술적 시그널</div>${sgH}
-      <div class="modal-sec">배당</div>${dvH}
-      <div class="modal-sec">분석</div>
-      <div class="arow"><button class="btn" onclick="mBacktest('${qesc(code)}')">📈 백테스트</button>
+      <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}
+      <div class="modal-sec">회사 가치·실적</div>${fund}
+      <div class="modal-sec">주가 흐름</div>${sgH}
+      <div class="modal-sec">배당금</div>${dvH}
+      <div class="modal-sec">더 알아보기</div>
+      <div class="arow"><button class="btn" onclick="mBacktest('${qesc(code)}')">📈 과거 성과</button>
         <button class="btn" onclick="mResearch('${qesc(code)}')">🧠 AI 분석</button></div><div id="mExtra"></div>`;
   }catch(e){ $("mBody").innerHTML=`<div class="empty">불러오기 실패: ${e.message}</div>`; }
 }
