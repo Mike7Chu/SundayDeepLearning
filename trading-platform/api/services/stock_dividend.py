@@ -18,18 +18,30 @@ def _today_str() -> str:
 
 
 def compute_dividend(quote: dict, items: list[dict]) -> dict:
-    """현재가 + 배당항목 → 연배당/수익률/다음 배당기준일(순수 함수)."""
+    """현재가 + 배당항목 → 연도별 이력 + 연배당/수익률/다음 기준일(순수 함수).
+
+    items는 최대 ~3년치. 연도별로 주당배당금을 합산해 history를 만들고,
+    가장 최근 연도 합을 연배당(annual)으로 본다.
+    """
     price = quote.get("price")
     today = _today_str()
-    # 최근 12개월 배당 합(연배당 추정)
-    annual = round(sum(i.get("per_share") or 0 for i in items), 4) if items else None
+    by_year: dict[str, float] = {}
+    for i in items:
+        d = i.get("date") or ""
+        ps = i.get("per_share")
+        if len(d) >= 4 and ps is not None:
+            by_year[d[:4]] = round(by_year.get(d[:4], 0.0) + ps, 2)
+    history = [{"year": y, "per_share": v,
+               "yield_pct": round(v / price * 100, 2) if price else None}
+              for y, v in sorted(by_year.items(), reverse=True)]
+    annual = history[0]["per_share"] if history else None
     yield_pct = round(annual / price * 100, 2) if (annual and price) else None
     upcoming = [i for i in items if (i.get("date") or "") >= today]
     next_ex = upcoming[0]["date"] if upcoming else None
     return {
         "code": quote.get("code"), "name": quote.get("name"), "price": price,
         "annual_per_share": annual, "yield_pct": yield_pct,
-        "next_ex_date": next_ex, "count": len(items),
+        "next_ex_date": next_ex, "count": len(items), "history": history,
     }
 
 

@@ -9,7 +9,8 @@ import json as _json
 
 from api.redis_client import get_redis
 from api.services.stock_dividend import compute_dividend, dividend_view
-from api.services.stock_signal import signals_for
+from api.services.stock_signal import evaluate_signals, signals_for
+from api.services.stock_score import compute_score
 from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
 from collector.stock.kis import effective_watchlist
@@ -44,6 +45,32 @@ async def stocks_all() -> dict:
 async def stocks_value(limit: int = 200) -> dict:
     """가치투자 스크리너(마법공식 랭킹). 전체 시장 수집분(stock:market) 기준, 상위 limit."""
     return await value_screener(get_redis(), limit=limit)
+
+
+@router.get("/stocks/score")
+async def stocks_score(limit: int = 200) -> dict:
+    """투자 매력도 랭킹 — 가치·품질·모멘텀·타이밍 통합 0~100 + 판정. 전체시장∪관심."""
+    redis = get_redis()
+    quotes = [q for q in await load_quotes(redis) if q.get("price") and q.get("code")]
+    codes = [q["code"] for q in quotes]
+    closes_map: dict[str, list] = {}
+    if codes:
+        async with redis.pipeline(transaction=False) as pipe:
+            for c in codes:
+                pipe.get(stock_ohlcv_key(c))
+            raws = await pipe.execute()
+        for c, raw in zip(codes, raws):
+            if not raw:
+                continue
+            try:
+                candles = _json.loads(raw)
+                closes_map[c] = [x["close"] for x in candles
+                                 if isinstance(x, dict) and x.get("close")]
+            except (ValueError, TypeError):
+                pass
+    rows = [compute_score(q, closes_map.get(q["code"], [])) for q in quotes]
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    return {"rows": rows[:limit], "total": len(rows)}
 
 
 @router.get("/stocks/signals")
@@ -89,7 +116,18 @@ async def stock_detail(code: str) -> dict:
     redis = get_redis()
     raw = await redis.hget(STOCK_QUOTE_KEY, code) or await redis.hget(STOCK_MARKET_KEY, code)
     quote = json.loads(raw) if raw else {"code": code}
-    sig = await signals_for(redis, code, quote.get("name", ""))
+    # 일봉 1회 조회 → 시그널 + 투자 매력도 스코어 공용
+    closes: list = []
+    oraw = await redis.get(stock_ohlcv_key(code))
+    if oraw:
+        try:
+            closes = [c["close"] for c in _json.loads(oraw)
+                      if isinstance(c, dict) and c.get("close")]
+        except (ValueError, TypeError):
+            closes = []
+    sig = ({"code": code, "name": quote.get("name", ""), **evaluate_signals(closes)}
+           if len(closes) >= 20 else None)
+    score = compute_score(quote, closes)
     div = None
     draw = await redis.hget(STOCK_DIVIDEND_KEY, code)
     if draw:
@@ -98,5 +136,5 @@ async def stock_detail(code: str) -> dict:
         except (json.JSONDecodeError, TypeError):
             div = None
     wl = await effective_watchlist(redis)
-    return {"quote": quote, "signal": sig, "dividend": div,
+    return {"quote": quote, "signal": sig, "dividend": div, "score": score,
             "in_watchlist": any(w.get("code") == code for w in wl)}

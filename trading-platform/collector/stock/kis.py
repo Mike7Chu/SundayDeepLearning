@@ -183,7 +183,7 @@ class KISClient:
         today = _dt.date.today()
         params = {
             "cts": "", "gb1": "0", "high_gb": "",   # high_gb 누락 시 빈 응답 방지
-            "f_dt": (today - _dt.timedelta(days=400)).strftime("%Y%m%d"),
+            "f_dt": (today - _dt.timedelta(days=1200)).strftime("%Y%m%d"),  # ~3년 이력
             "t_dt": (today + _dt.timedelta(days=120)).strftime("%Y%m%d"),
             "sht_cd": code,
         }
