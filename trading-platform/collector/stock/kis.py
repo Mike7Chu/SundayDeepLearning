@@ -69,6 +69,21 @@ class KISClient:
         self._throttle_lock = asyncio.Lock()
         self._last_call: float = 0.0
         self._min_interval: float = 1.0 / max(1.0, settings.kis_rate_per_sec)
+        self._http: httpx.AsyncClient | None = None
+
+    def http(self) -> httpx.AsyncClient:
+        """전 루프 공유 HTTP 클라이언트. KIS 실전 도메인은 동시 연결 수를 제한하므로
+        루프마다 새 커넥션을 열지 않고 이 하나(커넥션 풀 2)를 재사용한다."""
+        if self._http is None:
+            self._http = httpx.AsyncClient(
+                timeout=20,
+                limits=httpx.Limits(max_connections=2, max_keepalive_connections=2))
+        return self._http
+
+    async def aclose(self) -> None:
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
 
     @property
     def enabled(self) -> bool:

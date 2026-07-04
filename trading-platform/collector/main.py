@@ -66,20 +66,20 @@ async def stock_loop(redis: aioredis.Redis, kis: KISClient) -> None:
         logger.info("KIS 미설정 → 주식 수집 비활성 (.env KIS_APP_KEY/SECRET)")
         return
     logger.info("stock collector start (paper=%s)", settings.kis_paper)
+    client = kis.http()   # 공유 커넥션
     while True:
         watch = await effective_watchlist(redis)   # 매 주기 재조회(UI 편집 반영)
         n = 0
-        async with httpx.AsyncClient(timeout=10) as client:
-            for item in watch:
-                try:
-                    q = await kis.fetch_price(client, item["code"])
-                    # 병합 기록(Toss 시세 필드 보존). KIS 현재가가 0이면 price는 덮지 않음.
-                    if not q.get("price"):
-                        q.pop("price", None)
-                    await merge_quote(redis, item["code"], item["name"], q)
-                    n += 1
-                except Exception as exc:
-                    logger.warning("[stock %s] 실패: %s", item["code"], exc)
+        for item in watch:
+            try:
+                q = await kis.fetch_price(client, item["code"])
+                # 병합 기록(Toss 시세 필드 보존). KIS 현재가가 0이면 price는 덮지 않음.
+                if not q.get("price"):
+                    q.pop("price", None)
+                await merge_quote(redis, item["code"], item["name"], q)
+                n += 1
+            except Exception as exc:
+                logger.warning("[stock %s] 실패: %s", item["code"], exc)
         if n:
             logger.info("[stock] %d종목 수집(KIS)", n)
         await asyncio.sleep(settings.stock_interval_sec)
@@ -89,26 +89,26 @@ async def stock_history_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     """관심종목 일봉(시그널용) + 배당(배당주용) — 느린 주기. 키 없으면 비활성."""
     if not kis.enabled:
         return
+    client = kis.http()   # 공유 커넥션
     while True:
         watch = await effective_watchlist(redis)
-        async with httpx.AsyncClient(timeout=15) as client:
-            divs: dict[str, str] = {}
-            for item in watch:
-                code = item["code"]
-                try:
-                    candles = await kis.fetch_daily(client, code)
-                    if candles:
-                        await redis.set(stock_ohlcv_key(code), json.dumps(candles))
-                except Exception as exc:
-                    logger.warning("[stock daily %s] 실패: %s", code, exc)
-                try:
-                    dv = await kis.fetch_dividend(client, code)
-                    if dv.get("items"):
-                        divs[code] = json.dumps({**dv, "ts": time.time()})
-                except Exception as exc:
-                    logger.warning("[stock div %s] 실패: %s", code, exc)
-            if divs:
-                await replace_hash(redis, STOCK_DIVIDEND_KEY, divs)
+        divs: dict[str, str] = {}
+        for item in watch:
+            code = item["code"]
+            try:
+                candles = await kis.fetch_daily(client, code)
+                if candles:
+                    await redis.set(stock_ohlcv_key(code), json.dumps(candles))
+            except Exception as exc:
+                logger.warning("[stock daily %s] 실패: %s", code, exc)
+            try:
+                dv = await kis.fetch_dividend(client, code)
+                if dv.get("items"):
+                    divs[code] = json.dumps({**dv, "ts": time.time()})
+            except Exception as exc:
+                logger.warning("[stock div %s] 실패: %s", code, exc)
+        if divs:
+            await replace_hash(redis, STOCK_DIVIDEND_KEY, divs)
         logger.info("[stock] 일봉/배당 수집 완료(%d종목, 배당 %d종목)", len(watch), len(divs))
         if not divs:
             # 배당 0건이면 원인 진단 로그([div ...])가 위에 찍힘. 일시적 실패 대비 30분 뒤 재시도.
@@ -151,6 +151,7 @@ async def market_loop(redis: aioredis.Redis, kis: KISClient) -> None:
         return
     cursor = 0
     await asyncio.sleep(20)   # 유니버스 로딩 여유
+    client = kis.http()   # 공유 커넥션
     while True:
         uni = await _universe_codes(redis)
         if not uni:
@@ -161,15 +162,14 @@ async def market_loop(redis: aioredis.Redis, kis: KISClient) -> None:
             cursor = 0
             continue
         out: dict[str, str] = {}
-        async with httpx.AsyncClient(timeout=10) as client:
-            for item in batch:
-                code = item["code"]
-                try:
-                    q = await kis.fetch_price(client, code)
-                    out[code] = json.dumps({"code": code, "name": item.get("name", ""),
-                                            "ts": time.time(), **q}, ensure_ascii=False)
-                except Exception:
-                    continue
+        for item in batch:
+            code = item["code"]
+            try:
+                q = await kis.fetch_price(client, code)
+                out[code] = json.dumps({"code": code, "name": item.get("name", ""),
+                                        "ts": time.time(), **q}, ensure_ascii=False)
+            except Exception:
+                continue
         if out:
             await redis.hset(STOCK_MARKET_KEY, mapping=out)
         cursor += settings.market_batch
@@ -316,6 +316,7 @@ async def main() -> None:
         logger.info("활성 수집 루프 없음(KIS/TOSS 키 미설정) — idle 대기. .env 설정 후 재기동")
         await asyncio.Event().wait()
     finally:
+        await kis.aclose()
         await redis.aclose()
 
 
