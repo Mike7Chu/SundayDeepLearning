@@ -76,17 +76,31 @@ async def run() -> None:
         except Exception as exc:
             logger.warning("[research %s] 실패: %s", code, exc)
 
+    async def is_fresh(code: str) -> bool:
+        """이미 최근(interval 이내) 리포트가 있으면 재분석 생략(재시작 시 토큰 낭비 방지)."""
+        raw = await redis.hget(RESEARCH_KEY, code)
+        if not raw:
+            return False
+        try:
+            r = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        return bool(r.get("enabled") and r.get("report")
+                    and time.time() - (r.get("ts") or 0) < settings.research_interval_sec)
+
     last_full = 0.0
     try:
         while True:
-            # 1) 온디맨드 요청(대시보드 🧠 버튼 → API가 큐에 넣음) 우선 처리
+            # 1) 온디맨드 요청(대시보드 🧠 '다시 분석' → API가 큐에 넣음)은 무조건 처리
             reqs = await redis.spop(RESEARCH_REQ_KEY, 5)
             for code in (reqs or []):
                 await analyze_code(code)
                 await asyncio.sleep(2)
-            # 2) 정기 전체 분석(하루 1회)
-            if time.time() - last_full >= settings.research_interval_sec:
+            # 2) 정기 전체 분석 — 최근 리포트가 있는 종목은 건너뜀(재시작해도 재분석 안 함)
+            if time.time() - last_full >= 3600:   # 1시간마다 점검(신규/만료분만 분석)
                 for item in await effective_watchlist(redis):
+                    if await is_fresh(item["code"]):
+                        continue
                     await analyze_code(item["code"], item.get("name", ""))
                     await asyncio.sleep(2)
                 last_full = time.time()

@@ -56,6 +56,19 @@ async def merge_quote(redis: aioredis.Redis, code: str, name: str,
     for k, v in fields.items():
         if v is not None:
             rec[k] = v
+    # 가격 이상치 방어: 52주 범위를 크게 벗어난 현재가는 오염으로 보고 제거(다음 정상 수집 때 채움).
+    p, hi, lo = rec.get("price"), rec.get("high_52w"), rec.get("low_52w")
+    if p and hi and lo and hi > 0 and (p > hi * 2 or p < lo * 0.5):
+        rec.pop("price", None)
+        p = None
+    # PER/PBR/ROE는 신뢰 가능한 현재가 + EPS/BPS로 재계산(소스 불일치·오염 방지).
+    e, b = rec.get("eps"), rec.get("bps")
+    if p and e:
+        rec["per"] = round(p / e, 2)
+    if p and b and b > 0:
+        rec["pbr"] = round(p / b, 2)
+    if e is not None and b and b > 0:
+        rec["roe"] = round(e / b * 100, 2)
     rec["ts"] = time.time()
     await redis.hset(STOCK_QUOTE_KEY, code, json.dumps(rec, ensure_ascii=False))
 
@@ -73,10 +86,11 @@ async def stock_loop(redis: aioredis.Redis, kis: KISClient) -> None:
         for item in watch:
             try:
                 q = await kis.fetch_price(client, item["code"])
-                # 병합 기록(Toss 시세 필드 보존). KIS 현재가가 0이면 price는 덮지 않음.
-                if not q.get("price"):
-                    q.pop("price", None)
-                await merge_quote(redis, item["code"], item["name"], q)
+                # KIS 현재가/PER/PBR는 부정확 사례가 있어(예: 삼성전자 5배 부풀림) 신뢰도 높은
+                # Toss 가격을 쓴다. KIS에선 EPS·BPS(재무)만 취하고 PER/PBR은 merge_quote가
+                # Toss 가격으로 재계산. (부재 시 KIS 값 폴백)
+                fund = {"eps": q.get("eps"), "bps": q.get("bps")}
+                await merge_quote(redis, item["code"], item["name"], fund)
                 n += 1
             except Exception as exc:
                 logger.warning("[stock %s] 실패: %s", item["code"], exc)
@@ -145,8 +159,10 @@ async def _universe_codes(redis: aioredis.Redis) -> list[dict]:
     return load_watchlist()   # 폴백
 
 
-async def market_loop(redis: aioredis.Redis, kis: KISClient) -> None:
-    """유니버스 펀더멘털을 배치로 순회 수집 → stock:market (전체 시장 스크리너). 키 없으면 비활성."""
+async def market_loop(redis: aioredis.Redis, kis: KISClient,
+                      toss: TossClient) -> None:
+    """유니버스 펀더멘털 배치 수집 → stock:market. 가격은 Toss(신뢰), 재무는 KIS(EPS/BPS).
+    PER/PBR/ROE는 Toss 가격으로 재계산. 키 없으면 비활성."""
     if not kis.enabled:
         return
     cursor = 0
@@ -161,15 +177,34 @@ async def market_loop(redis: aioredis.Redis, kis: KISClient) -> None:
         if not batch:
             cursor = 0
             continue
+        codes = [it["code"] for it in batch]
+        # Toss 가격 배치 조회(신뢰). 실패 시 KIS 가격 폴백.
+        tprice: dict[str, float] = {}
+        if toss.enabled:
+            try:
+                async with httpx.AsyncClient(timeout=15) as tc:
+                    for p in await toss.fetch_prices(tc, codes):
+                        if p.get("price"):
+                            tprice[p["symbol"]] = p["price"]
+            except Exception as exc:
+                logger.warning("[market] Toss 가격 실패: %s", exc)
         out: dict[str, str] = {}
         for item in batch:
             code = item["code"]
             try:
                 q = await kis.fetch_price(client, code)
-                out[code] = json.dumps({"code": code, "name": item.get("name", ""),
-                                        "ts": time.time(), **q}, ensure_ascii=False)
             except Exception:
                 continue
+            price = tprice.get(code) or q.get("price")
+            eps, bps = q.get("eps"), q.get("bps")
+            per = round(price / eps, 2) if (price and eps) else q.get("per")
+            pbr = round(price / bps, 2) if (price and bps and bps > 0) else q.get("pbr")
+            roe = round(eps / bps * 100, 2) if (eps is not None and bps and bps > 0) else None
+            out[code] = json.dumps({
+                "code": code, "name": item.get("name", ""), "ts": time.time(),
+                "price": price, "per": per, "pbr": pbr, "eps": eps, "bps": bps, "roe": roe,
+                "high_52w": q.get("high_52w"), "low_52w": q.get("low_52w"),
+            }, ensure_ascii=False)
         if out:
             await redis.hset(STOCK_MARKET_KEY, mapping=out)
         cursor += settings.market_batch
@@ -306,7 +341,7 @@ async def main() -> None:
             stock_loop(redis, kis),
             stock_history_loop(redis, kis),
             universe_loop(redis, kis),
-            market_loop(redis, kis),
+            market_loop(redis, kis, toss),
             portfolio_loop(redis, toss),
             toss_history_loop(redis, toss),
             toss_price_loop(redis, toss),
