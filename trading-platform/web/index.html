@@ -507,16 +507,20 @@ async function mBacktest(code){
     e.innerHTML=`<div class="num" style="margin:6px 0">수수료 미반영 · 룰 검증용</div>`+tableHTML(["전략","전략수익%","매수후보유%","승률%","MDD%"],body);
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
 }
-async function mResearch(code){
-  const e=$("mExtra"); e.innerHTML='<div class="empty">AI 분석 요청 중…</div>';
-  try{ const r=await (await fetch(`/research/${code}/run`,{method:"POST"})).json();
+const escH=(s)=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+async function mResearch(code, force){
+  const e=$("mExtra"); e.innerHTML=`<div class="empty">AI 분석 ${force?'다시 실행 중…':'불러오는 중…'}</div>`;
+  try{ const r=await (await fetch(`/research/${encodeURIComponent(code)}/run${force?'?force=true':''}`,{method:"POST"})).json();
     if(r.queued){
-      // 구독 CLI 모드: 호스트 research가 처리 → 잠시 후 결과 폴링
-      e.innerHTML='<div class="empty">🧠 분석 요청됨 — 호스트에서 처리 중… (최대 1~2분)</div>';
+      // 호스트가 처리 → 이전 결과 있으면 먼저 보여주고, 새 결과 폴링
+      e.innerHTML=`<div class="num" style="margin:4px 0">🧠 분석 요청됨 — 호스트 처리 중… (최대 1~2분)</div>`
+        +(r.prev?`<pre class="rbody">${escH(r.prev)}</pre>`:'');
       pollResearch(code, e, 0); return;
     }
-    const note=r.cached?`<div class="num" style="margin:4px 0">📌 최근 분석 결과 (${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}) · 관심종목은 매일 갱신</div>`:'';
-    e.innerHTML=note+`<pre class="rbody">${(r.report||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</pre>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
+    const again=`<a class="clk" onclick="mResearch('${qesc(code)}',true)">🔄 다시 분석</a>`;
+    const note=r.cached?`<div class="num" style="margin:4px 0">📌 저장된 분석 (${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}) · 관심종목은 매일 자동 갱신 · ${again}</div>`
+      :`<div class="num" style="margin:4px 0">방금 분석 · ${again}</div>`;
+    e.innerHTML=note+`<pre class="rbody">${escH(r.report)}</pre>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
 }
 async function pollResearch(code, e, tries){

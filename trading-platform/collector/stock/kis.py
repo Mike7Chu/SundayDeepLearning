@@ -75,9 +75,11 @@ class KISClient:
         """전 루프 공유 HTTP 클라이언트. KIS 실전 도메인은 동시 연결 수를 제한하므로
         루프마다 새 커넥션을 열지 않고 이 하나(커넥션 풀 2)를 재사용한다."""
         if self._http is None:
+            # 커넥션 1개로 고정 — KIS 실전 도메인의 동시연결 제한('All connection attempts
+            # failed')을 확실히 피한다(throttle이 요청을 직렬화하므로 1개면 충분).
             self._http = httpx.AsyncClient(
                 timeout=20,
-                limits=httpx.Limits(max_connections=2, max_keepalive_connections=2))
+                limits=httpx.Limits(max_connections=1, max_keepalive_connections=1))
         return self._http
 
     async def aclose(self) -> None:
@@ -211,7 +213,7 @@ class KISClient:
         }
         body = await self._get(
             client, "/uapi/domestic-stock/v1/ksdinfo/dividend",
-            "HHKDB669102C0", params, f"배당 {code}")
+            "HHKDB669102C0", params, f"배당 {code}", retries=5)
         out1 = body.get("output1", [])
         items = parse_dividend(out1)
         if not items:
