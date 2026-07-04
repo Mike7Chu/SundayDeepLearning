@@ -1,0 +1,37 @@
+"""Redis 키 네이밍 (단일 진실원) — 주식 플랫폼."""
+from __future__ import annotations
+
+# 주식 시세 해시. field=종목코드, value=json{code,name,price,change_pct,per,pbr,...,ts}
+STOCK_QUOTE_KEY = "stock:quote"
+
+# 주식 배당 해시. field=종목코드, value=json{code, items:[{date, per_share, yield_pct}], ts}
+STOCK_DIVIDEND_KEY = "stock:dividend"
+
+# AI 리서치 리포트 해시. field=종목코드, value=json{code,name,report,model,ts,...}
+RESEARCH_KEY = "research:reports"
+# 온디맨드 분석 요청 큐(set of 종목코드). 컨테이너 API가 넣고 호스트 research가 처리.
+RESEARCH_REQ_KEY = "research:requests"
+
+# 관심종목 오버라이드(대시보드 편집). value=json[{code,name}]. 없으면 config/stocks.yaml.
+WATCHLIST_KEY = "stock:watchlist"
+
+# 전체 시장 스크리너: 유니버스(종목마스터) + 유니버스 펀더멘털
+STOCK_UNIVERSE_KEY = "stock:universe"   # value=json[{code,name,market}]
+STOCK_MARKET_KEY = "stock:market"       # field=code, value=json(quote+밸류에이션)
+
+# DART 공시. dart:recent=list(json 최근공시), dart:seen=set(접수번호 rcept_no)
+DART_RECENT_KEY = "dart:recent"
+DART_SEEN_KEY = "dart:seen"
+
+# 토스증권 포트폴리오. json{holdings:[{symbol,name,qty,avg_price,cur_price,eval_amount,pnl,pnl_pct}],
+#   cash, total_eval, pnl, pnl_pct, ts}
+TOSS_HOLDINGS_KEY = "toss:holdings"
+# 토스 계좌 요약. json{accountSeq, buying_power, ts}
+TOSS_ACCOUNT_KEY = "toss:account"
+# 토스 미체결 주문 스냅샷. json{orders:[...], ts}
+TOSS_ORDERS_KEY = "toss:orders"
+
+
+def stock_ohlcv_key(code: str) -> str:
+    """종목 일봉 시계열. value=json[{date, close, high, low, volume}] (오래된→최신)."""
+    return f"stock:ohlcv:{code}"
