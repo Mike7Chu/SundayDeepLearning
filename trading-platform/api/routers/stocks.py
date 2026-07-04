@@ -9,7 +9,7 @@ import json as _json
 
 from api.redis_client import get_redis
 from api.services.stock_dividend import compute_dividend, dividend_view
-from api.services.stock_signal import evaluate_signals, signals_for
+from api.services.stock_signal import evaluate_signals, signals_for, trade_levels
 from api.services.stock_score import compute_score
 from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
@@ -128,6 +128,7 @@ async def stock_detail(code: str) -> dict:
     sig = ({"code": code, "name": quote.get("name", ""), **evaluate_signals(closes)}
            if len(closes) >= 20 else None)
     score = compute_score(quote, closes)
+    levels = trade_levels(closes, quote.get("price"))
     div = None
     draw = await redis.hget(STOCK_DIVIDEND_KEY, code)
     if draw:
@@ -137,4 +138,5 @@ async def stock_detail(code: str) -> dict:
             div = None
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
+            "levels": levels,
             "in_watchlist": any(w.get("code") == code for w in wl)}

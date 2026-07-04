@@ -494,6 +494,14 @@ async function openStock(code,name){
     const smaTxt=align+(S&&S.sma_cross==='golden'?' · 골든크로스':S&&S.sma_cross==='dead'?' · 데드크로스':'');
     const trTxt=!S?['–','num']:(SC.momentum>=18?['상승 흐름','pos']:SC.momentum>=10?['혼조','num']:['약세 흐름','neg']);
     const sgH=S?`<div class="cgrid">${kv("흐름",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"위 종합점수의 '추세'와 같은 기준")}${kv("RSI",numC(S.rsi),HELP.rsi)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
+    const L=d.levels;
+    const lvH=L?`<div class="cgrid">
+      ${kv("추천 매수가",`<span class="pos">${fmt(L.entry)}원</span>`,`${L.entry_basis} 기준 · 추격 매수 방지`)}
+      ${kv("손절가",`<span class="neg">${fmt(L.stop)}원</span>`,`매수가 대비 ${numC(L.stop_pct,1)}% · 지지선 붕괴 시 탈출`)}
+      ${kv("목표가",`<span class="buy">${fmt(L.target)}원</span>`,`매수가 대비 +${numC(L.target_pct,1)}% · 손익비 1:2`)}
+      ${kv("추세 필터",L.trend_ok?'<span class="pos">상승 추세 ✓</span>':'<span class="neg">하락 추세 — 매수 보류 권장</span>',"현재가가 60일 평균선 위인가")}</div>
+      <div class="num" style="margin-top:6px">손실은 -${numC(-L.stop_pct,1)}%에서 자르고, 이익은 그 2배(+${numC(L.target_pct,1)}%)를 노리는 구조예요. 판단 보조이며 매매 신호가 아닙니다.</div>`
+      :`<div class="empty">가격 가이드 ${collectHint}</div>`;
     const hist=(D&&D.history&&D.history.length)?`<div class="scroll" style="margin-top:8px">${tableHTML(["연도","1주당 배당금","수익률"], D.history.map(h=>`<tr><td>${h.year}년</td><td class="num">${numC(h.per_share,0)}원</td><td class="num pos">${h.yield_pct!=null?h.yield_pct+"%":"–"}</td></tr>`).join(""))}</div>`:'';
     const dvH=(D&&(D.yield_pct!=null||hist))?`<div class="cgrid">${kv("배당수익률",D.yield_pct!=null?D.yield_pct+"%":"–",HELP.divy)}${kv("1주당 배당금",numC(D.annual_per_share,0)+"원",HELP.div)}${kv("다음 배당일",D.next_ex_date||"–")}</div>${hist}`:`<div class="empty">배당금 ${collectHint}</div>`;
     const wbtn=d.in_watchlist?'<span class="badge pos">✓ 내 관심종목</span>':`<button class="btn buy" onclick="addWatchModal('${qesc(code)}','${qesc(name)}')">＋ 관심종목에 담기</button>`;
@@ -501,6 +509,7 @@ async function openStock(code,name){
       <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}
       <div class="modal-sec">회사 가치·실적</div>${fund}
       <div class="modal-sec">주가 흐름</div>${sgH}
+      <div class="modal-sec">매매 가격 가이드</div>${lvH}
       <div class="modal-sec">배당금</div>${dvH}
       <div class="modal-sec">더 알아보기</div>
       <div class="arow"><button class="btn" onclick="mBacktest('${qesc(code)}')">📈 과거 성과</button>
