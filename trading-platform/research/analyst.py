@@ -59,7 +59,9 @@ class Analyst:
         if mode is None:
             return self._disabled_report(data)
         prompt = (
-            "다음 종목을 4대 거장 렌즈로 분석해 정해진 출력 형식으로 정리하세요.\n\n"
+            "다음 종목을 4대 거장 렌즈로 분석해 정해진 출력 형식으로 정리하세요.\n"
+            "제공된 정량 매력도 점수·안전마진을 근거로 삼아, 정성 판단(해자·경영·현금흐름)과 "
+            "종합해 '매수/분할매수/보류/회피' 관점을 명확히 제시하세요.\n\n"
             f"{format_for_prompt(data)}"
         )
         try:

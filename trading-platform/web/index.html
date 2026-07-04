@@ -200,9 +200,9 @@ async function render(){
 }
 
 async function renderHome(){
-  const [q,v,s,d,n,pf]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/signals"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio")]);
-  const quotes=q.rows||[], sigs=s.rows||[];
-  const buys=sigs.filter(r=>r.signal==="buy"), sells=sigs.filter(r=>r.signal==="sell");
+  const [q,v,sc,d,n,pf]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio")]);
+  const quotes=q.rows||[], scores=sc.rows||[];
+  const buys=scores.filter(r=>r.score>=60), sells=scores.filter(r=>r.score<45);
   const up=quotes.filter(r=>(r.change_pct||0)>0).length, dn=quotes.filter(r=>(r.change_pct||0)<0).length;
   $("stCount").textContent=quotes.length; $("stBuy").textContent=buys.length; $("stTarget").textContent=eok(TARGET);
   // 100억 진행률: 토스 실평가액(+현금) 있으면 자동, 없으면 수동입력(localStorage) 폴백
@@ -227,15 +227,15 @@ async function renderHome(){
     <div class="card"><h3>시장 온도</h3>
       <div class="row"><span>관심종목</span><b>${quotes.length}</b></div>
       <div class="row"><span>상승 / 하락</span><b><span class="pos">${up}</span> / <span class="neg">${dn}</span></b></div>
-      <div class="row"><span>매수 / 매도 시그널</span><b><span class="buy">${buys.length}</span> / <span class="sell">${sells.length}</span></b></div>
+      <div class="row"><span>매수후보(60+) / 회피(45-)</span><b><span class="buy">${buys.length}</span> / <span class="sell">${sells.length}</span></b></div>
     </div>
     <div class="card"><h3>등락 TOP</h3>${movers.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span>
       <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</b></div>`).join("")||'<div class="empty">데이터 없음(KIS 키 필요)</div>'}</div>
-    <div class="card"><h3>🟢 오늘의 매수 시그널</h3>${buys.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="badge">RSI ${numC(r.rsi)}</b></div>`).join("")||'<div class="empty">없음</div>'}</div>
+    <div class="card"><h3>🎯 오늘의 매수 후보 (매력도)</h3>${buys.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name} <span class="badge">${r.verdict}</span></span><b class="num strong ${VC(r.score)}">${numC(r.score,0)}</b></div>`).join("")||'<div class="empty">후보 없음 (KIS 키 필요)</div>'}</div>
     <div class="card"><h3>💎 가치 상위(마법공식)</h3>${topval.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="num">PER ${numC(r.per)} · ROE ${numC(r.roe)}%</b></div>`).join("")||'<div class="empty">데이터 없음</div>'}</div>
     <div class="card"><h3>💰 배당 상위</h3>${topdiv.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span><b class="pos">${r.yield_pct}%</b></div>`).join("")||'<div class="empty">데이터 없음</div>'}</div>
     <div class="card" style="grid-column:1/-1"><h3>📢 최근 공시</h3>${(n.rows||[]).slice(0,6).map(r=>`<div class="row"><a class="clk" href="${r.url}" target="_blank">${r.corp_name} · ${r.report_nm}</a><span class="num">${r.rcept_dt||''}</span></div>`).join("")||'<div class="empty">공시 없음 (DART 키 필요)</div>'}</div>`;
-  $("metaInfo").textContent=`관심종목 ${quotes.length} · 매수 ${buys.length}`;
+  $("metaInfo").textContent=`관심종목 ${quotes.length} · 매수후보 ${buys.length}`;
 }
 function saveAsset(){ localStorage.setItem("curAsset", $("curAsset").value||0); renderHome(); }
 
@@ -375,12 +375,15 @@ async function renderNews(){
 }
 
 async function renderResearch(){
-  const d=await jget("/research");
+  const [d,sc]=await Promise.all([jget("/research"),jget("/stocks/score")]);
+  const smap={}; (sc.rows||[]).forEach(r=>smap[r.code]=r);
   const rows=(d.rows||[]).filter(r=>match(r.name)||match(r.code));
-  const list=rows.map(r=>`<div class="card" style="margin:10px 16px">
+  const list=rows.map(r=>{const S=smap[r.code];
+    const sb=S?`<span class="badge ${VC(S.score)}">매력도 ${numC(S.score,0)} · ${S.verdict}</span>`:'';
+    return `<div class="card" style="margin:10px 16px">
     <div class="row"><b class="clk" onclick="openStock('${r.code}','${r.name}')">${r.name} (${r.code})</b>
-      <span class="badge">${r.model||''} ${r.ts?new Date(r.ts*1000).toLocaleString('ko-KR'):''}</span></div>
-    <div class="num" style="margin-top:6px">${(r.summary&&r.summary[0])||'(요약 없음)'}</div></div>`).join("");
+      <span>${sb} <span class="badge">${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}</span></span></div>
+    <div class="num" style="margin-top:6px">${(r.summary&&r.summary[0])||'(요약 없음)'}</div></div>`;}).join("");
   $("researchBox").innerHTML=`<div style="padding:12px 16px;color:var(--muted);font-size:13px">
     AI 4대 거장(버핏·멍거·돤융핑·리루) 렌즈 리서치. 종목 상세에서 'AI 분석'으로 생성.
     ${d.enabled?'':' · <b class="neg">비활성</b>(.env ANTHROPIC_API_KEY 또는 RESEARCH_USE_CLI)'}</div>

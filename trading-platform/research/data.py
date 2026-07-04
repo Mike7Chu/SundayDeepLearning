@@ -10,7 +10,8 @@ import json
 import redis.asyncio as aioredis
 from pydantic import BaseModel
 
-from shared.redis_keys import STOCK_QUOTE_KEY
+from api.services.stock_score import compute_score
+from shared.redis_keys import STOCK_MARKET_KEY, STOCK_QUOTE_KEY, stock_ohlcv_key
 
 
 class StockData(BaseModel):
@@ -25,6 +26,10 @@ class StockData(BaseModel):
     market_cap: float | None = None   # 억원
     high_52w: float | None = None
     low_52w: float | None = None
+    score: float | None = None        # 투자 매력도 0~100
+    verdict: str | None = None        # 판정
+    margin_pct: float | None = None   # 안전마진 %
+    score_reasons: list[str] = []     # 축별 근거
     news: list[str] = []
 
     def has_fundamentals(self) -> bool:
@@ -50,18 +55,30 @@ def from_quote(quote: dict, news: list[str] | None = None) -> StockData:
 
 
 async def gather(redis: aioredis.Redis, code: str) -> StockData | None:
-    """Redis에서 해당 종목 시세/밸류에이션을 모아 StockData 생성.
+    """Redis에서 시세/밸류에이션 + 투자 매력도 스코어를 모아 StockData 생성.
 
-    종목이 stock:quote에 아직 없으면 None(수집 대기/미설정).
+    관심종목(stock:quote) 없으면 전체시장(stock:market)에서. 둘 다 없으면 None.
     """
-    raw = await redis.hget(STOCK_QUOTE_KEY, code)
+    raw = await redis.hget(STOCK_QUOTE_KEY, code) or await redis.hget(STOCK_MARKET_KEY, code)
     if not raw:
         return None
     try:
         quote = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return None
-    return from_quote(quote)
+    closes: list = []
+    oraw = await redis.get(stock_ohlcv_key(code))
+    if oraw:
+        try:
+            closes = [c["close"] for c in json.loads(oraw)
+                      if isinstance(c, dict) and c.get("close")]
+        except (json.JSONDecodeError, TypeError):
+            closes = []
+    sd = from_quote(quote)
+    sc = compute_score(quote, closes)
+    sd.score, sd.verdict, sd.margin_pct = sc["score"], sc["verdict"], sc.get("margin_pct")
+    sd.score_reasons = sc.get("reasons", [])
+    return sd
 
 
 def _fmt(label: str, v, suffix: str = "") -> str:
@@ -81,7 +98,12 @@ def format_for_prompt(d: StockData) -> str:
         _fmt("시가총액", d.market_cap, "억원"),
         _fmt("52주최고", d.high_52w, "원"),
         _fmt("52주최저", d.low_52w, "원"),
+        _fmt("투자매력도(0~100)", d.score),
+        _fmt("판정", d.verdict),
+        _fmt("안전마진(그레이엄 대비)", d.margin_pct, "%"),
     ]
+    if d.score_reasons:
+        lines.append("정량 근거: " + " · ".join(d.score_reasons))
     if d.news:
         lines.append("최근 뉴스:")
         lines += [f"  · {n}" for n in d.news]
