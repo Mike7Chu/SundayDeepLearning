@@ -111,10 +111,11 @@ async def stock_history_loop(redis: aioredis.Redis, kis: KISClient) -> None:
                 await replace_hash(redis, STOCK_DIVIDEND_KEY, divs)
         logger.info("[stock] 일봉/배당 수집 완료(%d종목, 배당 %d종목)", len(watch), len(divs))
         if not divs:
-            # 배당이 전혀 안 잡히면 모의도메인 미제공 가능성 — 안내(실전키+KIS_QUOTE_REAL 권장).
-            logger.warning("[stock] 배당 0건 — 모의도메인은 예탁원 배당 미제공일 수 있음. "
-                           ".env KIS_QUOTE_REAL=true(실전 앱키) 또는 KIS_PAPER=false 검토")
-        await asyncio.sleep(settings.stock_history_interval_sec)
+            # 배당 0건이면 원인 진단 로그([div ...])가 위에 찍힘. 일시적 실패 대비 30분 뒤 재시도.
+            logger.warning("[stock] 배당 0건 — [div] 진단 로그 확인. 30분 뒤 재시도")
+            await asyncio.sleep(1800)
+        else:
+            await asyncio.sleep(settings.stock_history_interval_sec)
 
 
 async def universe_loop(redis: aioredis.Redis, kis: KISClient) -> None:

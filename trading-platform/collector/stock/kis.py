@@ -182,7 +182,7 @@ class KISClient:
         import datetime as _dt
         today = _dt.date.today()
         params = {
-            "cts": "", "gb1": "0",
+            "cts": "", "gb1": "0", "high_gb": "",   # high_gb 누락 시 빈 응답 방지
             "f_dt": (today - _dt.timedelta(days=400)).strftime("%Y%m%d"),
             "t_dt": (today + _dt.timedelta(days=120)).strftime("%Y%m%d"),
             "sht_cd": code,
@@ -190,7 +190,16 @@ class KISClient:
         body = await self._get(
             client, "/uapi/domestic-stock/v1/ksdinfo/dividend",
             "HHKDB669102C0", params, f"배당 {code}")
-        return {"code": code, "items": parse_dividend(body.get("output1", []))}
+        out1 = body.get("output1", [])
+        items = parse_dividend(out1)
+        if not items:
+            # 진단: rt_cd/msg1/output1 개수 확인(예탁원 응답 원인 파악용).
+            sample = out1[0] if isinstance(out1, list) and out1 else None
+            logger.info("[div %s] rt_cd=%s msg=%s output1=%s keys=%s",
+                        code, body.get("rt_cd"), body.get("msg1"),
+                        len(out1) if isinstance(out1, list) else type(out1).__name__,
+                        list(sample.keys()) if isinstance(sample, dict) else None)
+        return {"code": code, "items": items}
 
 
 def _f(v) -> float | None:
