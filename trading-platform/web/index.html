@@ -478,7 +478,7 @@ async function openStock(code,name){
       ${kv("PER",numC(Q.per),HELP.per)}${kv("PBR",numC(Q.pbr),HELP.pbr)}${kv("EPS",numC(Q.eps,0),HELP.eps)}${kv("BPS",numC(Q.bps,0),HELP.bps)}
       ${kv("시가총액",capF(Q.market_cap),HELP.cap)}${kv("1년 최저~최고",numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0)+"원",HELP.w52)}
       ${Q.ni_growth_pct!=null?kv("순이익 성장(작년比)",(Q.ni_growth_pct>=0?"+":"")+numC(Q.ni_growth_pct,0)+"%","공식 사업보고서 기준"):""}</div>`;
-    const collectHint=d.in_watchlist?'수집 대기':'관심종목 추가 시 수집';
+    const collectHint='일시 수집 실패 — 팝업을 다시 열어보세요';   // 어떤 종목이든 온디맨드 수집
     const SC=d.score||{};
     const bar=(lab,val,max)=>`<div class="row"><span style="width:56px">${lab}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:${Math.max(0,Math.min(100,(val||0)/max*100))}%"></i></div><b class="num">${numC(val,0)}/${max}</b></div>`;
     const growCaveat=(SC.margin_pct!=null&&SC.margin_pct<0&&(SC.ni_growth_pct||0)>=15)?' <span class="num">(이익이 크게 느는 성장주는 가치 기준으로 비싸 보일 수 있어요)</span>':'';

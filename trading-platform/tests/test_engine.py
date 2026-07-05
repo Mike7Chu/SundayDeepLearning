@@ -95,9 +95,14 @@ def test_place_gated_order_gates():
 # ---------- 텔레그램 명령 파서 ----------
 def test_parse_command_orders():
     assert parse_command("매수 005930 10 313500") == {
-        "cmd": "order", "side": "BUY", "code": "005930", "qty": 10.0, "price": 313500.0}
+        "cmd": "order", "broker": None, "side": "BUY", "code": "005930",
+        "qty": 10.0, "price": 313500.0}
     assert parse_command("매도 000660 2.5") == {
-        "cmd": "order", "side": "SELL", "code": "000660", "qty": 2.5, "price": None}
+        "cmd": "order", "broker": None, "side": "SELL", "code": "000660",
+        "qty": 2.5, "price": None}
+    # 브로커 명시: 토스/한투 접두어
+    assert parse_command("토스매수 005930 3")["broker"] == "toss"
+    assert parse_command("한투매도 000660 1 200000")["broker"] == "kis"
     assert parse_command("확인 42") == {"cmd": "confirm", "n": "42"}
     assert parse_command("주문취소 abc-123") == {"cmd": "cancel", "order_id": "abc-123"}
     assert parse_command("잔고") == {"cmd": "잔고"}

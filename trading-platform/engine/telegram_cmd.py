@@ -40,10 +40,11 @@ logger = logging.getLogger(__name__)
 
 _PENDING_TTL = 120.0   # '확인' 유효시간(초)
 _HELP = ("명령: 잔고 · 상태 · 후보 · 도움말\n"
-         "매수 코드 수량 [가격] / 매도 코드 수량 [가격]\n"
+         "매수 코드 수량 [가격] / 매도 코드 수량 [가격]  ← 기본 브로커(한투)\n"
+         "토스매수 코드 수량 [가격] / 토스매도 …  ← 토스 계좌로 주문\n"
+         "한투매수 / 한투매도 …  ← 한투 명시\n"
          "→ 요약이 오면 2분 내 '확인 N' 회신 시 실주문\n"
-         "(주문 브로커: AUTO_TRADE_BROKER — 기본 한투, 토스는 수동 매매용)\n"
-         "주문취소 주문ID (토스 주문만)")
+         "주문취소 주문ID (토스 주문만 — 한투는 앱/HTS)")
 
 
 def parse_command(text: str) -> dict | None:
@@ -51,11 +52,13 @@ def parse_command(text: str) -> dict | None:
     t = (text or "").strip()
     if t in ("잔고", "상태", "후보", "도움말", "/start", "help"):
         return {"cmd": {"/start": "도움말", "help": "도움말"}.get(t, t)}
-    m = re.fullmatch(r"(매수|매도)\s+(\d{6})\s+(\d+(?:\.\d+)?)(?:\s+(\d+))?", t)
+    m = re.fullmatch(r"(한투|토스)?(매수|매도)\s+(\d{6})\s+(\d+(?:\.\d+)?)(?:\s+(\d+))?", t)
     if m:
-        return {"cmd": "order", "side": "BUY" if m.group(1) == "매수" else "SELL",
-                "code": m.group(2), "qty": float(m.group(3)),
-                "price": float(m.group(4)) if m.group(4) else None}
+        broker = {"한투": "kis", "토스": "toss"}.get(m.group(1))   # None=기본 브로커
+        return {"cmd": "order", "broker": broker,
+                "side": "BUY" if m.group(2) == "매수" else "SELL",
+                "code": m.group(3), "qty": float(m.group(4)),
+                "price": float(m.group(5)) if m.group(5) else None}
     m = re.fullmatch(r"확인\s+(\d+)", t)
     if m:
         return {"cmd": "confirm", "n": m.group(1)}
@@ -127,11 +130,13 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
             await sender.send(f"{p['code']} 가격을 몰라요 — 가격을 지정해 주세요")
             return
         n = str(int(time.time()) % 100000)
+        bk = p.get("broker") or settings.auto_trade_broker
         await redis.hset(TG_PENDING_KEY, n, json.dumps(
-            {**p, "price": price, "ts": time.time()}, ensure_ascii=False))
+            {**p, "broker": bk, "price": price, "ts": time.time()},
+            ensure_ascii=False))
         side_kr = "매수" if p["side"] == "BUY" else "매도"
         broker_kr = ("한투" + ("(모의)" if settings.kis_paper else "")
-                     if settings.auto_trade_broker == "kis" else "토스")
+                     if bk == "kis" else "토스")
         await sender.send(
             f"⚠️ 실주문 확인 필요 [{broker_kr}]\n{side_kr} {p['code']} {p['qty']:g}주 "
             f"@{price:,.0f}원 (예상 {p['qty'] * price:,.0f}원)\n"
@@ -152,7 +157,7 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
             return
         ok, msg = await place_gated_order(redis, side=o["side"], code=o["code"],
                                           qty=o["qty"], price=o["price"],
-                                          broker=settings.auto_trade_broker,
+                                          broker=o.get("broker") or settings.auto_trade_broker,
                                           kis=kis, toss=toss)
         await sender.send(("✅ " if ok else "🚫 ") + msg)
     elif cmd == "cancel":

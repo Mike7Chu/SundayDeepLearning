@@ -1,13 +1,18 @@
 """주식(KIS) 시세 + 전략 API (시그널·가치·배당)."""
 from __future__ import annotations
 
+import datetime as _dt
 import json
+import time as _time
 
+import httpx
 from fastapi import APIRouter
 
 import json as _json
 
 from api.redis_client import get_redis
+from collector.news.dart import DartClient
+from collector.stock.toss import TossClient, candle_metrics
 from api.services.stock_dividend import compute_dividend, dividend_view
 from api.services.stock_signal import evaluate_signals, signals_for, trade_levels
 from api.services.stock_score import compute_score
@@ -16,6 +21,7 @@ from backtest.engine import STRATEGIES, backtest
 from collector.stock.kis import effective_watchlist
 from fastapi import HTTPException
 from shared.redis_keys import (
+    DART_CORP_KEY,
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
@@ -106,36 +112,91 @@ async def stocks_backtest(code: str, strategy: str = "sma") -> dict:
     return {"code": code, **backtest(closes, strategy)}
 
 
+_toss = TossClient()
+_dart = DartClient()
+
+
+async def _ondemand_candles(redis, code: str) -> list[dict]:
+    """미수집 종목의 일봉을 토스에서 즉시 수집(6h 캐시) — 관심종목 아니어도 분석 가능."""
+    if not _toss.enabled:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=20) as tc:
+            candles = await _toss.fetch_daily_history(tc, code)
+        if candles:
+            await redis.set(stock_ohlcv_key(code), _json.dumps(candles), ex=21600)
+        return candles or []
+    except Exception:
+        return []
+
+
+async def _ondemand_dividend(redis, code: str) -> list[dict]:
+    """미수집 종목의 배당 3개년을 DART에서 즉시 수집 — 관심종목 아니어도 표시."""
+    if not _dart.enabled:
+        return []
+    try:
+        craw = await redis.get(DART_CORP_KEY)
+        corp = (_json.loads(craw) if craw else {}).get(code)
+        if not corp:
+            return []
+        year = _dt.date.today().year - 1
+        async with httpx.AsyncClient(timeout=15) as dc:
+            items = await _dart.fetch_dividend_years(dc, corp, year)
+            if not items:
+                items = await _dart.fetch_dividend_years(dc, corp, year - 1)
+        if items:
+            await redis.hset(STOCK_DIVIDEND_KEY, code, _json.dumps(
+                {"code": code, "items": items, "src": "dart", "ts": _time.time()},
+                ensure_ascii=False))
+        return items or []
+    except Exception:
+        return []
+
+
 @router.get("/stocks/{code}")
 async def stock_detail(code: str) -> dict:
-    """단일 종목 상세 — 관심종목이 아니어도 전체시장(stock:market) 수집분에서 조회.
+    """단일 종목 상세 — 관심종목이 아니어도 즉시 분석.
 
-    펀더멘털은 stock:quote(관심) ∪ stock:market(전체시장)에서, 시그널·배당은
-    수집된 경우에만(관심종목). 미수집이면 '관심종목 추가 시 수집' 안내.
+    펀더멘털은 stock:quote ∪ stock:market. 차트(기술분석·매매가이드)와 배당이
+    미수집이면 토스/DART에서 온디맨드 수집 후 계산(캐시 저장).
     """
     redis = get_redis()
     raw = await redis.hget(STOCK_QUOTE_KEY, code) or await redis.hget(STOCK_MARKET_KEY, code)
     quote = json.loads(raw) if raw else {"code": code}
-    # 일봉 1회 조회 → 시그널 + 투자 매력도 스코어 공용
-    closes: list = []
+    # 일봉: 저장분 → 없으면 토스 온디맨드
+    candles: list = []
     oraw = await redis.get(stock_ohlcv_key(code))
     if oraw:
         try:
-            closes = [c["close"] for c in _json.loads(oraw)
-                      if isinstance(c, dict) and c.get("close")]
+            candles = _json.loads(oraw)
         except (ValueError, TypeError):
-            closes = []
+            candles = []
+    if len(candles) < 20:
+        candles = await _ondemand_candles(redis, code)
+    closes = [c["close"] for c in candles if isinstance(c, dict) and c.get("close")]
+    # 시세가 아직 없으면 일봉으로 보강(현재가·등락률·52주)
+    if not quote.get("price") and closes:
+        m = candle_metrics(candles)
+        quote.update({"price": m.get("last_close"), "change_pct": m.get("change_pct"),
+                      "high_52w": quote.get("high_52w") or m.get("high_52w"),
+                      "low_52w": quote.get("low_52w") or m.get("low_52w")})
     sig = ({"code": code, "name": quote.get("name", ""), **evaluate_signals(closes)}
            if len(closes) >= 20 else None)
     score = compute_score(quote, closes)
     levels = trade_levels(closes, quote.get("price"))
+    # 배당: 저장분 → 없으면 DART 온디맨드
     div = None
     draw = await redis.hget(STOCK_DIVIDEND_KEY, code)
+    items: list = []
     if draw:
         try:
-            div = compute_dividend(quote, json.loads(draw).get("items", []))
+            items = json.loads(draw).get("items", [])
         except (json.JSONDecodeError, TypeError):
-            div = None
+            items = []
+    if not items:
+        items = await _ondemand_dividend(redis, code)
+    if items:
+        div = compute_dividend(quote, items)
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
             "levels": levels,
