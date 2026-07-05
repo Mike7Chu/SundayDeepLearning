@@ -42,7 +42,8 @@ _PENDING_TTL = 120.0   # '확인' 유효시간(초)
 _HELP = ("명령: 잔고 · 상태 · 후보 · 도움말\n"
          "매수 코드 수량 [가격] / 매도 코드 수량 [가격]\n"
          "→ 요약이 오면 2분 내 '확인 N' 회신 시 실주문\n"
-         "주문취소 주문ID")
+         "(주문 브로커: AUTO_TRADE_BROKER — 기본 한투, 토스는 수동 매매용)\n"
+         "주문취소 주문ID (토스 주문만)")
 
 
 def parse_command(text: str) -> dict | None:
@@ -85,7 +86,7 @@ async def _cur_price(redis: aioredis.Redis, code: str) -> float | None:
         return None
 
 
-async def _handle(redis: aioredis.Redis, toss: TossClient,
+async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
                   sender: TelegramSender, text: str) -> None:
     p = parse_command(text)
     if p is None:
@@ -129,8 +130,10 @@ async def _handle(redis: aioredis.Redis, toss: TossClient,
         await redis.hset(TG_PENDING_KEY, n, json.dumps(
             {**p, "price": price, "ts": time.time()}, ensure_ascii=False))
         side_kr = "매수" if p["side"] == "BUY" else "매도"
+        broker_kr = ("한투" + ("(모의)" if settings.kis_paper else "")
+                     if settings.auto_trade_broker == "kis" else "토스")
         await sender.send(
-            f"⚠️ 실주문 확인 필요\n{side_kr} {p['code']} {p['qty']:g}주 "
+            f"⚠️ 실주문 확인 필요 [{broker_kr}]\n{side_kr} {p['code']} {p['qty']:g}주 "
             f"@{price:,.0f}원 (예상 {p['qty'] * price:,.0f}원)\n"
             f"→ 2분 내 '확인 {n}' 회신 시 실행")
     elif cmd == "confirm":
@@ -147,16 +150,17 @@ async def _handle(redis: aioredis.Redis, toss: TossClient,
         if time.time() - (o.get("ts") or 0) > _PENDING_TTL:
             await sender.send("⏰ 확인 시간 초과(2분) — 다시 주문해 주세요")
             return
-        ok, msg = await place_gated_order(redis, toss, side=o["side"],
-                                          code=o["code"], qty=o["qty"],
-                                          price=o["price"])
+        ok, msg = await place_gated_order(redis, side=o["side"], code=o["code"],
+                                          qty=o["qty"], price=o["price"],
+                                          broker=settings.auto_trade_broker,
+                                          kis=kis, toss=toss)
         await sender.send(("✅ " if ok else "🚫 ") + msg)
     elif cmd == "cancel":
         ok, msg = await cancel_gated_order(redis, toss, p["order_id"])
         await sender.send(("✅ " if ok else "🚫 ") + msg)
 
 
-async def command_loop(redis: aioredis.Redis, toss: TossClient) -> None:
+async def command_loop(redis: aioredis.Redis, toss: TossClient, kis=None) -> None:
     """텔레그램 getUpdates 롱폴링 — 등록된 chat_id의 메시지만 처리."""
     sender = TelegramSender()
     if not sender.enabled:
@@ -180,7 +184,7 @@ async def command_loop(redis: aioredis.Redis, toss: TossClient) -> None:
                     logger.warning("[tg] 미등록 chat 무시: %s", chat)
                     continue
                 if text:
-                    await _handle(redis, toss, sender, text)
+                    await _handle(redis, toss, kis, sender, text)
         except Exception as exc:
             logger.warning("[tg] 폴링 오류(계속): %s", exc)
             await asyncio.sleep(5)

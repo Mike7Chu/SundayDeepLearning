@@ -60,10 +60,14 @@ class Settings(BaseSettings):
     cash_floor_pct: float = 25.0          # 현금 비중 25% 미만이면 매수 시그널 무시
     buy_score_min: float = 70.0           # 2단계 필터 최종 점수 컷(이상만 매수 리스트)
     inversion_max_per_cycle: int = 5      # 사이클당 AI 역방향 분석 요청 상한(토큰 절약)
-    # 자동매매(기본 잠금): true + TOSS_TRADING_ENABLED=true 여야 필터 통과 종목을
-    # 추천 매수가에 지정가 자동 매수(종목당 5%·주문 한도·리스크 실드 전부 적용).
+    # 자동매매(기본 잠금): true + 해당 브로커 실매매 플래그 둘 다 켜야 동작.
+    # 브로커 분리: 자동매매=한투(KIS), 수동=토스 앱 — auto_trade_broker로 선택.
     auto_trade_enabled: bool = False
+    auto_trade_broker: str = "kis"              # kis | toss
     auto_trade_cooldown_sec: float = 604800.0   # 같은 종목 자동 재매수 금지 기간(7일)
+    # 한투(KIS) 주문 게이트 — kis_paper=true면 모의투자 주문(리허설), false면 실전
+    kis_trading_enabled: bool = False
+    kis_max_order_krw: float = 100_000.0        # 한투 주문당 안전 상한
 
     # AI 가치투자 리서치 (Addendum 9) — 키 없으면 비활성(idle)
     anthropic_api_key: str = ""

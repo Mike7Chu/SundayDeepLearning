@@ -65,6 +65,33 @@ def test_final_score():
     assert final_score(85, None) is None    # 감점 검증 전 → 보류
 
 
+# ---------- 게이트 주문 실행기(네트워크 전 단계 거부) ----------
+def test_place_gated_order_gates():
+    import asyncio
+
+    from collector.stock.kis import KISClient
+    from collector.stock.toss import TossClient
+    from engine.orders import place_gated_order
+
+    async def run():
+        # 키 미설정 환경: 브로커별로 명확한 거부 사유(네트워크 접근 없이 반환)
+        ok, msg = await place_gated_order(None, side="BUY", code="005930",
+                                          qty=1, price=1000, broker="kis",
+                                          kis=KISClient())
+        assert not ok and "한투" in msg
+        ok, msg = await place_gated_order(None, side="BUY", code="005930",
+                                          qty=1, price=1000, broker="toss",
+                                          toss=TossClient())
+        assert not ok and "토스" in msg
+        ok, msg = await place_gated_order(None, side="HOLD", code="005930",
+                                          qty=1, price=1000)
+        assert not ok and "BUY/SELL" in msg
+        ok, msg = await place_gated_order(None, side="BUY", code="005930",
+                                          qty=0, price=1000)
+        assert not ok and "양수" in msg
+    asyncio.run(run())
+
+
 # ---------- 텔레그램 명령 파서 ----------
 def test_parse_command_orders():
     assert parse_command("매수 005930 10 313500") == {

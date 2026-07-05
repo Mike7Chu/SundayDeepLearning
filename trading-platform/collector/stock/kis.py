@@ -61,8 +61,9 @@ class KISClient:
     def __init__(self):
         # 조회 전용이므로 kis_quote_real면 실전 도메인 고정(예탁원 배당 등 모의도메인 미제공 대응).
         self.base = _REAL if (settings.kis_quote_real or not settings.kis_paper) else _PAPER
-        self._token: str | None = None
-        self._exp: float = 0.0
+        # 주문은 계좌 종류를 따라감: 모의계좌(kis_paper=true)→vts, 실전→real.
+        self.order_base = _PAPER if settings.kis_paper else _REAL
+        self._tokens: dict[str, tuple[str, float]] = {}   # base → (token, 만료시각)
         self._lock = asyncio.Lock()   # 토큰 발급 직렬화(동시 발급 → KIS 1분당 1회 제한 위반)
         self._retry_after: float = 0.0
         # 요청 레이트리밋(전 루프 공유): 버스트로 KIS가 500을 뱉는 것 방지.
@@ -91,18 +92,23 @@ class KISClient:
     def enabled(self) -> bool:
         return bool(settings.kis_app_key and settings.kis_app_secret)
 
-    async def _token_value(self, client: httpx.AsyncClient) -> str:
-        if self._token and time.time() < self._exp - 60:
-            return self._token
+    async def _token_value(self, client: httpx.AsyncClient,
+                           base: str | None = None) -> str:
+        """도메인별 토큰(조회=base, 주문=order_base가 다를 수 있어 base 단위 캐시)."""
+        base = base or self.base
+        cached = self._tokens.get(base)
+        if cached and time.time() < cached[1] - 60:
+            return cached[0]
         # 여러 루프가 공유하는 클라이언트라, 락으로 한 번만 발급(나머지는 캐시 재사용).
         async with self._lock:
-            if self._token and time.time() < self._exp - 60:
-                return self._token
+            cached = self._tokens.get(base)
+            if cached and time.time() < cached[1] - 60:
+                return cached[0]
             now = time.time()
             if now < self._retry_after:
                 # KIS는 토큰 발급을 1분당 1회로 제한 → 실패 후 60초는 재요청 금지(스팸 방지).
                 raise RuntimeError("KIS 토큰 재발급 대기(1분당 1회 제한)")
-            r = await client.post(f"{self.base}/oauth2/tokenP", json={
+            r = await client.post(f"{base}/oauth2/tokenP", json={
                 "grant_type": "client_credentials",
                 "appkey": settings.kis_app_key,
                 "appsecret": settings.kis_app_secret,
@@ -114,10 +120,10 @@ class KISClient:
                 logger.warning("KIS 토큰 발급 실패(60s 대기): %s",
                                d.get("error_description") or d.get("msg1") or r.status_code)
                 raise RuntimeError("KIS 토큰 발급 실패")
-            self._token = d["access_token"]
-            self._exp = now + int(d.get("expires_in", 86400))
+            token = d["access_token"]
+            self._tokens[base] = (token, now + int(d.get("expires_in", 86400)))
             self._retry_after = 0.0
-            return self._token
+            return token
 
     def _headers(self, token: str, tr_id: str) -> dict:
         return {
@@ -224,6 +230,39 @@ class KISClient:
                         len(out1) if isinstance(out1, list) else type(out1).__name__,
                         list(sample.keys()) if isinstance(sample, dict) else None)
         return {"code": code, "items": items}
+
+    # ---- 주문 (자동매매 전용 — 호출부에서 kis_trading_enabled 등 게이트 필수) ----
+    async def place_order(self, client: httpx.AsyncClient, *, code: str,
+                          side: str, qty: int, price: int) -> dict:
+        """국내주식 현금 지정가 주문. kis_paper=true면 모의투자 주문(리허설).
+
+        KIS_ACCOUNT 형식 '12345678-01'(종합계좌 8자리-상품코드 2자리).
+        hashkey는 개인계좌 선택사항이라 생략. 실패는 rt_cd/msg1로 예외.
+        """
+        if "-" not in (settings.kis_account or ""):
+            raise RuntimeError("KIS_ACCOUNT 미설정/형식 오류(예: 12345678-01)")
+        cano, prdt = settings.kis_account.split("-", 1)
+        paper = settings.kis_paper
+        tr_id = (("VTTC0802U" if paper else "TTTC0802U") if side.upper() == "BUY"
+                 else ("VTTC0801U" if paper else "TTTC0801U"))
+        token = await self._token_value(client, self.order_base)
+        body = {
+            "CANO": cano.strip(), "ACNT_PRDT_CD": prdt.strip(),
+            "PDNO": code, "ORD_DVSN": "00",            # 00=지정가
+            "ORD_QTY": str(int(qty)), "ORD_UNPR": str(int(price)),
+        }
+        await self._throttle()
+        r = await client.post(
+            f"{self.order_base}/uapi/domestic-stock/v1/trading/order-cash",
+            headers=self._headers(token, tr_id), json=body)
+        r.raise_for_status()
+        d = self._check_rt(r.json(), f"주문 {side} {code}")
+        if d.get("rt_cd") != "0":
+            raise RuntimeError(f"KIS 주문 거부: {d.get('msg1') or d.get('msg_cd')}")
+        out = d.get("output", {}) or {}
+        return {"order_id": out.get("ODNO", ""),
+                "org_no": out.get("KRX_FWDG_ORD_ORGNO", ""),
+                "time": out.get("ORD_TMD", ""), "paper": paper}
 
 
 def _f(v) -> float | None:
