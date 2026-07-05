@@ -18,6 +18,7 @@ import time
 import redis.asyncio as aioredis
 
 from api.services.stock_score import compute_score
+from api.services.stock_signal import trade_levels
 from api.services.stock_value import load_quotes
 from engine.risk import evaluate_risk
 from engine.screener import final_score, quant_filter
@@ -113,8 +114,9 @@ async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
     # 정량 매력도 상위 순으로 정렬(감점 검증 우선순위)
     scored = []
     for q in cands:
-        sc = compute_score(q, await _closes(redis, q["code"]))
-        scored.append((sc["score"], q, sc))
+        closes = await _closes(redis, q["code"])
+        sc = compute_score(q, closes)
+        scored.append((sc["score"], q, sc, closes))
     scored.sort(key=lambda x: x[0], reverse=True)
 
     inv_raw = await redis.hgetall(RESEARCH_INV_KEY)
@@ -122,7 +124,7 @@ async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
     rows, requested = [], 0
     prev = await _json_get(redis, ENGINE_BUYLIST_KEY)
     prev_codes = {r.get("code") for r in prev.get("rows", [])}
-    for qscore, q, sc in scored[:30]:          # 상위 30개만 관리(부하·토큰 절약)
+    for qscore, q, sc, closes in scored[:30]:  # 상위 30개만 관리(부하·토큰 절약)
         code = q["code"]
         inv = None
         if code in inv_raw:
@@ -140,10 +142,13 @@ async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
         final = final_score(qscore, penalty)
         if final is None or final < settings.buy_score_min:
             continue
+        lv = trade_levels(closes, q.get("price")) or {}
         rows.append({"code": code, "name": q.get("name", ""),
                      "price": q.get("price"), "quant_score": qscore,
                      "penalty": penalty, "final": final,
                      "roe": q.get("roe"), "per": q.get("per"), "pbr": q.get("pbr"),
+                     "entry": lv.get("entry"), "stop": lv.get("stop"),
+                     "target": lv.get("target"), "trend_ok": lv.get("trend_ok"),
                      "risk_summary": (inv.get("report") or "").strip()[:200]})
     rows.sort(key=lambda r: r["final"], reverse=True)
     await redis.set(ENGINE_BUYLIST_KEY, json.dumps(
@@ -153,10 +158,18 @@ async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
                 len(cands), requested, len(rows))
     new = [r for r in rows if r["code"] not in prev_codes]
     if new and not risk.get("buy_lock"):
-        lines = [f"· {r['name']}({r['code']}) 최종 {r['final']:.0f}점 "
-                 f"(정량 {r['quant_score']:.0f} − 감점 {r['penalty']})" for r in new[:5]]
+        lines = []
+        for r in new[:5]:
+            line = (f"· {r['name']}({r['code']}) 최종 {r['final']:.0f}점 "
+                    f"(정량 {r['quant_score']:.0f} − 감점 {r['penalty']})")
+            if r.get("entry"):
+                line += (f"\n  매수 {r['entry']:,.0f} · 손절 {r['stop']:,.0f} · "
+                         f"목표 {r['target']:,.0f}")
+                if r.get("trend_ok") is False:
+                    line += " ⚠️하락추세"
+            lines.append(line)
         await sender.send("🎯 매수 후보 진입(2단계 필터 통과)\n" + "\n".join(lines)
-                          + "\n※ 자동 주문 아님 — 판단 보조")
+                          + "\n※ 자동 주문 아님 — 최종 결정은 직접")
 
 
 async def run() -> None:

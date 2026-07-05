@@ -141,6 +141,64 @@ async def _dart_dividend(dart: DartClient, client: httpx.AsyncClient,
     return []
 
 
+async def _upsert_market_price(redis: aioredis.Redis, code: str, name: str,
+                               price: float) -> None:
+    """stock:market에 가격 반영(레코드 없으면 생성). EPS/BPS 있으면 비율 재계산."""
+    raw = await redis.hget(STOCK_MARKET_KEY, code)
+    rec: dict = {"code": code}
+    if raw:
+        try:
+            rec = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            rec = {"code": code}
+    if name and not rec.get("name"):
+        rec["name"] = name
+    rec["price"] = price
+    e, b = rec.get("eps"), rec.get("bps")
+    if e:
+        rec["per"] = round(price / e, 2)
+    if b and b > 0:
+        rec["pbr"] = round(price / b, 2)
+    rec["ts"] = time.time()
+    await redis.hset(STOCK_MARKET_KEY, code, json.dumps(rec, ensure_ascii=False))
+
+
+async def market_price_loop(redis: aioredis.Redis, toss: TossClient) -> None:
+    """유니버스 전체 가격 고속 스윕 — 토스 다건 시세(200종목/콜)로 5분마다 채움.
+
+    KIS 펀더멘털(market_loop, 시간당 1바퀴)을 기다리지 않고 가격·PER/PBR을
+    유니버스 전체에 즉시 공급 → '가격 없는 종목'을 최소화(거래정지 등만 남음).
+    """
+    if not toss.enabled:
+        return
+    await asyncio.sleep(15)   # 유니버스 로딩 여유
+    while True:
+        try:
+            uni = await _universe_codes(redis)
+            names = {u["code"]: u.get("name", "") for u in uni}
+            codes = list(names.keys())
+            n = 0
+            async with httpx.AsyncClient(timeout=20) as client:
+                for i in range(0, len(codes), 200):
+                    chunk = codes[i:i + 200]
+                    try:
+                        prices = await toss.fetch_prices(client, chunk)
+                    except Exception as exc:
+                        logger.warning("[market-price] 청크 실패(%d~): %s", i, exc)
+                        continue
+                    for p in prices:
+                        if p.get("price"):
+                            await _upsert_market_price(
+                                redis, p["symbol"], names.get(p["symbol"], ""),
+                                p["price"])
+                            n += 1
+                    await asyncio.sleep(1)   # 콜 간 여유
+            logger.info("[market-price] 유니버스 가격 %d/%d종목", n, len(codes))
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] market-price 스윕 실패: %s", exc)
+        await asyncio.sleep(settings.market_price_interval_sec)
+
+
 async def _merge_market_field(redis: aioredis.Redis, code: str, fields: dict) -> None:
     """stock:market 레코드에 필드 병합(레코드 없으면 스킵 — market_loop가 곧 생성)."""
     raw = await redis.hget(STOCK_MARKET_KEY, code)
@@ -420,6 +478,7 @@ async def main() -> None:
             stock_history_loop(redis, dart),
             universe_loop(redis, kis),
             market_loop(redis, kis, toss),
+            market_price_loop(redis, toss),
             portfolio_loop(redis, toss),
             toss_history_loop(redis, toss),
             toss_price_loop(redis, toss),

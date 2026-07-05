@@ -23,9 +23,10 @@ class Settings(BaseSettings):
     dart_watch_all: bool = False             # True=전 종목 공시, False=관심/유니버스만
 
     # 전체 시장 스크리너: 유니버스 펀더멘털 수집(배치·느린 주기, KIS 레이트리밋 대비)
-    market_scan_interval_sec: float = 3600.0  # 유니버스 1바퀴 목표 주기
+    market_scan_interval_sec: float = 3600.0  # 유니버스 1바퀴 목표 주기(KIS 펀더멘털)
     market_batch: int = 60                     # 사이클당 조회 종목 수
     market_universe_max: int = 900             # 유니버스 상한(부하 방지)
+    market_price_interval_sec: float = 300.0   # 유니버스 전체 가격 스윕(토스 200종목/콜)
 
     # 한국투자증권(KIS) — 키 없으면 주식 수집 비활성
     kis_app_key: str = ""
@@ -53,7 +54,7 @@ class Settings(BaseSettings):
     briefing_drip_budget: float = 0.0             # 배당 정기적립 월예산(원). 0=미사용
 
     # ===== 매매 엔진(멍거 리스크 실드) — 1시간 주기 검증. 실주문은 별도 게이트 =====
-    engine_interval_sec: float = 3600.0   # 잔고·리스크·시그널 점검 주기
+    engine_interval_sec: float = 600.0    # 잔고·리스크·시그널 점검 주기(기본 10분 — 준실시간 알림)
     mdd_limit_pct: float = 15.0           # 최고점 대비 -15% → BUY_LOCK(서킷 브레이커)
     max_stock_pct: float = 5.0            # 단일 종목 최대 매수금액 = 자산의 5%
     cash_floor_pct: float = 25.0          # 현금 비중 25% 미만이면 매수 시그널 무시
