@@ -77,6 +77,29 @@ def test_parse_alot_matter_three_years():
     ]
 
 
+def test_parse_alot_matter_split_adjusted():
+    # 전전기 액면 5,000 → 당기 500 (10:1 분할): 과거 배당 ÷10 환산
+    payload = {"status": "000", "list": [
+        {"se": "주당액면가액(원)", "thstrm": "500", "frmtrm": "500", "lwfr": "5,000"},
+        {"se": "주당 현금배당금(원)", "stock_knd": "보통주",
+         "thstrm": "300", "frmtrm": "280", "lwfr": "2,500"},
+    ]}
+    items = parse_alot_matter(payload, 2025)
+    assert items[0] == {"date": "2025", "per_share": 300.0}   # 당기 그대로
+    assert items[1] == {"date": "2024", "per_share": 280.0}
+    assert items[2] == {"date": "2023", "per_share": 250.0}   # 2500 × (500/5000)
+
+
+def test_compute_dividend_split_suspect():
+    from api.services.stock_dividend import compute_dividend
+    # 보고서 이후 분할 미반영 → 수익률 40% 같은 비정상치는 숨김
+    q = {"code": "X", "name": "분할주", "price": 5000}
+    out = compute_dividend(q, [{"date": "2025", "per_share": 2000}])   # 40%
+    assert out["split_suspect"] is True and out["yield_pct"] is None
+    ok = compute_dividend(q, [{"date": "2025", "per_share": 350}])     # 7%
+    assert ok["split_suspect"] is False and ok["yield_pct"] == 7.0
+
+
 def test_parse_alot_matter_error_or_empty():
     assert parse_alot_matter({"status": "013"}, 2025) == []            # 데이터 없음
     assert parse_alot_matter({"status": "000", "list": []}, 2025) == []

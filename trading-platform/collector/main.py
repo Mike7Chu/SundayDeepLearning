@@ -402,6 +402,16 @@ async def toss_history_loop(redis: aioredis.Redis, toss: TossClient) -> None:
     while True:
         try:
             watch = await effective_watchlist(redis)
+            # 보유 종목도 포함 — 목표가/손절선 알림에 차트가 필요.
+            try:
+                raw = await redis.get(TOSS_HOLDINGS_KEY)
+                held = json.loads(raw).get("holdings", []) if raw else []
+            except (json.JSONDecodeError, TypeError):
+                held = []
+            wset = {w["code"] for w in watch}
+            watch = list(watch) + [
+                {"code": h["symbol"], "name": h.get("name", "")}
+                for h in held if h.get("symbol") and h["symbol"] not in wset]
             codes = [w["code"] for w in watch]
             async with httpx.AsyncClient(timeout=20) as client:
                 info = await toss.fetch_stocks(client, codes)

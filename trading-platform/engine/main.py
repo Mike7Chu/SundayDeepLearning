@@ -24,6 +24,7 @@ from engine.risk import evaluate_risk
 from engine.screener import final_score, quant_filter
 from notifier.telegram import TelegramSender
 from shared.redis_keys import (
+    ENGINE_ALERTS_KEY,
     ENGINE_BUYLIST_KEY,
     ENGINE_PEAK_KEY,
     ENGINE_RISK_KEY,
@@ -172,6 +173,46 @@ async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
                           + "\n※ 자동 주문 아님 — 최종 결정은 직접")
 
 
+async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> None:
+    """보유 종목이 추천 목표가/손절선에 닿으면 알림(종목·종류당 24h 1회).
+
+    가격 가이드(trade_levels)와 같은 기준. 구간을 벗어나면 상태 해제 → 재진입 시 재알림.
+    """
+    hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
+    prev = await redis.hgetall(ENGINE_ALERTS_KEY)
+    for h in hold.get("holdings", []):
+        code = h.get("symbol")
+        name = h.get("name") or code
+        cur, avg = h.get("cur_price"), h.get("avg_price")
+        if not code or not cur:
+            continue
+        lv = trade_levels(await _closes(redis, code), cur)
+        if not lv:
+            continue
+        kind = "target" if cur >= lv["target"] else ("stop" if cur <= lv["stop"] else None)
+        if kind is None:
+            if code in prev:
+                await redis.hdel(ENGINE_ALERTS_KEY, code)   # 구간 이탈 → 상태 리셋
+            continue
+        try:
+            last = json.loads(prev[code]) if code in prev else {}
+        except (json.JSONDecodeError, TypeError):
+            last = {}
+        if last.get("kind") == kind and time.time() - (last.get("ts") or 0) < 86400:
+            continue                                        # 같은 상태 24h 내 재알림 금지
+        pnl = f" · 평단 대비 {((cur / avg) - 1) * 100:+.1f}%" if avg else ""
+        if kind == "target":
+            msg = (f"🎯 목표가 도달 — {name}({code})\n"
+                   f"현재 {cur:,.0f} ≥ 목표 {lv['target']:,.0f}{pnl}\n익절 검토 타이밍")
+        else:
+            msg = (f"🛑 손절선 이탈 — {name}({code})\n"
+                   f"현재 {cur:,.0f} ≤ 손절 {lv['stop']:,.0f}{pnl}\n손절 검토 타이밍")
+        await sender.send(msg + "\n※ 판단 보조 — 최종 결정은 직접")
+        await redis.hset(ENGINE_ALERTS_KEY, code,
+                         json.dumps({"kind": kind, "ts": time.time()}))
+        logger.info("[alert] %s %s (cur %.0f)", code, kind, cur)
+
+
 async def run() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     sender = TelegramSender()
@@ -182,6 +223,7 @@ async def run() -> None:
         while True:
             try:
                 risk = await _update_risk(redis, sender)
+                await _holdings_alerts(redis, sender)
                 await _pipeline(redis, sender, risk)
             except Exception as exc:
                 # 어떤 오류도 엔진을 죽이지 않는다 — 기록 후 다음 주기.

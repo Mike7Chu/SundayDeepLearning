@@ -38,6 +38,8 @@ TOSS_ORDERS_KEY = "toss:orders"
 ENGINE_PEAK_KEY = "engine:peak_asset"
 ENGINE_RISK_KEY = "engine:risk"
 ENGINE_BUYLIST_KEY = "engine:buylist"
+# 보유 종목 목표가/손절선 도달 알림 상태(hash{code: json{kind,ts}} — 중복 알림 방지)
+ENGINE_ALERTS_KEY = "engine:alerts"
 # 역방향(Inversion) AI 분석. inv_requests=set(요청 큐), inversion=hash{code: json{penalty,report,ts}}
 RESEARCH_INV_REQ_KEY = "research:inv_requests"
 RESEARCH_INV_KEY = "research:inversion"

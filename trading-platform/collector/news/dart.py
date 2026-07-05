@@ -61,6 +61,10 @@ def parse_alot_matter(payload: dict, year: int) -> list[dict]:
 
     사업보고서 1건에 당기(thstrm)/전기(frmtrm)/전전기(lwfr) 3개년이 담긴다.
     보통주 행 우선. 값의 쉼표 제거. 반환: [{date:"2025", per_share:1444.0}, ...]
+
+    **액면분할 보정**: 같은 보고서의 '주당액면가액' 행으로 연도별 액면가를 비교해,
+    분할 전 연도의 주당배당금을 현재 액면 기준으로 환산한다.
+    (예: 액면 5,000→500 분할이면 과거 배당 ÷10 — 미보정 시 수익률이 10배 부풀려짐)
     """
     if not isinstance(payload, dict) or payload.get("status") != "000":
         return []
@@ -72,17 +76,25 @@ def parse_alot_matter(payload: dict, year: int) -> list[dict]:
         except (TypeError, ValueError):
             return None
 
-    rows = [r for r in payload.get("list", []) or []
+    lst = payload.get("list", []) or []
+    rows = [r for r in lst
             if "주당" in (r.get("se") or "") and "현금배당" in (r.get("se") or "")]
     if not rows:
         return []
     pref = [r for r in rows if "보통주" in (r.get("stock_knd") or "")]
     row = (pref or rows)[0]
+    par_rows = [r for r in lst if "액면가" in (r.get("se") or "")]
+    par = par_rows[0] if par_rows else {}
+    par_cur = _num(par.get("thstrm"))
     out: list[dict] = []
     for key, y in (("thstrm", year), ("frmtrm", year - 1), ("lwfr", year - 2)):
         v = _num(row.get(key))
-        if v:
-            out.append({"date": str(y), "per_share": v})
+        if not v:
+            continue
+        par_y = _num(par.get(key))
+        if par_cur and par_y and par_y > 0 and par_cur != par_y:
+            v = v * (par_cur / par_y)     # 액면분할/병합 환산(현재 액면 기준)
+        out.append({"date": str(y), "per_share": round(v, 2)})
     return out
 
 

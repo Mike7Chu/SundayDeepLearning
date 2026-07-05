@@ -37,12 +37,20 @@ def compute_dividend(quote: dict, items: list[dict]) -> dict:
               for y, v in sorted(by_year.items(), reverse=True)]
     annual = history[0]["per_share"] if history else None
     yield_pct = round(annual / price * 100, 2) if (annual and price) else None
+    # 액면분할 안전망: 보고서 '이후' 분할은 액면가 보정으로도 못 잡는다.
+    # 수익률 25% 초과는 분할 미반영 의심 → 랭킹 오염 방지 위해 수익률 숨김.
+    split_suspect = bool(yield_pct and yield_pct > 25)
+    if split_suspect:
+        yield_pct = None
+        for h in history:
+            h["yield_pct"] = None
     upcoming = [i for i in items if (i.get("date") or "") >= today]
     next_ex = upcoming[0]["date"] if upcoming else None
     return {
         "code": quote.get("code"), "name": quote.get("name"), "price": price,
         "annual_per_share": annual, "yield_pct": yield_pct,
         "next_ex_date": next_ex, "count": len(items), "history": history,
+        "split_suspect": split_suspect,
     }
 
 
