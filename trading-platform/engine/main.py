@@ -20,11 +20,15 @@ import redis.asyncio as aioredis
 from api.services.stock_score import compute_score
 from api.services.stock_signal import trade_levels
 from api.services.stock_value import load_quotes
+from collector.stock.toss import TossClient
+from engine.orders import place_gated_order
 from engine.risk import evaluate_risk
 from engine.screener import final_score, quant_filter
+from engine.telegram_cmd import command_loop
 from notifier.telegram import TelegramSender
 from shared.redis_keys import (
     ENGINE_ALERTS_KEY,
+    ENGINE_AUTO_KEY,
     ENGINE_BUYLIST_KEY,
     ENGINE_PEAK_KEY,
     ENGINE_RISK_KEY,
@@ -106,9 +110,48 @@ async def _closes(redis: aioredis.Redis, code: str) -> list:
         return []
 
 
+async def _auto_buy(redis: aioredis.Redis, toss: TossClient,
+                    sender: TelegramSender, risk: dict, rows: list[dict]) -> None:
+    """자동매수(옵트인): 필터 통과 신규 종목을 추천 매수가에 지정가 주문.
+
+    조건: AUTO_TRADE_ENABLED + TOSS_TRADING_ENABLED + BUY_LOCK 아님 + 상승추세 +
+    미보유 + 쿨다운(7일) 밖. 예산 = min(종목당 5% 한도, 주문 한도). 전 게이트 재검증.
+    """
+    if not settings.auto_trade_enabled or risk.get("buy_lock"):
+        return
+    hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
+    held = {h.get("symbol") for h in hold.get("holdings", [])}
+    now = time.time()
+    for r in rows:
+        code, entry = r["code"], r.get("entry")
+        if not entry or code in held or r.get("trend_ok") is False:
+            continue
+        raw = await redis.hget(ENGINE_AUTO_KEY, code)
+        if raw:
+            try:
+                if now - (json.loads(raw).get("ts") or 0) < settings.auto_trade_cooldown_sec:
+                    continue                     # 쿨다운 내 재매수 금지
+            except (json.JSONDecodeError, TypeError):
+                pass
+        budget = min(risk.get("per_stock_cap") or settings.toss_max_order_krw,
+                     settings.toss_max_order_krw)
+        qty = int(budget // entry)
+        if qty < 1:
+            continue
+        ok, msg = await place_gated_order(redis, toss, side="BUY", code=code,
+                                          qty=qty, price=entry)
+        await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
+            {"ts": now, "ok": ok, "qty": qty, "price": entry}, ensure_ascii=False))
+        await sender.send(("🤖 자동매수 " + ("접수 ✅" if ok else "거부 🚫")) +
+                          f"\n{r['name']}({code}) {qty}주 @{entry:,.0f}원 "
+                          f"(최종 {r['final']:.0f}점)\n{msg if not ok else ''}"
+                          f"손절 {r.get('stop') or 0:,.0f} · 목표 {r.get('target') or 0:,.0f}")
+        logger.info("[auto] %s BUY x%d @%.0f → %s", code, qty, entry, ok)
+
+
 async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
-                    risk: dict) -> None:
-    """2단계 필터 실행 → engine:buylist 저장(+신규 진입 알림)."""
+                    risk: dict, toss: TossClient) -> None:
+    """2단계 필터 실행 → engine:buylist 저장(+신규 진입 알림·옵트인 자동매수)."""
     quotes = await load_quotes(redis)
     cands = quant_filter(quotes,
                          roe_min=10.0, pbr_max=1.5, per_max=15.0)
@@ -170,7 +213,11 @@ async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
                     line += " ⚠️하락추세"
             lines.append(line)
         await sender.send("🎯 매수 후보 진입(2단계 필터 통과)\n" + "\n".join(lines)
-                          + "\n※ 자동 주문 아님 — 최종 결정은 직접")
+                          + ("\n※ 자동매수 활성 — 조건 충족 시 자동 주문"
+                             if settings.auto_trade_enabled
+                             else "\n※ 자동 주문 아님 — 최종 결정은 직접"))
+    if new:
+        await _auto_buy(redis, toss, sender, risk, new)
 
 
 async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> None:
@@ -213,22 +260,32 @@ async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> Non
         logger.info("[alert] %s %s (cur %.0f)", code, kind, cur)
 
 
+async def _cycle_loop(redis: aioredis.Redis, sender: TelegramSender,
+                      toss: TossClient) -> None:
+    while True:
+        try:
+            risk = await _update_risk(redis, sender)
+            await _holdings_alerts(redis, sender)
+            await _pipeline(redis, sender, risk, toss)
+        except Exception as exc:
+            # 어떤 오류도 엔진을 죽이지 않는다 — 기록 후 다음 주기.
+            logger.warning("[DATA_ERROR] engine 사이클 실패: %s", exc)
+        await asyncio.sleep(settings.engine_interval_sec)
+
+
 async def run() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     sender = TelegramSender()
-    logger.info("engine start (interval=%ss, MDD %s%%, 종목한도 %s%%, 현금바닥 %s%%)",
-                settings.engine_interval_sec, settings.mdd_limit_pct,
-                settings.max_stock_pct, settings.cash_floor_pct)
+    toss = TossClient()
+    logger.info("engine start (interval=%ss, MDD %s%%, 종목한도 %s%%, 현금바닥 %s%%, "
+                "자동매매=%s)", settings.engine_interval_sec, settings.mdd_limit_pct,
+                settings.max_stock_pct, settings.cash_floor_pct,
+                settings.auto_trade_enabled)
     try:
-        while True:
-            try:
-                risk = await _update_risk(redis, sender)
-                await _holdings_alerts(redis, sender)
-                await _pipeline(redis, sender, risk)
-            except Exception as exc:
-                # 어떤 오류도 엔진을 죽이지 않는다 — 기록 후 다음 주기.
-                logger.warning("[DATA_ERROR] engine 사이클 실패: %s", exc)
-            await asyncio.sleep(settings.engine_interval_sec)
+        await asyncio.gather(
+            _cycle_loop(redis, sender, toss),
+            command_loop(redis, toss),   # 텔레그램 주문지시(확인 회신 필수)
+        )
     finally:
         await redis.aclose()
 

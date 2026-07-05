@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from engine.risk import evaluate_risk, order_allowed
 from engine.screener import final_score, quant_filter
+from engine.telegram_cmd import parse_command
 from research.analyst import parse_penalty
 
 
@@ -62,6 +63,25 @@ def test_final_score():
     assert final_score(85, 10) == 75.0
     assert final_score(85, 30) == 55.0
     assert final_score(85, None) is None    # 감점 검증 전 → 보류
+
+
+# ---------- 텔레그램 명령 파서 ----------
+def test_parse_command_orders():
+    assert parse_command("매수 005930 10 313500") == {
+        "cmd": "order", "side": "BUY", "code": "005930", "qty": 10.0, "price": 313500.0}
+    assert parse_command("매도 000660 2.5") == {
+        "cmd": "order", "side": "SELL", "code": "000660", "qty": 2.5, "price": None}
+    assert parse_command("확인 42") == {"cmd": "confirm", "n": "42"}
+    assert parse_command("주문취소 abc-123") == {"cmd": "cancel", "order_id": "abc-123"}
+    assert parse_command("잔고") == {"cmd": "잔고"}
+    assert parse_command("/start") == {"cmd": "도움말"}
+
+
+def test_parse_command_rejects_malformed():
+    assert parse_command("매수 삼성전자 10") is None      # 코드는 6자리 숫자만
+    assert parse_command("매수 005930") is None            # 수량 누락
+    assert parse_command("전량매도") is None
+    assert parse_command("") is None
 
 
 # ---------- 감점 파서 ----------

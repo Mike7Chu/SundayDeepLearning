@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     cash_floor_pct: float = 25.0          # 현금 비중 25% 미만이면 매수 시그널 무시
     buy_score_min: float = 70.0           # 2단계 필터 최종 점수 컷(이상만 매수 리스트)
     inversion_max_per_cycle: int = 5      # 사이클당 AI 역방향 분석 요청 상한(토큰 절약)
+    # 자동매매(기본 잠금): true + TOSS_TRADING_ENABLED=true 여야 필터 통과 종목을
+    # 추천 매수가에 지정가 자동 매수(종목당 5%·주문 한도·리스크 실드 전부 적용).
+    auto_trade_enabled: bool = False
+    auto_trade_cooldown_sec: float = 604800.0   # 같은 종목 자동 재매수 금지 기간(7일)
 
     # AI 가치투자 리서치 (Addendum 9) — 키 없으면 비활성(idle)
     anthropic_api_key: str = ""

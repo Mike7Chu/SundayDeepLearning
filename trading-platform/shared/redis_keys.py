@@ -40,6 +40,11 @@ ENGINE_RISK_KEY = "engine:risk"
 ENGINE_BUYLIST_KEY = "engine:buylist"
 # 보유 종목 목표가/손절선 도달 알림 상태(hash{code: json{kind,ts}} — 중복 알림 방지)
 ENGINE_ALERTS_KEY = "engine:alerts"
+# 자동매매 실행 기록(hash{code: json{ts,order_id,qty,price}} — 재매수 쿨다운)
+ENGINE_AUTO_KEY = "engine:auto_orders"
+# 텔레그램 명령: getUpdates 오프셋 / 확인 대기 주문(hash{n: json{side,code,qty,price,ts}})
+TG_OFFSET_KEY = "tg:offset"
+TG_PENDING_KEY = "tg:pending"
 # 역방향(Inversion) AI 분석. inv_requests=set(요청 큐), inversion=hash{code: json{penalty,report,ts}}
 RESEARCH_INV_REQ_KEY = "research:inv_requests"
 RESEARCH_INV_KEY = "research:inversion"
