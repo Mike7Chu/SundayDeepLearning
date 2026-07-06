@@ -300,9 +300,16 @@ async def universe_loop(redis: aioredis.Redis, kis: KISClient) -> None:
             uni = uni[: settings.market_universe_max]
             if uni:
                 await redis.set(STOCK_UNIVERSE_KEY, json.dumps(uni, ensure_ascii=False))
-                logger.info("[universe] %d종목 저장", len(uni))
+                kq = sum(1 for u in uni if u.get("market") == "KOSDAQ")
+                logger.info("[universe] %d종목 저장(코스닥 %d, 상한 %d)",
+                            len(uni), kq, settings.market_universe_max)
+                if kq == 0:
+                    logger.warning("[universe] 코스닥 0종목 — MARKET_UNIVERSE_MAX(.env) 확인")
         except Exception as exc:
-            logger.warning("[universe] 실패: %s", exc)
+            # 실패 시 옛(작은) 유니버스가 Redis에 남아 코스닥이 안 보일 수 있음 → 1시간 재시도.
+            logger.warning("[universe] 실패: %s — 1시간 뒤 재시도", exc)
+            await asyncio.sleep(3600)
+            continue
         await asyncio.sleep(86400)
 
 
