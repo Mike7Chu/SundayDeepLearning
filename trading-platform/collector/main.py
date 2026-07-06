@@ -154,6 +154,9 @@ async def _upsert_market_price(redis: aioredis.Redis, code: str, name: str,
     if name and not rec.get("name"):
         rec["name"] = name
     rec["price"] = price
+    prev = rec.get("prev_close")
+    if prev:
+        rec["change_pct"] = round((price / prev - 1) * 100, 2)   # 등락률 실시간 재계산
     e, b = rec.get("eps"), rec.get("bps")
     if e:
         rec["per"] = round(price / e, 2)
@@ -342,11 +345,28 @@ async def market_loop(redis: aioredis.Redis, kis: KISClient,
             per = round(price / eps, 2) if (price and eps) else q.get("per")
             pbr = round(price / bps, 2) if (price and bps and bps > 0) else q.get("pbr")
             roe = round(eps / bps * 100, 2) if (eps is not None and bps and bps > 0) else None
-            out[code] = json.dumps({
-                "code": code, "name": item.get("name", ""), "ts": time.time(),
-                "price": price, "per": per, "pbr": pbr, "eps": eps, "bps": bps, "roe": roe,
+            # 전일 종가 도출(KIS 등락률 역산) → 가격 스윕이 5분마다 등락률 재계산 가능.
+            kp, kc = q.get("price"), q.get("change_pct")
+            prev_close = (round(kp / (1 + kc / 100), 2)
+                          if (kp and kc is not None and kc > -100) else None)
+            change = (round((price / prev_close - 1) * 100, 2)
+                      if (price and prev_close) else kc)
+            # 기존 레코드에 병합 — ni_growth 등 다른 루프가 채운 필드 보존.
+            old_raw = await redis.hget(STOCK_MARKET_KEY, code)
+            rec: dict = {}
+            if old_raw:
+                try:
+                    rec = json.loads(old_raw)
+                except (json.JSONDecodeError, TypeError):
+                    rec = {}
+            rec.update({
+                "code": code, "name": item.get("name", "") or rec.get("name", ""),
+                "ts": time.time(), "price": price, "change_pct": change,
+                "prev_close": prev_close or rec.get("prev_close"),
+                "per": per, "pbr": pbr, "eps": eps, "bps": bps, "roe": roe,
                 "high_52w": q.get("high_52w"), "low_52w": q.get("low_52w"),
-            }, ensure_ascii=False)
+            })
+            out[code] = json.dumps(rec, ensure_ascii=False)
         if out:
             await redis.hset(STOCK_MARKET_KEY, mapping=out)
         cursor += settings.market_batch
