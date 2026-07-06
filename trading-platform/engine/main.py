@@ -49,8 +49,6 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("engine")
 
-_INV_FRESH_SEC = 86400.0   # 역방향 감점 유효기간(1일) — 지나면 재검증
-
 
 async def _json_get(redis: aioredis.Redis, key: str) -> dict:
     raw = await redis.get(key)
@@ -183,7 +181,7 @@ async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
                 inv = json.loads(inv_raw[code])
             except (json.JSONDecodeError, TypeError):
                 inv = None
-        fresh = inv and (now - (inv.get("ts") or 0) < _INV_FRESH_SEC)
+        fresh = inv and (now - (inv.get("ts") or 0) < settings.inversion_fresh_sec)
         if not fresh:
             if requested < settings.inversion_max_per_cycle:
                 await redis.sadd(RESEARCH_INV_REQ_KEY, code)

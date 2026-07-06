@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     cash_floor_pct: float = 25.0          # 현금 비중 25% 미만이면 매수 시그널 무시
     buy_score_min: float = 70.0           # 2단계 필터 최종 점수 컷(이상만 매수 리스트)
     inversion_max_per_cycle: int = 5      # 사이클당 AI 역방향 분석 요청 상한(토큰 절약)
+    inversion_fresh_sec: float = 604800.0  # 역방향 감점 유효기간(기본 1주 — 리서치 주기와 동일, 토큰 절약)
     # 자동매매(기본 잠금): true + 해당 브로커 실매매 플래그 둘 다 켜야 동작.
     # 브로커 분리: 자동매매=한투(KIS), 수동=토스 앱 — auto_trade_broker로 선택.
     auto_trade_enabled: bool = False

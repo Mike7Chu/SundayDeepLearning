@@ -17,8 +17,6 @@ from research.analyst import Analyst
 from research.data import StockData, gather
 from shared.redis_keys import RESEARCH_KEY, RESEARCH_REQ_KEY
 
-_WEEK = 7 * 86400
-
 router = APIRouter()
 
 
@@ -59,7 +57,7 @@ async def research_run(code: str, force: bool = False) -> dict:
 
     - force=false(기본): 저장된 리포트가 있으면 즉시 반환(cached). 매번 재실행 방지.
     - force=true(다시 분석): 새로 분석/큐 요청.
-    관심종목은 호스트 정기 패스가 매일 갱신하므로 버튼은 최신 저장분을 보여주면 충분.
+    관심종목은 호스트 정기 패스가 매주 갱신하므로 버튼은 최신 저장분을 보여주면 충분.
     """
     redis = get_redis()
     existing_raw = await redis.hget(RESEARCH_KEY, code)

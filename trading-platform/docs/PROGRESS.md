@@ -55,7 +55,7 @@
 - **MEXC 펀비**: bulk(`fetchFundingRates`) 미지원/빈값이면 단건(`fetchFundingRate`) 폴백(동시성8·상한 `funding_single_cap`=250).
 - **거래대금 필터**: 김프 탭에 거래대금(억원) 필터+컬럼 추가(`base_volume_krw`). 알림은 기존 `min_volume_eokwon` 유지.
 - 테스트 43 passed(펀비주기 파싱·마진플래그·아비 마진다리 추가).
-- `research/main.py`: 관심종목 `research_interval_sec`(기본 1일) 정기 분석 → `research:reports` 저장 + 텔레그램 브리핑. 키 없으면 idle.
+- `research/main.py`: 관심종목 `research_interval_sec`(기본 1주) 정기 분석 → `research:reports` 저장 + 텔레그램 브리핑. 키 없으면 idle.
 - `api/routers/research.py`: `/research`(목록)·`/research/{code}`(전문)·`POST /research/{code}/run`(즉시). 대시보드 주식 탭 리서치 보기/분석 버튼.
 - `collector/stock/kis.parse_price`: inquire-price에서 밸류에이션(per/pbr/eps/bps/시총/52주) 추가 추출(테스트 가능 순수 함수).
 - docker-compose `research` 서비스, `anthropic` requirement, `.env.example`(ANTHROPIC_API_KEY/RESEARCH_MODEL/RESEARCH_INTERVAL_SEC), `tests/test_research.py`(렌즈/데이터/키없는 idle).
