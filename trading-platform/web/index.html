@@ -542,7 +542,7 @@ async function mResearch(code, force){
       pollResearch(code, e, 0); return;
     }
     const again=`<a class="clk" onclick="mResearch('${qesc(code)}',true)">🔄 다시 분석</a>`;
-    const note=r.cached?`<div class="num" style="margin:4px 0">📌 저장된 분석 (${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}) · 관심종목은 매일 자동 갱신 · ${again}</div>`
+    const note=r.cached?`<div class="num" style="margin:4px 0">📌 저장된 분석 (${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}) · 관심종목은 매주 자동 갱신 · ${again}</div>`
       :`<div class="num" style="margin:4px 0">방금 분석 · ${again}</div>`;
     e.innerHTML=note+`<pre class="rbody">${escH(r.report)}</pre>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
