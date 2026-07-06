@@ -109,6 +109,19 @@ def test_parse_alot_matter_error_or_empty():
     assert parse_alot_matter(payload, 2025) == [{"date": "2024", "per_share": 100.0}]
 
 
+def test_quarter_candidates():
+    import datetime as dt
+
+    from collector.news.dart import quarter_candidates
+    # 2026년 7월 → 2026.1Q가 최신(5월 공시 완료), 폴백은 전년 3Q
+    c = quarter_candidates(dt.date(2026, 7, 4))
+    assert c[0] == ("11013", 2026, "2026.1Q")
+    # 12월 → 당해 3Q
+    assert quarter_candidates(dt.date(2026, 12, 1))[0] == ("11014", 2026, "2026.3Q")
+    # 3월 → 아직 당해 1Q 미공시 → 전년 3Q
+    assert quarter_candidates(dt.date(2026, 3, 1))[0] == ("11014", 2025, "2025.3Q")
+
+
 def test_parse_net_income_growth():
     payload = {"status": "000", "list": [
         {"account_nm": "당기순이익", "fs_div": "OFS",

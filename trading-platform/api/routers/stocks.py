@@ -174,6 +174,15 @@ async def stock_detail(code: str) -> dict:
     if len(candles) < 20:
         candles = await _ondemand_candles(redis, code)
     closes = [c["close"] for c in candles if isinstance(c, dict) and c.get("close")]
+    # 장중 실시간 반영: 오늘 캔들이 아직 없으면 현재가를 오늘 종가로 덧붙이고,
+    # 있으면 마지막 종가를 실시간가로 교체 → 시그널·추세·매매가이드가 장중 가격 기준.
+    live = quote.get("price")
+    if live and closes:
+        last_date = str(candles[-1].get("date", ""))[:10]
+        if last_date == _dt.date.today().isoformat():
+            closes[-1] = live
+        else:
+            closes = closes + [live]
     # 시세가 아직 없으면 일봉으로 보강(현재가·등락률·52주)
     if not quote.get("price") and closes:
         m = candle_metrics(candles)

@@ -249,15 +249,22 @@ async def stock_history_loop(redis: aioredis.Redis,
                 elif is_watch:
                     logger.warning("[DATA_ERROR] %s 배당금 수집 실패(응답 없음/무배당)",
                                    name or code)
-                # 순이익 성장률(YoY) — 트레일링 PER 함정 보정용 성장 축 데이터.
+                # 순이익 성장률 — 연간(사업보고서) + 최근 분기(전년 동기 대비, 더 최신).
                 try:
+                    fields: dict = {}
                     g = await dart.fetch_net_income_growth(
                         dclient, corp, _latest_report_year())
                     if g is not None:
+                        fields["ni_growth_pct"] = g
+                    qg = await dart.fetch_quarterly_growth(dclient, corp)
+                    if qg:
+                        fields["ni_growth_q_pct"] = qg["growth"]
+                        fields["ni_growth_q_label"] = qg["label"]
+                    if fields:
                         if is_watch:
-                            await merge_quote(redis, code, name, {"ni_growth_pct": g})
+                            await merge_quote(redis, code, name, fields)
                         else:
-                            await _merge_market_field(redis, code, {"ni_growth_pct": g})
+                            await _merge_market_field(redis, code, fields)
                 except Exception:
                     if is_watch:
                         logger.warning("[DATA_ERROR] %s 순이익 성장률 수집 실패", name or code)

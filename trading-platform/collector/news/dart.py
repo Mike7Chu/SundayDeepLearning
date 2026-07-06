@@ -125,6 +125,22 @@ def parse_net_income_growth(payload: dict) -> float | None:
     return round((cur - prev) / abs(prev) * 100, 1)
 
 
+def quarter_candidates(today: _dt.date) -> list[tuple[str, int, str]]:
+    """오늘 날짜 기준, 공시됐을 가장 최근 분기보고서 후보(최신→과거, 순수 함수).
+
+    공시 마감: 1Q=5월중순, 반기=8월중순, 3Q=11월중순 → 여유 두고 6/9/12월부터 조회.
+    reprt_code: 11013=1분기, 11012=반기, 11014=3분기.
+    """
+    y, m = today.year, today.month
+    if m >= 12:
+        return [("11014", y, f"{y}.3Q"), ("11012", y, f"{y}.2Q")]
+    if m >= 9:
+        return [("11012", y, f"{y}.2Q"), ("11013", y, f"{y}.1Q")]
+    if m >= 6:
+        return [("11013", y, f"{y}.1Q"), ("11014", y - 1, f"{y-1}.3Q")]
+    return [("11014", y - 1, f"{y-1}.3Q"), ("11012", y - 1, f"{y-1}.2Q")]
+
+
 class DartClient:
     @property
     def enabled(self) -> bool:
@@ -156,6 +172,24 @@ class DartClient:
         r = await client.get(_FNLTT_URL, params=params, timeout=5)
         r.raise_for_status()
         return parse_net_income_growth(r.json())
+
+    async def fetch_quarterly_growth(self, client: httpx.AsyncClient,
+                                     corp_code: str,
+                                     today: _dt.date | None = None) -> dict | None:
+        """가장 최근 분기보고서 기준 순이익 YoY(전년 동기 대비).
+
+        연간(작년 사업보고서)보다 최신 실적을 반영 — 예: 2026.7월이면 2026.1Q.
+        반환 {"growth": %, "label": "2026.1Q"} 또는 None(미공시/무데이터).
+        """
+        for reprt, y, label in quarter_candidates(today or _dt.date.today()):
+            params = {"crtfc_key": settings.dart_api_key, "corp_code": corp_code,
+                      "bsns_year": str(y), "reprt_code": reprt}
+            r = await client.get(_FNLTT_URL, params=params, timeout=5)
+            r.raise_for_status()
+            g = parse_net_income_growth(r.json())
+            if g is not None:
+                return {"growth": g, "label": label}
+        return None
 
     async def fetch_recent(self, client: httpx.AsyncClient, page_count: int = 100) -> list[dict]:
         """오늘자 최근 공시(전 종목) 목록. 최신순으로 page_count건."""

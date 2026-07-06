@@ -78,15 +78,17 @@ def _growth_axis(q: dict) -> tuple[float, list[str]]:
     이익이 급증하는 변곡점(예: AI·HBM 사이클)에서는 트레일링 PER이 높아도
     시장이 미래 이익을 반영 중일 수 있다. 데이터 없으면 중립(5점).
     """
-    g = q.get("ni_growth_pct")
+    gq = q.get("ni_growth_q_pct")               # 최근 분기(전년 동기 대비) 우선
+    g = gq if gq is not None else q.get("ni_growth_pct")
+    label = q.get("ni_growth_q_label") if gq is not None else "연간"
     if g is None:
         return 5.0, []                          # 미수집 → 중립(가점·감점 없음)
     s = _clamp((g + 10) / 60)                    # -10%↓=0점, +50%↑=만점
     reasons = []
     if g >= 15:
-        reasons.append(f"순이익 {g:+.0f}%")
+        reasons.append(f"순이익 {g:+.0f}%({label})")
     elif g < 0:
-        reasons.append(f"이익 감소 {g:.0f}%")
+        reasons.append(f"이익 감소 {g:.0f}%({label})")
     return round(15 * s, 1), reasons
 
 
@@ -167,6 +169,8 @@ def compute_score(quote: dict, closes: list[float] | None = None) -> dict:
         "margin_pct": margin_of_safety(quote.get("price"), quote.get("eps"), quote.get("bps")),
         "graham": graham_number(quote.get("eps"), quote.get("bps")),
         "ni_growth_pct": quote.get("ni_growth_pct"),
+        "ni_growth_q_pct": quote.get("ni_growth_q_pct"),
+        "ni_growth_q_label": quote.get("ni_growth_q_label"),
         "has_chart": bool(closes),
         "reasons": reasons,
     }

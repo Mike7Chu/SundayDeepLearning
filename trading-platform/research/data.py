@@ -26,7 +26,9 @@ class StockData(BaseModel):
     market_cap: float | None = None   # 억원
     high_52w: float | None = None
     low_52w: float | None = None
-    ni_growth_pct: float | None = None  # 순이익 YoY %(DART 공식)
+    ni_growth_pct: float | None = None  # 순이익 YoY %(DART 연간 사업보고서)
+    ni_growth_q_pct: float | None = None   # 최근 분기 순이익 YoY %(전년 동기 대비)
+    ni_growth_q_label: str | None = None   # 예: "2026.1Q"
     score: float | None = None        # 투자 매력도 0~100
     verdict: str | None = None        # 판정
     margin_pct: float | None = None   # 안전마진 %
@@ -52,6 +54,8 @@ def from_quote(quote: dict, news: list[str] | None = None) -> StockData:
         high_52w=quote.get("high_52w"),
         low_52w=quote.get("low_52w"),
         ni_growth_pct=quote.get("ni_growth_pct"),
+        ni_growth_q_pct=quote.get("ni_growth_q_pct"),
+        ni_growth_q_label=quote.get("ni_growth_q_label"),
         news=news or [],
     )
 
@@ -100,7 +104,9 @@ def format_for_prompt(d: StockData) -> str:
         _fmt("시가총액", d.market_cap, "억원"),
         _fmt("52주최고", d.high_52w, "원"),
         _fmt("52주최저", d.low_52w, "원"),
-        _fmt("순이익 YoY(공식 사업보고서)", d.ni_growth_pct, "%"),
+        _fmt("순이익 YoY(연간 사업보고서)", d.ni_growth_pct, "%"),
+        _fmt(f"최근 분기 순이익 YoY({d.ni_growth_q_label or '분기'}, 전년 동기 대비)",
+             d.ni_growth_q_pct, "%"),
         _fmt("투자매력도(0~100)", d.score),
         _fmt("판정", d.verdict),
         _fmt("안전마진(그레이엄 대비)", d.margin_pct, "%"),

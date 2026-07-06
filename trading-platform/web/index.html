@@ -477,7 +477,8 @@ async function openStock(code,name){
     const fund=`<div class="cgrid">${kv("현재가",fmt(Q.price)+"원",HELP.price)}${kv("등락률",Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–",HELP.change)}
       ${kv("PER",numC(Q.per),HELP.per)}${kv("PBR",numC(Q.pbr),HELP.pbr)}${kv("EPS",numC(Q.eps,0),HELP.eps)}${kv("BPS",numC(Q.bps,0),HELP.bps)}
       ${kv("시가총액",capF(Q.market_cap),HELP.cap)}${kv("1년 최저~최고",numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0)+"원",HELP.w52)}
-      ${Q.ni_growth_pct!=null?kv("순이익 성장(작년比)",(Q.ni_growth_pct>=0?"+":"")+numC(Q.ni_growth_pct,0)+"%","공식 사업보고서 기준"):""}</div>`;
+      ${Q.ni_growth_q_pct!=null?kv("순이익 성장("+(Q.ni_growth_q_label||"최근 분기")+")",(Q.ni_growth_q_pct>=0?"+":"")+numC(Q.ni_growth_q_pct,0)+"%","전년 동기 대비 · 공식 분기보고서"):""}
+      ${Q.ni_growth_pct!=null?kv("순이익 성장(연간)",(Q.ni_growth_pct>=0?"+":"")+numC(Q.ni_growth_pct,0)+"%","작년 사업보고서 기준"):""}</div>`;
     const collectHint='일시 수집 실패 — 팝업을 다시 열어보세요';   // 어떤 종목이든 온디맨드 수집
     const SC=d.score||{};
     const bar=(lab,val,max)=>`<div class="row"><span style="width:56px">${lab}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:${Math.max(0,Math.min(100,(val||0)/max*100))}%"></i></div><b class="num">${numC(val,0)}/${max}</b></div>`;
@@ -561,7 +562,13 @@ function init(){
   $("modal").addEventListener("click", e=>{ if(e.target.id==="modal") closeModal(); });
   document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeModal(); });
   switchTab("home");
-  setInterval(()=>{ if(activeTab==="home") renderHome(); }, 10000);
+  // 실시간 갱신: 활성 탭을 12초마다 자동 새로고침(설정 탭·입력 중은 건너뜀)
+  setInterval(()=>{
+    if(busy || activeTab==="settings") return;
+    const a=document.activeElement;
+    if(a && (a.tagName==="INPUT"||a.tagName==="TEXTAREA")) return;
+    render();
+  }, 12000);
 }
 init();
 </script>
