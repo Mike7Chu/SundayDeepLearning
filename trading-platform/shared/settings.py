@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # 전체 시장 스크리너: 유니버스 펀더멘털 수집(배치·느린 주기, KIS 레이트리밋 대비)
     market_scan_interval_sec: float = 3600.0  # 유니버스 1바퀴 목표 주기(KIS 펀더멘털)
     market_batch: int = 60                     # 사이클당 조회 종목 수
-    market_universe_max: int = 900             # 유니버스 상한(부하 방지)
+    market_universe_max: int = 4000            # 유니버스 상한(코스피+코스닥 전 종목 커버)
     market_price_interval_sec: float = 300.0   # 유니버스 전체 가격 스윕(토스 200종목/콜)
 
     # 한국투자증권(KIS) — 키 없으면 주식 수집 비활성

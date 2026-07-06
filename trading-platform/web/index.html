@@ -494,7 +494,12 @@ async function openStock(code,name){
     const align=(S&&S.sma20!=null&&S.sma60!=null)?(S.sma20>S.sma60?'정배열(상승 배열)':'역배열(하락 배열)'):'–';
     const smaTxt=align+(S&&S.sma_cross==='golden'?' · 골든크로스':S&&S.sma_cross==='dead'?' · 데드크로스':'');
     const trTxt=!S?['–','num']:(SC.momentum>=18?['상승 흐름','pos']:SC.momentum>=10?['혼조','num']:['약세 흐름','neg']);
-    const sgH=S?`<div class="cgrid">${kv("흐름",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"위 종합점수의 '추세'와 같은 기준")}${kv("RSI",numC(S.rsi),HELP.rsi)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
+    const P=d.pillar;
+    const pillarCard=P?kv("수급(거래대금)",
+      P.pillar?'<span class="buy">💡 빛의기둥</span>':numC(P.value_eok,0)+"억",
+      P.pillar?`거래대금 ${numC(P.value_eok,0)}억 · 평소의 ${numC(P.surge_x,1)}배 · 고가 마감 장대양봉 — 추격 주의`
+              :`오늘 거래대금 ${numC(P.value_eok,0)}억${P.surge_x?` · 평소의 ${numC(P.surge_x,1)}배`:''}`):'';
+    const sgH=S?`<div class="cgrid">${kv("흐름",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"위 종합점수의 '추세'와 같은 기준")}${kv("RSI",numC(S.rsi),HELP.rsi)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}${pillarCard}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
     const L=d.levels;
     const lvH=L?`<div class="cgrid">
       ${kv("추천 매수가",`<span class="pos">${fmt(L.entry)}원</span>`,`${L.entry_basis} 기준 · 추격 매수 방지`)}

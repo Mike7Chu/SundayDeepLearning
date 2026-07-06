@@ -92,6 +92,41 @@ def evaluate_signals(closes: list[float]) -> dict:
     }
 
 
+def light_pillar(candles: list[dict]) -> dict | None:
+    """'빛의기둥' 수급 포착(순수 함수) — 마지막 봉 기준.
+
+    수급 = (H+L+O+C)/4 × 거래량 ÷ 1억 = 거래대금(억원).
+    조건: ①거래대금 20억↑ ②양봉(o<c) ③몸통 > 윗꼬리×1.2(고가 근처 마감)
+          ④거래대금 ≥ 직전 2일 평균의 3배(수급 급증).
+    보조 확인(원 전략): 볼밴 하단권·이평 위·테마 동반이면 신뢰↑ — 추격 매수 주의.
+    """
+    if len(candles) < 3:
+        return None
+
+    def _tv(c: dict) -> float | None:
+        try:
+            h, l, o, cl, v = (c.get("high"), c.get("low"), c.get("open"),
+                              c.get("close"), c.get("volume"))
+            if None in (h, l, o, cl) or not v:
+                return None
+            return (h + l + o + cl) / 4 * v / 1e8
+        except TypeError:
+            return None
+
+    t, p1, p2 = candles[-1], candles[-2], candles[-3]
+    v, v1, v2 = _tv(t), _tv(p1), _tv(p2)
+    if v is None or v1 is None or v2 is None:
+        return None
+    o, h, c = t.get("open"), t.get("high"), t.get("close")
+    if None in (o, h, c):
+        return None
+    avg2 = (v1 + v2) / 2
+    pillar = (v >= 20 and o < c and (c - o) > (h - c) * 1.2
+              and avg2 > 0 and v >= avg2 * 3)
+    return {"pillar": pillar, "value_eok": round(v, 1),
+            "surge_x": round(v / avg2, 1) if avg2 > 0 else None}
+
+
 def krx_tick(p: float) -> float:
     """KRX 호가 단위로 반올림(주문 가능한 가격으로)."""
     if p < 2000:

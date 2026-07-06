@@ -18,8 +18,9 @@ import time
 import redis.asyncio as aioredis
 
 from api.services.stock_score import compute_score
-from api.services.stock_signal import trade_levels
+from api.services.stock_signal import light_pillar, trade_levels
 from api.services.stock_value import load_quotes
+from collector.stock.kis import effective_watchlist
 from collector.stock.toss import TossClient
 from engine.orders import place_gated_order
 from engine.risk import evaluate_risk
@@ -29,6 +30,7 @@ from notifier.telegram import TelegramSender
 from shared.redis_keys import (
     ENGINE_ALERTS_KEY,
     ENGINE_AUTO_KEY,
+    ENGINE_PILLAR_KEY,
     ENGINE_BUYLIST_KEY,
     ENGINE_PEAK_KEY,
     ENGINE_RISK_KEY,
@@ -271,11 +273,47 @@ async def _cycle_loop(redis: aioredis.Redis, sender: TelegramSender,
         try:
             risk = await _update_risk(redis, sender)
             await _holdings_alerts(redis, sender)
+            await _pillar_scan(redis, sender)
             await _pipeline(redis, sender, risk, toss, kis)
         except Exception as exc:
             # 어떤 오류도 엔진을 죽이지 않는다 — 기록 후 다음 주기.
             logger.warning("[DATA_ERROR] engine 사이클 실패: %s", exc)
         await asyncio.sleep(settings.engine_interval_sec)
+
+
+async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
+    """빛의기둥(수급 포착) — 관심+보유 종목의 최신 일봉 검사, 종목당 하루 1회 알림.
+
+    조건: 거래대금 20억↑ · 양봉 · 고가 마감(몸통>윗꼬리×1.2) · 평소(직전2일)의 3배 수급.
+    ※ 캔들은 6시간 주기 갱신이라 장중 감지는 지연될 수 있음(정확도 우선).
+    """
+    watch = await effective_watchlist(redis)
+    hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
+    names = {w["code"]: w.get("name", "") for w in watch}
+    for h in hold.get("holdings", []):
+        if h.get("symbol"):
+            names.setdefault(h["symbol"], h.get("name", ""))
+    today = time.strftime("%Y-%m-%d")
+    for code, name in names.items():
+        raw = await redis.get(stock_ohlcv_key(code))
+        if not raw:
+            continue
+        try:
+            candles = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        lp = light_pillar(candles)
+        if not lp or not lp.get("pillar"):
+            continue
+        if await redis.hget(ENGINE_PILLAR_KEY, code) == today:
+            continue                                    # 하루 1회
+        await redis.hset(ENGINE_PILLAR_KEY, code, today)
+        await sender.send(
+            f"💡 빛의기둥(수급 포착) — {name or code}({code})\n"
+            f"거래대금 {lp['value_eok']:,.0f}억 · 평소의 {lp['surge_x']:.1f}배 · "
+            "고가 마감 장대양봉\n"
+            "체크: 볼밴 하단권? 이평 위? 테마 동반? — 추격 매수 주의, 판단 보조")
+        logger.info("[pillar] %s %.0f억 x%.1f", code, lp["value_eok"], lp["surge_x"])
 
 
 async def run() -> None:

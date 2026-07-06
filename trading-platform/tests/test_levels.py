@@ -38,3 +38,25 @@ def test_trade_levels_downtrend_flag():
 
 def test_trade_levels_insufficient_data():
     assert trade_levels([1000] * 10) is None
+
+
+def test_light_pillar():
+    from api.services.stock_signal import light_pillar
+
+    def bar(o, h, l, c, v):
+        return {"open": o, "high": h, "low": l, "close": c, "volume": v}
+
+    # 평소 10억대 거래대금 → 오늘 60억(6배) + 고가 마감 장대양봉 = 빛의기둥
+    quiet1 = bar(10000, 10100, 9900, 10000, 100_000)     # ≈10억
+    quiet2 = bar(10000, 10100, 9900, 10050, 100_000)
+    pillar = bar(10000, 11100, 9950, 11000, 570_000)     # ≈60억, 몸통1000>윗꼬리100×1.2
+    lp = light_pillar([quiet1, quiet2, pillar])
+    assert lp["pillar"] is True
+    assert lp["value_eok"] >= 20 and lp["surge_x"] >= 3
+
+    # 윗꼬리 긴 음봉/평범한 거래대금이면 아님
+    doji = bar(10000, 11000, 9900, 10050, 570_000)       # 몸통50 < 윗꼬리950
+    assert light_pillar([quiet1, quiet2, doji])["pillar"] is False
+    small = bar(10000, 10500, 9900, 10400, 120_000)      # 수급 급증 아님
+    assert light_pillar([quiet1, quiet2, small])["pillar"] is False
+    assert light_pillar([quiet1, pillar]) is None        # 봉 부족

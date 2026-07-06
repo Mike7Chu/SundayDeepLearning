@@ -14,7 +14,12 @@ from api.redis_client import get_redis
 from collector.news.dart import DartClient
 from collector.stock.toss import TossClient, candle_metrics
 from api.services.stock_dividend import compute_dividend, dividend_view
-from api.services.stock_signal import evaluate_signals, signals_for, trade_levels
+from api.services.stock_signal import (
+    evaluate_signals,
+    light_pillar,
+    signals_for,
+    trade_levels,
+)
 from api.services.stock_score import compute_score
 from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
@@ -193,6 +198,7 @@ async def stock_detail(code: str) -> dict:
            if len(closes) >= 20 else None)
     score = compute_score(quote, closes)
     levels = trade_levels(closes, quote.get("price"))
+    pillar = light_pillar(candles)   # 수급 포착(빛의기둥) — 거래량 포함 원본 캔들 기준
     # 배당: 저장분 → 없으면 DART 온디맨드
     div = None
     draw = await redis.hget(STOCK_DIVIDEND_KEY, code)
@@ -208,5 +214,5 @@ async def stock_detail(code: str) -> dict:
         div = compute_dividend(quote, items)
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
-            "levels": levels,
+            "levels": levels, "pillar": pillar,
             "in_watchlist": any(w.get("code") == code for w in wl)}

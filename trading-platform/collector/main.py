@@ -237,6 +237,15 @@ async def stock_history_loop(redis: aioredis.Redis,
             for item in targets:
                 code, name = item["code"], item.get("name", "")
                 is_watch = code in wset
+                if not is_watch:
+                    # 유니버스(~3,600종목)는 하루 1회만 갱신 — DART 무료 한도(일 2만건) 준수.
+                    old = await redis.hget(STOCK_DIVIDEND_KEY, code)
+                    if old:
+                        try:
+                            if time.time() - (json.loads(old).get("ts") or 0) < 86400:
+                                continue
+                        except (json.JSONDecodeError, TypeError):
+                            pass
                 corp = cmap.get(code)
                 if not corp:
                     if is_watch:   # 유니버스 매핑 누락은 흔함(스팩·리츠 등) — 조용히
