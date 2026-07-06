@@ -13,12 +13,15 @@ import time
 import httpx
 import redis.asyncio as aioredis
 
+from api.services.stock_signal import candle_trading_value, pillar_precheck
 from collector.news.dart import DartClient
 from collector.stock.kis import KISClient, effective_watchlist, load_watchlist
+from notifier.telegram import TelegramSender
 from collector.stock.kis_master import fetch_universe
 from collector.stock.toss import TossClient, candle_metrics
 from shared.redis_keys import (
     DART_CORP_KEY,
+    ENGINE_PILLAR_KEY,
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
@@ -313,15 +316,47 @@ async def _universe_codes(redis: aioredis.Redis) -> list[dict]:
     return load_watchlist()   # 폴백
 
 
+async def _pillar_confirm_alert(redis: aioredis.Redis, toss: TossClient,
+                                sender: TelegramSender, code: str, name: str,
+                                value_eok: float) -> None:
+    """1차 조건 통과 종목의 '직전 2일 대비 3배' 확정 → 텔레그램(종목당 하루 1회).
+
+    전 종목 장중 스캔용: 당일 수치는 KIS 현재가 응답, 이력 2일은 토스 캔들로 확정.
+    """
+    today = time.strftime("%Y-%m-%d")
+    if await redis.hget(ENGINE_PILLAR_KEY, code) == today:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10) as tc:
+            candles = await toss.fetch_candles(tc, code)
+        done = [c for c in candles if str(c.get("date", ""))[:10] != today]
+        vals = [v for v in (candle_trading_value(c) for c in done[-2:]) if v]
+        if len(vals) < 2:
+            return
+        avg2 = sum(vals) / 2
+        if avg2 <= 0 or value_eok < avg2 * 3:
+            return
+        await redis.hset(ENGINE_PILLAR_KEY, code, today)
+        await sender.send(
+            f"💡 빛의기둥(수급 포착) — {name or code}({code})\n"
+            f"오늘 거래대금 {value_eok:,.0f}억 · 평소의 {value_eok / avg2:.1f}배 · "
+            "고가 마감형 장대양봉\n"
+            "체크: 볼밴 하단권? 이평 위? 테마 동반? — 추격 매수 주의, 판단 보조")
+        logger.info("[pillar/market] %s %.0f억 x%.1f", code, value_eok, value_eok / avg2)
+    except Exception as exc:
+        logger.debug("[pillar %s] 확정 실패: %s", code, exc)
+
+
 async def market_loop(redis: aioredis.Redis, kis: KISClient,
                       toss: TossClient) -> None:
-    """유니버스 펀더멘털 배치 수집 → stock:market. 가격은 Toss(신뢰), 재무는 KIS(EPS/BPS).
-    PER/PBR/ROE는 Toss 가격으로 재계산. 키 없으면 비활성."""
+    """유니버스 펀더멘털 배치 수집 → stock:market + 전 종목 수급(빛의기둥) 장중 감지.
+    가격은 Toss(신뢰), 재무는 KIS(EPS/BPS). PER/PBR/ROE는 Toss 가격으로 재계산."""
     if not kis.enabled:
         return
     cursor = 0
     await asyncio.sleep(20)   # 유니버스 로딩 여유
     client = kis.http()   # 공유 커넥션
+    sender = TelegramSender()
     while True:
         uni = await _universe_codes(redis)
         if not uni:
@@ -376,6 +411,12 @@ async def market_loop(redis: aioredis.Redis, kis: KISClient,
                 "high_52w": q.get("high_52w"), "low_52w": q.get("low_52w"),
             })
             out[code] = json.dumps(rec, ensure_ascii=False)
+            # 전 종목 수급 감지(장중): 당일 시가·고가·거래대금으로 1차 조건 →
+            # 통과 종목만 토스 캔들 2일로 '3배 급증' 확정(비용 최소화).
+            if pillar_precheck(q.get("open"), q.get("high"), price,
+                               q.get("value_eok")):
+                await _pillar_confirm_alert(redis, toss, sender, code,
+                                            rec.get("name", ""), q["value_eok"])
         if out:
             await redis.hset(STOCK_MARKET_KEY, mapping=out)
         cursor += settings.market_batch

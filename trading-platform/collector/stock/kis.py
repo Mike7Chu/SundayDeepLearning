@@ -328,4 +328,10 @@ def parse_price(o: dict) -> dict:
         "market_cap": _f(o.get("hts_avls")),            # 시가총액(억원)
         "high_52w": _f(o.get("w52_hgpr")),              # 52주 최고
         "low_52w": _f(o.get("w52_lwpr")),               # 52주 최저
+        "open": _f(o.get("stck_oprc")),                 # 당일 시가
+        "high": _f(o.get("stck_hgpr")),                 # 당일 고가
+        "low": _f(o.get("stck_lwpr")),                  # 당일 저가
+        # 당일 누적 거래대금(억원) — 빛의기둥 장중 감지용
+        "value_eok": (round(_f(o.get("acml_tr_pbmn")) / 1e8, 1)
+                      if _f(o.get("acml_tr_pbmn")) else None),
     }

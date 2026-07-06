@@ -92,6 +92,31 @@ def evaluate_signals(closes: list[float]) -> dict:
     }
 
 
+def pillar_precheck(open_: float | None, high: float | None,
+                    close: float | None, value_eok: float | None) -> bool:
+    """빛의기둥 1차 조건(당일 실시간 데이터로 판정, 순수 함수).
+
+    거래대금 20억↑ · 양봉 · 몸통 > 윗꼬리×1.2. (수급 3배 급증은 직전 2일
+    이력이 필요해 후속 확정 단계에서 검사 — 전 종목 장중 스캔용 프리필터)
+    """
+    if None in (open_, high, close) or not value_eok:
+        return False
+    return (value_eok >= 20 and open_ < close
+            and (close - open_) > (high - close) * 1.2)
+
+
+def candle_trading_value(c: dict) -> float | None:
+    """캔들 1개의 거래대금(억원) = (H+L+O+C)/4 × V ÷ 1억 (순수 함수)."""
+    try:
+        h, l, o, cl, v = (c.get("high"), c.get("low"), c.get("open"),
+                          c.get("close"), c.get("volume"))
+        if None in (h, l, o, cl) or not v:
+            return None
+        return (h + l + o + cl) / 4 * v / 1e8
+    except TypeError:
+        return None
+
+
 def light_pillar(candles: list[dict]) -> dict | None:
     """'빛의기둥' 수급 포착(순수 함수) — 마지막 봉 기준.
 
@@ -102,19 +127,9 @@ def light_pillar(candles: list[dict]) -> dict | None:
     """
     if len(candles) < 3:
         return None
-
-    def _tv(c: dict) -> float | None:
-        try:
-            h, l, o, cl, v = (c.get("high"), c.get("low"), c.get("open"),
-                              c.get("close"), c.get("volume"))
-            if None in (h, l, o, cl) or not v:
-                return None
-            return (h + l + o + cl) / 4 * v / 1e8
-        except TypeError:
-            return None
-
     t, p1, p2 = candles[-1], candles[-2], candles[-3]
-    v, v1, v2 = _tv(t), _tv(p1), _tv(p2)
+    v, v1, v2 = (candle_trading_value(t), candle_trading_value(p1),
+                 candle_trading_value(p2))
     if v is None or v1 is None or v2 is None:
         return None
     o, h, c = t.get("open"), t.get("high"), t.get("close")
