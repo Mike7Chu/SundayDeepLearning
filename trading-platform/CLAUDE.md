@@ -24,6 +24,10 @@
 - ✅ **AI 리서치**(`research/`): 4대 거장 렌즈 → Claude(모델 `claude-opus-4-8`). 백엔드 2종 — API 키 or 구독 CLI(`RESEARCH_USE_CLI`).
   `/research`, `/research/{code}`, `POST /research/{code}/run`. 키 없으면 idle.
 - ✅ **일일 브리핑**(`briefing/`): 시세·시그널·가치·배당 요약 텔레그램 1일 발송(`compose.py` 순수). 키 없으면 로그.
+- ✅ **AI 아침 점검(포트폴리오 코치)**(`research/coach.py`, `api/routers/coach.py`): 매일 `COACH_HOUR_KST`(기본 8시)에
+  실보유 비중·손익 + 종목 정량 + 보유종목 공시 + 리스크 실드 + 사용자 목표(수익률·기한)를 모아 종목별
+  '계속 보유/일부 매도/위험 신호' 판정 + 오늘의 한 줄 결론(✅/⚠️/🚨) → 텔레그램 자동 발송 + 홈 카드.
+  CLI 모드는 웹검색 허용(미국 반도체 간밤 동향). `GET /coach`, `POST /coach/goal|/coach/run`. 하루 1콜.
 - ✅ **토스증권 연동**(`collector/stock/toss.py`, `api/routers/portfolio.py`): 실보유·매수여력 수집(`portfolio_loop`
   → `toss:holdings`/`toss:account`) + **실매매 게이트**(`TOSS_TRADING_ENABLED`+`TOSS_MAX_ORDER_KRW` 이중 검증).
   `GET /portfolio`, `POST /portfolio/order|.../cancel`. 홈 100억 진행률이 토스 실평가액으로 자동. 키 없으면 idle.

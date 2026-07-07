@@ -15,8 +15,11 @@ import redis.asyncio as aioredis
 from collector.stock.kis import effective_watchlist
 from notifier.telegram import TelegramSender
 from research.analyst import Analyst
+from research.coach import gather_coach, should_run
 from research.data import StockData, gather
 from shared.redis_keys import (
+    COACH_KEY,
+    COACH_REQ_KEY,
     RESEARCH_INV_KEY,
     RESEARCH_INV_REQ_KEY,
     RESEARCH_KEY,
@@ -104,9 +107,37 @@ async def run() -> None:
         except Exception as exc:
             logger.warning("[DATA_ERROR] %s 역방향 검증 실패: %s", code, exc)
 
+    async def run_coach(reason: str) -> None:
+        """아침 점검(포트폴리오 코치) 1회: 수집→분석→저장→텔레그램."""
+        block = await gather_coach(redis)
+        if block is None:
+            logger.info("[coach] 보유 데이터 없음(토스 미연동?) — 점검 생략(%s)", reason)
+            return
+        result = await analyst.analyze_coach(block)
+        await redis.set(COACH_KEY, json.dumps(result, ensure_ascii=False))
+        if result.get("enabled") and not result["report"].startswith("⚠️"):
+            await sender.send(result["report"][:3500])
+        logger.info("[coach] 아침 점검 완료(%s)", reason)
+
+    async def coach_last_ts() -> float:
+        raw = await redis.get(COACH_KEY)
+        if not raw:
+            return 0.0
+        try:
+            return float(json.loads(raw).get("ts") or 0)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return 0.0
+
     last_full = 0.0
     try:
         while True:
+            # 코치: 온디맨드('지금 점검' 버튼) + 매일 코치 시각(KST) 정기 1회
+            if settings.coach_enabled:
+                if await redis.spop(COACH_REQ_KEY):
+                    await run_coach("요청")
+                elif should_run(time.time(), await coach_last_ts(),
+                                settings.coach_hour_kst):
+                    await run_coach(f"정기 {settings.coach_hour_kst}시")
             # 0) 매매 엔진의 역방향 검증 요청(감점) — 매수 판단에 직결되므로 최우선
             inv = await redis.spop(RESEARCH_INV_REQ_KEY, 5)
             for code in (inv or []):

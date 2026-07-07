@@ -78,5 +78,10 @@ class Settings(BaseSettings):
     research_use_cli: bool = False           # True+claude 바이너리 존재 시 구독 CLI로 분석
     research_cli_bin: str = "claude"         # Claude Code 실행 파일명/경로
 
+    # AI 포트폴리오 코치(아침 점검) — 실보유 비중 기준 종목별 '보유/일부매도/위험신호' 판정.
+    # 매일 1회(코치 시각, KST) 텔레그램 발송 + 대시보드 홈 카드. 리서치 백엔드 공유(하루 1콜).
+    coach_enabled: bool = True
+    coach_hour_kst: int = 8                  # 아침 점검 시각(KST, 0~23)
+
 
 settings = Settings()

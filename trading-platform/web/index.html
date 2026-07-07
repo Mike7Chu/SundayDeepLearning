@@ -216,7 +216,7 @@ async function render(){
 }
 
 async function renderHome(){
-  const [q,v,sc,d,n,pf,eng]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine")]);
+  const [q,v,sc,d,n,pf,eng,co]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine"),jget("/coach")]);
   const quotes=q.rows||[], scores=sc.rows||[];
   const buys=scores.filter(r=>r.score>=60), sells=scores.filter(r=>r.score<45);
   const up=quotes.filter(r=>(r.change_pct||0)>0).length, dn=quotes.filter(r=>(r.change_pct||0)<0).length;
@@ -240,6 +240,7 @@ async function renderHome(){
              <button class="btn" onclick="saveAsset()">저장</button>
              <span class="badge">목표까지 ${eok(Math.max(0,TARGET-cur))}</span></div>`}
     </div>
+    ${coachCardHTML(co)}
     <div class="card"><h3>시장 온도</h3>
       <div class="row"><span>관심종목</span><b>${quotes.length}</b></div>
       <div class="row"><span>상승 / 하락</span><b><span class="pos">${up}</span> / <span class="neg">${dn}</span></b></div>
@@ -261,6 +262,46 @@ async function renderHome(){
   $("metaInfo").textContent=`관심종목 ${quotes.length} · 매수후보 ${buys.length}`;
 }
 function saveAsset(){ localStorage.setItem("curAsset", $("curAsset").value||0); renderHome(); }
+
+function coachCardHTML(co){
+  co=co||{};
+  const g=co.goal||{}, r=co.report;
+  const when=r&&r.ts?new Date(r.ts*1000).toLocaleString("ko-KR"):null;
+  const body=!co.enabled
+    ? `<div class="empty">AI 리서치 백엔드가 꺼져 있어요 — 호스트에서 run-research-host.sh 실행(구독) 또는 ANTHROPIC_API_KEY 설정이 필요합니다.</div>`
+    : (r&&r.report
+        ? `<details ${window.coachOpen?"open":""} ontoggle="window.coachOpen=this.open"><summary class="clk">리포트 보기 <span class="num">(마지막 점검: ${when})</span></summary><pre class="rbody" style="margin-top:8px">${escH(r.report)}</pre></details>`
+        : `<div class="empty">아직 점검 리포트가 없어요 — 매일 아침 ${co.hour_kst??8}시에 자동 생성되고, 아래 '지금 점검'으로 바로 받을 수도 있어요.</div>`);
+  return `<div class="card" style="grid-column:1/-1">
+    <h3>🧭 AI 아침 점검 <span class="badge">매일 ${co.hour_kst??8}시 텔레그램 자동 발송</span>
+      <span class="badge" title="내 실제 보유 비중 기준으로 종목별 '계속 보유/일부 매도/위험 신호'와 오늘의 한 줄 결론을 알려줍니다">?</span></h3>
+    <div class="arow" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
+      <label>목표 수익률(%) <input id="gTarget" type="number" style="width:90px" value="${g.target_pct??""}" placeholder="예: 35"></label>
+      <label>기한 <input id="gDeadline" type="date" style="width:150px" value="${g.deadline||""}"></label>
+      <label>메모 <input id="gMemo" style="width:170px" value="${escH(g.memo||"")}" placeholder="예: 코인 손실 복구"></label>
+      <button class="btn" onclick="saveGoal()">목표 저장</button>
+      <button class="btn" onclick="runCoach(this)">지금 점검</button>
+    </div>
+    ${body}
+    <div class="num" style="margin-top:6px">투자 판단 보조이며 매매 지시가 아닙니다.</div></div>`;
+}
+async function saveGoal(){
+  const target_pct=$("gTarget").value===""?null:Number($("gTarget").value);
+  const body={target_pct, deadline:$("gDeadline").value||"", memo:$("gMemo").value||""};
+  const res=await fetch("/coach/goal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  alert(res.ok?"목표 저장됨 — 다음 아침 점검부터 반영됩니다":"저장 실패");
+}
+async function runCoach(btn){
+  btn.disabled=true; btn.textContent="점검 중…";
+  try{
+    const res=await fetch("/coach/run",{method:"POST"});
+    const d=await res.json();
+    if(d.queued) alert("점검 요청됨 — 미국 시황 웹검색 포함 몇 분 걸려요. 잠시 후 홈에서 확인하세요.");
+    else if(d.report) renderHome();
+    else alert(d.detail||"점검 불가");
+  }catch(e){ alert("오류: "+e.message); }
+  finally{ btn.disabled=false; btn.textContent="지금 점검"; }
+}
 
 async function renderPortfolio(){
   const pf=await jget("/portfolio");

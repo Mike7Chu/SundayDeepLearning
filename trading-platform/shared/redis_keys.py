@@ -51,6 +51,12 @@ TG_PENDING_KEY = "tg:pending"
 RESEARCH_INV_REQ_KEY = "research:inv_requests"
 RESEARCH_INV_KEY = "research:inversion"
 
+# AI 포트폴리오 코치(아침 점검). report=json{report,ts,...}, goal=json{target_pct,deadline,memo},
+# requests=set(온디맨드 '지금 점검' 요청 — 호스트 research가 처리)
+COACH_KEY = "coach:report"
+COACH_GOAL_KEY = "coach:goal"
+COACH_REQ_KEY = "coach:requests"
+
 
 def stock_ohlcv_key(code: str) -> str:
     """종목 일봉 시계열. value=json[{date, close, high, low, volume}] (오래된→최신)."""
