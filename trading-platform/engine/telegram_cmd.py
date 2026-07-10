@@ -25,6 +25,7 @@ from collector.stock.toss import TossClient
 from engine.orders import cancel_gated_order, place_gated_order
 from notifier.telegram import TelegramSender
 from shared.redis_keys import (
+    COACH_REQ_KEY,
     ENGINE_BUYLIST_KEY,
     ENGINE_RISK_KEY,
     STOCK_MARKET_KEY,
@@ -39,7 +40,8 @@ from shared.settings import settings
 logger = logging.getLogger(__name__)
 
 _PENDING_TTL = 120.0   # '확인' 유효시간(초)
-_HELP = ("명령: 잔고 · 상태 · 후보 · 도움말\n"
+_HELP = ("명령: 잔고 · 상태 · 후보 · 점검 · 도움말\n"
+         "점검  ← AI 아침 점검(보유 종목 판정)을 지금 바로 요청\n"
          "매수 코드 수량 [가격] / 매도 코드 수량 [가격]  ← 기본 브로커(한투)\n"
          "토스매수 코드 수량 [가격] / 토스매도 …  ← 토스 계좌로 주문\n"
          "한투매수 / 한투매도 …  ← 한투 명시\n"
@@ -52,6 +54,8 @@ def parse_command(text: str) -> dict | None:
     t = (text or "").strip()
     if t in ("잔고", "상태", "후보", "도움말", "/start", "help"):
         return {"cmd": {"/start": "도움말", "help": "도움말"}.get(t, t)}
+    if t.replace(" ", "") in ("점검", "지금점검", "아침점검", "오늘점검"):
+        return {"cmd": "점검"}
     # 코드: 국내 6자리 또는 미국 티커(NVDA, BRK.B). 가격: 미국은 소수점(달러) 허용.
     m = re.fullmatch(r"(한투|토스)?(매수|매도)\s+(\d{6}|[A-Za-z]{1,6}(?:\.[A-Za-z]{1,2})?)"
                      r"\s+(\d+(?:\.\d+)?)(?:\s+(\d+(?:\.\d+)?))?", t)
@@ -102,6 +106,11 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
     cmd = p["cmd"]
     if cmd == "도움말":
         await sender.send(_HELP)
+    elif cmd == "점검":
+        # 호스트 research 프로세스가 큐를 소비(15초 폴링) → 완료 시 리포트 발송
+        await redis.sadd(COACH_REQ_KEY, "now")
+        await sender.send("🧭 아침 점검 요청됨 — 보유 종목 판정 + 미국 시황 확인 중. "
+                          "몇 분 내 리포트가 도착해요. (호스트 research 구동 필요)")
     elif cmd == "잔고":
         h = await _jget(redis, TOSS_HOLDINGS_KEY)
         a = await _jget(redis, TOSS_ACCOUNT_KEY)

@@ -126,3 +126,10 @@ def test_parse_penalty():
     assert parse_penalty("본문 감점: 5/30 언급\n최종 감점: 22/30") == 22  # 마지막 매치
     assert parse_penalty("형식 없음") == 30       # 못 찾으면 보수적 30
     assert parse_penalty("감점: 99/30") == 30     # 상한 클램프
+
+
+def test_parse_command_coach_check():
+    # '점검'(공백/변형 포함) → 아침 점검 온디맨드 요청
+    assert parse_command("점검") == {"cmd": "점검"}
+    assert parse_command("지금 점검") == {"cmd": "점검"}
+    assert parse_command("아침점검") == {"cmd": "점검"}
