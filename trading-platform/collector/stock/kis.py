@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from functools import lru_cache
 from pathlib import Path
@@ -49,12 +50,22 @@ async def effective_watchlist(redis) -> list[dict]:
     return load_watchlist()
 
 
+def is_kr_code(code: str) -> bool:
+    """국내 6자리 종목코드 여부(아니면 미국 티커로 취급)."""
+    return bool(code) and code.isdigit() and len(code) == 6
+
+
 def normalize_watch_item(code: str, name: str = "") -> dict | None:
-    """관심종목 입력 정규화. 6자리 숫자 코드만 허용(아니면 None)."""
+    """관심종목 입력 정규화: 국내 6자리 숫자 또는 미국 티커(영문 1~6자, 예: NVDA).
+
+    미국 티커는 대문자 통일(BRK.B 같은 점 표기 허용). 그 외 형식은 None.
+    """
     code = (code or "").strip()
-    if not (code.isdigit() and len(code) == 6):
-        return None
-    return {"code": code, "name": (name or "").strip()}
+    if is_kr_code(code):
+        return {"code": code, "name": (name or "").strip()}
+    if re.fullmatch(r"[A-Za-z]{1,6}(?:\.[A-Za-z]{1,2})?", code):
+        return {"code": code.upper(), "name": (name or "").strip()}
+    return None
 
 
 class KISClient:

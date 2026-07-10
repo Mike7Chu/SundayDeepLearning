@@ -72,3 +72,18 @@ def test_build_coach_prompt_minimal():
     # 목표·디테일·공시·리스크 전부 없어도 보유만 있으면 생성
     block = build_coach_prompt(_snap(), None, {}, {}, [], {})
     assert "대한전선" in block and "[내 목표]" not in block
+
+
+def test_build_coach_prompt_usd_holding():
+    # 미장 보유: 환율로 원화 환산해 비중 계산, 표시는 달러
+    snap = {"total_eval": 41_400_000.0, "holdings": [
+        {"symbol": "005930", "name": "삼성전자", "eval_amount": 14_000_000,
+         "pnl_pct": 8.0, "currency": "KRW"},
+        {"symbol": "NVDA", "name": "엔비디아", "eval_amount": 10_000.0,
+         "pnl_pct": 20.0, "currency": "USD"},
+    ]}
+    block = build_coach_prompt(snap, None, {}, {}, [], {}, fx_usdkrw=1400.0)
+    # NVDA 원화 환산 1,400만원 → 삼성전자와 각각 50%
+    assert "NVDA, 미국) | 비중 50.0% | 평가 $10,000.00" in block
+    assert "삼성전자(005930) | 비중 50.0%" in block
+    assert "1달러 = 1,400.0원" in block

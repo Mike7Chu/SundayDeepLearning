@@ -17,6 +17,7 @@ from shared.redis_keys import (
     COACH_GOAL_KEY,
     DART_RECENT_KEY,
     ENGINE_RISK_KEY,
+    FX_USDKRW_KEY,
     TOSS_ACCOUNT_KEY,
     TOSS_HOLDINGS_KEY,
 )
@@ -42,26 +43,40 @@ def _pct(part: float, total: float) -> float:
 
 def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
                        details: dict[str, dict], filings: list[dict],
-                       risk: dict, today: str = "") -> str:
+                       risk: dict, today: str = "",
+                       fx_usdkrw: float | None = None) -> str:
     """보유 스냅샷 + 목표 + 종목 정량 + 공시 + 리스크 → 데이터 블록(순수 함수).
 
     details: {종목코드: {"score","verdict","ni_growth_q_pct","ni_growth_q_label",
     "change_pct","margin_pct"}} — research.data.gather 결과에서 추림.
+    미국 보유(currency=USD)는 환율(fx_usdkrw)로 원화 환산해 비중을 계산한다.
     """
     hs = snap.get("holdings") or []
-    total = sum(h.get("eval_amount") or 0 for h in hs)
+
+    def _krw(h: dict) -> float:
+        ev = h.get("eval_amount") or 0
+        if h.get("currency") == "USD":
+            return ev * fx_usdkrw if fx_usdkrw else 0.0   # 환율 없으면 비중 계산서 제외
+        return ev
+
+    total = sum(_krw(h) for h in hs)
     lines = [f"[내 실계좌 — {today or '오늘'} 기준]" if today else "[내 실계좌]"]
     te = snap.get("total_eval") or total
     lines.append(f"- 총 평가액: {te:,.0f}원"
                  + (f" · 현금(매수여력): {cash:,.0f}원" if cash else ""))
     if snap.get("pnl_pct") is not None:
         lines.append(f"- 전체 수익률: {snap['pnl_pct']:+.2f}%")
-    lines.append("보유 종목(비중=평가액 기준):")
-    for h in sorted(hs, key=lambda x: -(x.get("eval_amount") or 0)):
+    if fx_usdkrw:
+        lines.append(f"- 환율: 1달러 = {fx_usdkrw:,.1f}원")
+    lines.append("보유 종목(비중=평가액 기준, 원화 환산):")
+    for h in sorted(hs, key=lambda x: -_krw(x)):
         code = h.get("symbol", "")
-        w = _pct(h.get("eval_amount") or 0, total)
-        row = (f"- {h.get('name') or code}({code}) | 비중 {w}% | "
-               f"평가 {h.get('eval_amount') or 0:,.0f}원 | "
+        usd = h.get("currency") == "USD"
+        w = _pct(_krw(h), total)
+        ev_txt = (f"${h.get('eval_amount') or 0:,.2f}" if usd
+                  else f"{h.get('eval_amount') or 0:,.0f}원")
+        row = (f"- {h.get('name') or code}({code}{', 미국' if usd else ''}) | "
+               f"비중 {w}% | 평가 {ev_txt} | "
                f"수익률 {h.get('pnl_pct') or 0:+.2f}%")
         d = details.get(code) or {}
         extra = []
@@ -141,12 +156,19 @@ async def gather_coach(redis: aioredis.Redis) -> str | None:
             filings.append(json.loads(item))
         except (json.JSONDecodeError, TypeError):
             continue
+    fx = None
+    fx_raw = await redis.get(FX_USDKRW_KEY)
+    if fx_raw:
+        try:
+            fx = float(json.loads(fx_raw).get("rate") or 0) or None
+        except (json.JSONDecodeError, TypeError, ValueError):
+            fx = None
     details: dict[str, dict] = {}
     for h in snap["holdings"]:
         code = h.get("symbol", "")
-        if not (code.isdigit() and len(code) == 6):   # 국내 6자리만 정량 보유
+        if not code:
             continue
-        sd = await gather(redis, code)
+        sd = await gather(redis, code)   # 미국 티커도 토스 수집 quote 있으면 포함
         if sd:
             details[code] = {
                 "score": sd.score, "verdict": sd.verdict,
@@ -155,4 +177,5 @@ async def gather_coach(redis: aioredis.Redis) -> str | None:
                 "ni_growth_q_label": sd.ni_growth_q_label,
             }
     today = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
-    return build_coach_prompt(snap, cash, goal, details, filings, risk, today)
+    return build_coach_prompt(snap, cash, goal, details, filings, risk, today,
+                              fx_usdkrw=fx)

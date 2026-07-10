@@ -60,3 +60,13 @@ def test_light_pillar():
     small = bar(10000, 10500, 9900, 10400, 120_000)      # 수급 급증 아님
     assert light_pillar([quiet1, quiet2, small])["pillar"] is False
     assert light_pillar([quiet1, pillar]) is None        # 봉 부족
+
+
+def test_trade_levels_us_cents():
+    # 미국 티커(kr=False): KRX 호가 대신 센트(0.01) 반올림 — 달러 소수점 유지
+    closes = [150 + i * 0.5 for i in range(80)]
+    lv = trade_levels(closes, kr=False)
+    assert lv is not None
+    assert lv["stop"] < lv["entry"] < lv["target"]
+    for k in ("entry", "stop", "target"):
+        assert abs(lv[k] - round(lv[k], 2)) < 1e-9   # 센트 단위

@@ -36,7 +36,7 @@ async def add_watch(item: WatchItem) -> dict:
     redis = get_redis()
     norm = normalize_watch_item(item.code, item.name)
     if not norm:
-        raise HTTPException(400, "종목코드는 6자리 숫자")
+        raise HTTPException(400, "국내 6자리 숫자 또는 미국 티커(예: NVDA)")
     # 이름 미지정이면 수집된 시세에서 보완
     if not norm["name"]:
         raw = await redis.hget(STOCK_QUOTE_KEY, norm["code"])

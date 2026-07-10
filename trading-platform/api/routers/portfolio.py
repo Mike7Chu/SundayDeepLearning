@@ -15,7 +15,12 @@ from pydantic import BaseModel
 from api.redis_client import get_redis
 from collector.stock.toss import TossClient, TossError
 from engine.risk import order_allowed
-from shared.redis_keys import ENGINE_RISK_KEY, TOSS_ACCOUNT_KEY, TOSS_HOLDINGS_KEY
+from shared.redis_keys import (
+    ENGINE_RISK_KEY,
+    FX_USDKRW_KEY,
+    TOSS_ACCOUNT_KEY,
+    TOSS_HOLDINGS_KEY,
+)
 from shared.settings import settings
 
 router = APIRouter()
@@ -29,9 +34,17 @@ async def portfolio() -> dict:
     redis = get_redis()
     h_raw = await redis.get(TOSS_HOLDINGS_KEY)
     a_raw = await redis.get(TOSS_ACCOUNT_KEY)
+    f_raw = await redis.get(FX_USDKRW_KEY)
     snap = json.loads(h_raw) if h_raw else {}
     acc = json.loads(a_raw) if a_raw else {}
+    fx = None
+    if f_raw:
+        try:
+            fx = json.loads(f_raw).get("rate")
+        except (json.JSONDecodeError, TypeError):
+            fx = None
     return {
+        "fx_usdkrw": fx,
         "enabled": _toss.enabled,
         "trading_enabled": settings.toss_trading_enabled,
         "max_order_krw": settings.toss_max_order_krw,
@@ -100,7 +113,20 @@ async def place_order(req: OrderRequest) -> dict:
         raise HTTPException(400, "side는 BUY 또는 SELL")
     if req.quantity <= 0 or req.price <= 0:
         raise HTTPException(400, "quantity·price는 양수")
-    await _assert_trading_allowed(req.price * req.quantity, req.side)
+    est = req.price * req.quantity
+    if not (req.symbol.isdigit() and len(req.symbol) == 6):
+        # 미국 티커: USD 금액 → 환율로 원화 환산해 한도 검증(환율 없으면 거부)
+        f_raw = await get_redis().get(FX_USDKRW_KEY)
+        rate = None
+        if f_raw:
+            try:
+                rate = float(json.loads(f_raw).get("rate") or 0) or None
+            except (json.JSONDecodeError, TypeError, ValueError):
+                rate = None
+        if not rate:
+            raise HTTPException(503, "환율(USD/KRW) 미확보 — 잠시 후 재시도")
+        est = est * rate
+    await _assert_trading_allowed(est, req.side)
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             account = await _toss.resolve_account_seq(client)

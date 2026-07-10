@@ -161,13 +161,15 @@ def krx_tick(p: float) -> float:
     return round(p / t) * t
 
 
-def trade_levels(closes: list[float], live_price: float | None = None) -> dict | None:
+def trade_levels(closes: list[float], live_price: float | None = None,
+                 kr: bool = True) -> dict | None:
     """매매 가격 가이드(순수 함수): 추천 매수가·손절가·목표가.
 
     - 추천 매수가: 상승추세면 SMA20 눌림목(추격 매수 방지), 아니면 현재가.
     - 손절가: 최근 20거래일 최저가의 3% 아래(지지 붕괴 시 탈출). 진입가 대비
       최소 -3%, 최대 -15%로 클램프(비정상 급등락 방어).
     - 목표가: 손익비 1:2 (기대이익 = 감수위험의 2배).
+    - kr=True면 KRX 호가 단위 반올림, False(미국 티커)면 센트(0.01) 반올림.
     판단 보조용 — 매매 신호·수익 보장이 아님.
     """
     if len(closes) < 20:
@@ -182,8 +184,9 @@ def trade_levels(closes: list[float], live_price: float | None = None) -> dict |
     stop = max(entry * 0.85, min(stop, entry * 0.97))   # 진입 대비 -3%~-15%
     target = entry + 2 * (entry - stop)
     trend_ok = bool(s60 and price > s60)
+    tick = krx_tick if kr else (lambda p: round(p, 2))
     return {
-        "entry": krx_tick(entry), "stop": krx_tick(stop), "target": krx_tick(target),
+        "entry": tick(entry), "stop": tick(stop), "target": tick(target),
         "entry_basis": basis,
         "stop_pct": round((stop / entry - 1) * 100, 1),
         "target_pct": round((target / entry - 1) * 100, 1),

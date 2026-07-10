@@ -141,8 +141,12 @@ def test_normalize_watch_item():
     assert normalize_watch_item("005930", "삼성전자") == {"code": "005930", "name": "삼성전자"}
     assert normalize_watch_item(" 000660 ")["code"] == "000660"
     assert normalize_watch_item("12345") is None      # 5자리
-    assert normalize_watch_item("AAPL") is None        # 비숫자
     assert normalize_watch_item("") is None
+    # 미장: 미국 티커 허용(대문자 통일, 점 표기 허용)
+    assert normalize_watch_item("nvda")["code"] == "NVDA"
+    assert normalize_watch_item("AAPL", "애플") == {"code": "AAPL", "name": "애플"}
+    assert normalize_watch_item("brk.b")["code"] == "BRK.B"
+    assert normalize_watch_item("NVDA123") is None    # 혼합 형식 거부
 
 
 def test_effective_watchlist_redis_override_and_fallback():

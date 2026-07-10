@@ -103,6 +103,10 @@ def test_parse_command_orders():
     # 브로커 명시: 토스/한투 접두어
     assert parse_command("토스매수 005930 3")["broker"] == "toss"
     assert parse_command("한투매도 000660 1 200000")["broker"] == "kis"
+    # 미장(미국 티커): 소문자도 대문자 통일, 달러 소수점 가격 허용
+    us = parse_command("토스매수 nvda 2 185.50")
+    assert us["code"] == "NVDA" and us["price"] == 185.5 and us["broker"] == "toss"
+    assert parse_command("매도 BRK.B 1")["code"] == "BRK.B"
     assert parse_command("확인 42") == {"cmd": "confirm", "n": "42"}
     assert parse_command("주문취소 abc-123") == {"cmd": "cancel", "order_id": "abc-123"}
     assert parse_command("잔고") == {"cmd": "잔고"}
@@ -110,7 +114,7 @@ def test_parse_command_orders():
 
 
 def test_parse_command_rejects_malformed():
-    assert parse_command("매수 삼성전자 10") is None      # 코드는 6자리 숫자만
+    assert parse_command("매수 삼성전자 10") is None      # 코드는 6자리 숫자/미국 티커만
     assert parse_command("매수 005930") is None            # 수량 누락
     assert parse_command("전량매도") is None
     assert parse_command("") is None

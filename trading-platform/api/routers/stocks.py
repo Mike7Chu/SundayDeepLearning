@@ -23,7 +23,7 @@ from api.services.stock_signal import (
 from api.services.stock_score import compute_score
 from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
-from collector.stock.kis import effective_watchlist
+from collector.stock.kis import effective_watchlist, is_kr_code
 from fastapi import HTTPException
 from shared.redis_keys import (
     DART_CORP_KEY,
@@ -194,22 +194,26 @@ async def stock_detail(code: str) -> dict:
         quote.update({"price": m.get("last_close"), "change_pct": m.get("change_pct"),
                       "high_52w": quote.get("high_52w") or m.get("high_52w"),
                       "low_52w": quote.get("low_52w") or m.get("low_52w")})
+    kr = is_kr_code(code)
+    if not kr and not quote.get("currency"):
+        quote["currency"] = "USD"   # 미국 티커 — UI 통화 표시
     sig = ({"code": code, "name": quote.get("name", ""), **evaluate_signals(closes)}
            if len(closes) >= 20 else None)
     score = compute_score(quote, closes)
-    levels = trade_levels(closes, quote.get("price"))
-    pillar = light_pillar(candles)   # 수급 포착(빛의기둥) — 거래량 포함 원본 캔들 기준
-    # 배당: 저장분 → 없으면 DART 온디맨드
+    levels = trade_levels(closes, quote.get("price"), kr=kr)
+    pillar = light_pillar(candles) if kr else None   # 수급 기준(억원)은 국내 전용
+    # 배당: 저장분 → 없으면 DART 온디맨드(국내만 — 미국은 DART 미커버)
     div = None
-    draw = await redis.hget(STOCK_DIVIDEND_KEY, code)
     items: list = []
-    if draw:
-        try:
-            items = json.loads(draw).get("items", [])
-        except (json.JSONDecodeError, TypeError):
-            items = []
-    if not items:
-        items = await _ondemand_dividend(redis, code)
+    if kr:
+        draw = await redis.hget(STOCK_DIVIDEND_KEY, code)
+        if draw:
+            try:
+                items = json.loads(draw).get("items", [])
+            except (json.JSONDecodeError, TypeError):
+                items = []
+        if not items:
+            items = await _ondemand_dividend(redis, code)
     if items:
         div = compute_dividend(quote, items)
     wl = await effective_watchlist(redis)

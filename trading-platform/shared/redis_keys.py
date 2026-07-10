@@ -51,6 +51,9 @@ TG_PENDING_KEY = "tg:pending"
 RESEARCH_INV_REQ_KEY = "research:inv_requests"
 RESEARCH_INV_KEY = "research:inversion"
 
+# USD/KRW 환율(토스 exchange-rate, 포트폴리오 루프가 갱신). json{rate, ts}
+FX_USDKRW_KEY = "fx:usdkrw"
+
 # AI 포트폴리오 코치(아침 점검). report=json{report,ts,...}, goal=json{target_pct,deadline,memo},
 # requests=set(온디맨드 '지금 점검' 요청 — 호스트 research가 처리)
 COACH_KEY = "coach:report"

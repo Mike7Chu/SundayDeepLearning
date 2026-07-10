@@ -15,13 +15,14 @@ import redis.asyncio as aioredis
 
 from api.services.stock_signal import candle_trading_value, pillar_precheck
 from collector.news.dart import DartClient
-from collector.stock.kis import KISClient, effective_watchlist, load_watchlist
+from collector.stock.kis import KISClient, effective_watchlist, is_kr_code, load_watchlist
 from notifier.telegram import TelegramSender
 from collector.stock.kis_master import fetch_universe
 from collector.stock.toss import TossClient, candle_metrics
 from shared.redis_keys import (
     DART_CORP_KEY,
     ENGINE_PILLAR_KEY,
+    FX_USDKRW_KEY,
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
@@ -88,6 +89,8 @@ async def stock_loop(redis: aioredis.Redis, kis: KISClient) -> None:
         watch = await effective_watchlist(redis)   # 매 주기 재조회(UI 편집 반영)
         n = 0
         for item in watch:
+            if not is_kr_code(item["code"]):
+                continue   # 미국 티커는 토스가 시세·차트 담당(KIS는 국내 전용)
             try:
                 q = await kis.fetch_price(client, item["code"])
                 # KIS 현재가/PER/PBR는 부정확 사례가 있어(예: 삼성전자 5배 부풀림) 신뢰도 높은
@@ -239,6 +242,8 @@ async def stock_history_loop(redis: aioredis.Redis,
             cmap = await _dart_corp_map(redis, dart, dclient)
             for item in targets:
                 code, name = item["code"], item.get("name", "")
+                if not is_kr_code(code):
+                    continue   # DART는 국내 공시만 — 미국 티커 스킵
                 is_watch = code in wset
                 if not is_watch:
                     # 유니버스(~3,600종목)는 하루 1회만 갱신 — DART 무료 한도(일 2만건) 준수.
@@ -448,16 +453,23 @@ async def portfolio_loop(redis: aioredis.Redis, toss: TossClient) -> None:
                         continue
                     logger.info("[toss] account=%s", account)
                 snap = await toss.fetch_holdings(client, account)
-                # 100억은 원화 기준: KRW 평가액 + (USD 평가액 × 환율). USD 보유 없으면 환율 조회 생략.
+                # 환율은 매 주기 저장(fx:usdkrw) — 미장 표시·코치 비중 환산·주문 한도 검증 공용.
+                rate = None
+                try:
+                    fx = await toss.fetch_exchange_rate(client)  # USD→KRW
+                    rate = float(fx.get("rate") or 0) or None
+                    if rate:
+                        await redis.set(FX_USDKRW_KEY, json.dumps(
+                            {"rate": rate, "ts": time.time()}))
+                except Exception as exc:
+                    logger.warning("[toss] 환율 조회 실패: %s", exc)
+                # 100억은 원화 기준: KRW 평가액 + (USD 평가액 × 환율).
                 total_eval = snap.get("total_eval_krw") or 0.0
                 usd = snap.get("total_eval_usd")
-                if usd:
-                    try:
-                        fx = await toss.fetch_exchange_rate(client)  # USD→KRW
-                        rate = float(fx.get("rate") or 0)
-                        total_eval += usd * rate
-                    except Exception as exc:
-                        logger.warning("[toss] 환율 조회 실패(USD 미반영): %s", exc)
+                if usd and rate:
+                    total_eval += usd * rate
+                elif usd:
+                    logger.warning("[toss] USD 보유 있으나 환율 없음 — 원화 합산 미반영")
                 snap["total_eval"] = round(total_eval, 2)
                 # 매수여력은 별도 try — 실패해도 보유/평가는 저장(한 엔드포인트가 전체를 막지 않게).
                 try:
@@ -520,6 +532,8 @@ async def toss_history_loop(redis: aioredis.Redis, toss: TossClient) -> None:
                         "high_52w": m["high_52w"], "low_52w": m["low_52w"],
                         "prev_close": m["prev_close"], "shares": shares,
                         "market_cap": mktcap,
+                        # 미국 티커는 USD 시세(시총 단위도 억달러) — UI/코치 통화 표시용
+                        "currency": "KRW" if is_kr_code(code) else "USD",
                     })
             logger.info("[toss] 일봉/종목정보 수집 %d종목", len(watch))
         except Exception as exc:
@@ -546,7 +560,8 @@ async def toss_price_loop(redis: aioredis.Redis, toss: TossClient) -> None:
                 rec = json.loads(raw) if raw else {}
                 prev = rec.get("prev_close")
                 shares = rec.get("shares")
-                fields = {"price": price}
+                fields = {"price": price,
+                          "currency": "KRW" if is_kr_code(p["symbol"]) else "USD"}
                 if prev:
                     fields["change_pct"] = round((price - prev) / prev * 100, 2)
                 if shares:

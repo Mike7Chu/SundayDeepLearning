@@ -137,6 +137,7 @@ const fmt=(n)=> n==null?"–":Number(n).toLocaleString("ko-KR",{maximumFractionD
 const numC=(v,d=2)=> v==null?"–":Number(v).toLocaleString("ko-KR",{maximumFractionDigits:d});
 const capF=(e)=> e==null?"–":(e>=10000? Number(e/10000).toLocaleString("ko-KR",{maximumFractionDigits:0})+"조" : Number(e).toLocaleString("ko-KR",{maximumFractionDigits:0})+"억");
 const won=(n)=> n==null?"–":Number(n).toLocaleString("ko-KR")+"원";
+const money=(v,c)=> v==null?"–":(c==="USD"?"$"+Number(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}):won(v));
 const eok=(n)=> n==null?"–":(n/1e8).toLocaleString("ko-KR",{maximumFractionDigits:1})+"억";
 let activeTab="home", busy=false;
 const term=()=>$("search").value.trim();
@@ -245,6 +246,7 @@ async function renderHome(){
       <div class="row"><span>관심종목</span><b>${quotes.length}</b></div>
       <div class="row"><span>상승 / 하락</span><b><span class="pos">${up}</span> / <span class="neg">${dn}</span></b></div>
       <div class="row"><span>매수후보(60+) / 회피(45-)</span><b><span class="buy">${buys.length}</span> / <span class="sell">${sells.length}</span></b></div>
+      ${pf&&pf.fx_usdkrw?`<div class="row"><span>환율(달러)</span><b class="num">1$ = ${numC(pf.fx_usdkrw,1)}원</b></div>`:''}
     </div>
     <div class="card"><h3>등락 TOP</h3>${movers.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span>
       <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</b></div>`).join("")||'<div class="empty">데이터 없음(KIS 키 필요)</div>'}</div>
@@ -326,11 +328,11 @@ async function renderPortfolio(){
   dataTable("pfTable", [
     {label:"종목", key:"name", num:false, fmt:r=>`${r.name||r.symbol}<span class="num" style="opacity:.6"> ${r.symbol}</span>`},
     {label:"수량", key:"qty", fmt:r=>fmt(r.qty)},
-    {label:"평단", key:"avg_price", fmt:r=>won(r.avg_price)},
-    {label:"현재가", key:"cur_price", fmt:r=>won(r.cur_price)},
-    {label:"평가액", key:"eval_amount", fmt:r=>won(r.eval_amount)},
+    {label:"평단", key:"avg_price", fmt:r=>money(r.avg_price,r.currency)},
+    {label:"현재가", key:"cur_price", fmt:r=>money(r.cur_price,r.currency)},
+    {label:"평가액", key:"eval_amount", fmt:r=>money(r.eval_amount,r.currency)},
     {label:"평가손익", key:"pnl_pct", cls:r=>"num "+((r.pnl_pct||0)>=0?"pos":"neg"),
-     fmt:r=>`${(r.pnl||0)>=0?"+":""}${won(r.pnl)} (${(r.pnl_pct||0)>=0?"+":""}${numC(r.pnl_pct)}%)`},
+     fmt:r=>`${(r.pnl||0)>=0?"+":""}${money(r.pnl,r.currency)} (${(r.pnl_pct||0)>=0?"+":""}${numC(r.pnl_pct)}%)`},
   ], hs, {rowClick:r=>`openStock('${qesc(r.symbol)}','${qesc(r.name)}')`,
           sort:{key:"eval_amount",dir:-1}, empty:"보유 종목 없음"});
   $("metaInfo").textContent=`보유 ${hs.length}종목 · 평가 ${eok(pf.total_eval)}`;
@@ -346,7 +348,7 @@ function orderPanelHTML(pf){
   return `<div class="card" style="grid-column:1/-1;margin-bottom:12px">
     <h3>주문 <span class="badge">⚠️ 실매매 · 한도 ${won(pf.max_order_krw)}</span></h3>
     <div class="arow" style="flex-wrap:wrap;gap:8px">
-      <input id="oSym" placeholder="종목코드(005930)" style="width:150px">
+      <input id="oSym" placeholder="005930 또는 NVDA" style="width:150px">
       <input id="oQty" type="number" placeholder="수량" style="width:100px">
       <input id="oPrice" type="number" placeholder="지정가(원)" style="width:130px">
       <button class="btn buy" onclick="submitOrder('BUY')">매수</button>
@@ -376,13 +378,13 @@ async function renderStocks(){
   const rows=((await jget("/stocks/all")).rows||[]).filter(r=>match(r.name)||match(r.code));
   dataTable("stocksBox", [
     {label:"종목", key:"name", num:false, fmt:nameCell},
-    {label:"현재가", key:"price", hint:HELP.price, fmt:r=>fmt(r.price), cls:()=>"num strong"},
+    {label:"현재가", key:"price", hint:HELP.price, fmt:r=>r.currency==="USD"?money(r.price,"USD"):fmt(r.price), cls:()=>"num strong"},
     {label:"등락률", key:"change_pct", hint:HELP.change, fmt:pctFmt("change_pct"), cls:pctCls("change_pct")},
     {label:"PER", key:"per", hint:HELP.per, fmt:r=>numC(r.per)},
     {label:"PBR", key:"pbr", hint:HELP.pbr, fmt:r=>numC(r.pbr)},
     {label:"ROE%", key:"roe", hint:"자본으로 얼마 버는지", fmt:r=>numC(r.roe)},
-    {label:"1년 최고가", key:"high_52w", hint:HELP.w52, fmt:r=>fmt(r.high_52w)},
-    {label:"시가총액", key:"market_cap", hint:HELP.cap, fmt:r=>capF(r.market_cap)},
+    {label:"1년 최고가", key:"high_52w", hint:HELP.w52, fmt:r=>r.currency==="USD"?money(r.high_52w,"USD"):fmt(r.high_52w)},
+    {label:"시가총액", key:"market_cap", hint:HELP.cap, fmt:r=>r.currency==="USD"?(r.market_cap==null?"–":numC(r.market_cap,0)+"억$"):capF(r.market_cap)},
   ], rows, {rowClick:rowOpen, sort:{key:"change_pct",dir:-1}, empty:"수집 대기 (시세 없음)"});
   $("metaInfo").textContent=`${rows.length}종목 · 전체 시장${term()?" (검색)":""}`;
 }
@@ -468,7 +470,7 @@ async function renderSettings(){
   $("settingsBox").innerHTML=`<div class="grid">
     <div class="card" style="grid-column:1/-1"><h3>관심종목 편집 (${wl.length})</h3>
       <div class="arow" style="gap:8px;flex-wrap:wrap">
-        <input id="wCode" placeholder="종목코드 6자리(예:005930)" style="width:180px" maxlength="6">
+        <input id="wCode" placeholder="005930 또는 미국 티커(NVDA)" style="width:190px" maxlength="8">
         <input id="wName" placeholder="이름(선택)" style="width:140px">
         <button class="btn buy" onclick="addWatch()">＋ 추가</button>
         <span class="num">추가/삭제 즉시 수집 반영(다음 주기)</span></div>
@@ -495,7 +497,7 @@ async function renderSettings(){
 }
 async function addWatch(){
   const code=$("wCode").value.trim(), name=$("wName").value.trim();
-  if(!/^\d{6}$/.test(code)){ alert("종목코드는 6자리 숫자"); return; }
+  if(!/^(\d{6}|[A-Za-z]{1,6}(\.[A-Za-z]{1,2})?)$/.test(code)){ alert("국내 6자리 숫자 또는 미국 티커(예: NVDA)"); return; }
   const r=await fetch("/watchlist",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({code,name})});
   if(!r.ok){ const d=await r.json().catch(()=>({})); alert("추가 실패: "+(d.detail||r.status)); return; }
@@ -515,9 +517,10 @@ async function openStock(code,name){
   try{
     const d=await jget("/stocks/"+encodeURIComponent(code));
     const Q=d.quote||{}, S=d.signal, D=d.dividend;
-    const fund=`<div class="cgrid">${kv("현재가",fmt(Q.price)+"원",HELP.price)}${kv("등락률",Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–",HELP.change)}
+    const US=Q.currency==="USD", MN=(v)=>US?money(v,"USD"):fmt(v)+"원";
+    const fund=`<div class="cgrid">${kv("현재가",MN(Q.price),HELP.price)}${kv("등락률",Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–",HELP.change)}
       ${kv("PER",numC(Q.per),HELP.per)}${kv("PBR",numC(Q.pbr),HELP.pbr)}${kv("EPS",numC(Q.eps,0),HELP.eps)}${kv("BPS",numC(Q.bps,0),HELP.bps)}
-      ${kv("시가총액",capF(Q.market_cap),HELP.cap)}${kv("1년 최저~최고",numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0)+"원",HELP.w52)}
+      ${kv("시가총액",US?(Q.market_cap==null?"–":numC(Q.market_cap,0)+"억$"):capF(Q.market_cap),HELP.cap)}${kv("1년 최저~최고",US?(money(Q.low_52w,"USD")+"~"+money(Q.high_52w,"USD")):(numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0)+"원"),HELP.w52)}
       ${Q.ni_growth_q_pct!=null?kv("순이익 성장("+(Q.ni_growth_q_label||"최근 분기")+")",(Q.ni_growth_q_pct>=0?"+":"")+numC(Q.ni_growth_q_pct,0)+"%","전년 동기 대비 · 공식 분기보고서"):""}
       ${Q.ni_growth_pct!=null?kv("순이익 성장(연간)",(Q.ni_growth_pct>=0?"+":"")+numC(Q.ni_growth_pct,0)+"%","작년 사업보고서 기준"):""}</div>`;
     const collectHint='일시 수집 실패 — 팝업을 다시 열어보세요';   // 어떤 종목이든 온디맨드 수집
@@ -543,9 +546,9 @@ async function openStock(code,name){
     const sgH=S?`<div class="cgrid">${kv("흐름",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"위 종합점수의 '추세'와 같은 기준")}${kv("RSI",numC(S.rsi),HELP.rsi)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}${pillarCard}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
     const L=d.levels;
     const lvH=L?`<div class="cgrid">
-      ${kv("추천 매수가",`<span class="pos">${fmt(L.entry)}원</span>`,`${L.entry_basis} 기준 · 추격 매수 방지`)}
-      ${kv("손절가",`<span class="neg">${fmt(L.stop)}원</span>`,`매수가 대비 ${numC(L.stop_pct,1)}% · 지지선 붕괴 시 탈출`)}
-      ${kv("목표가",`<span class="buy">${fmt(L.target)}원</span>`,`매수가 대비 +${numC(L.target_pct,1)}% · 손익비 1:2`)}
+      ${kv("추천 매수가",`<span class="pos">${MN(L.entry)}</span>`,`${L.entry_basis} 기준 · 추격 매수 방지`)}
+      ${kv("손절가",`<span class="neg">${MN(L.stop)}</span>`,`매수가 대비 ${numC(L.stop_pct,1)}% · 지지선 붕괴 시 탈출`)}
+      ${kv("목표가",`<span class="buy">${MN(L.target)}</span>`,`매수가 대비 +${numC(L.target_pct,1)}% · 손익비 1:2`)}
       ${kv("추세 필터",L.trend_ok?'<span class="pos">상승 추세 ✓</span>':'<span class="neg">하락 추세 — 매수 보류 권장</span>',"현재가가 60일 평균선 위인가")}</div>
       <div class="num" style="margin-top:6px">손실은 -${numC(-L.stop_pct,1)}%에서 자르고, 이익은 그 2배(+${numC(L.target_pct,1)}%)를 노리는 구조예요. 판단 보조이며 매매 신호가 아닙니다.</div>`
       :`<div class="empty">가격 가이드 ${collectHint}</div>`;

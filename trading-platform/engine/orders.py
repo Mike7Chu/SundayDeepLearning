@@ -13,10 +13,10 @@ import logging
 import httpx
 import redis.asyncio as aioredis
 
-from collector.stock.kis import KISClient
+from collector.stock.kis import KISClient, is_kr_code
 from collector.stock.toss import TossClient, TossError
 from engine.risk import order_allowed
-from shared.redis_keys import ENGINE_RISK_KEY
+from shared.redis_keys import ENGINE_RISK_KEY, FX_USDKRW_KEY
 from shared.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,20 @@ async def place_gated_order(redis: aioredis.Redis, *, side: str, code: str,
     if qty <= 0 or price <= 0:
         return False, "수량·가격은 양수여야 함"
     est = qty * price
+    if not is_kr_code(code):
+        # 미국 티커: 토스 전용 + USD 금액을 환율로 원화 환산해 한도 검증(환율 없으면 거부)
+        if broker == "kis":
+            return False, f"{code}는 미국 종목 — 한투(KIS)는 국내 전용, '토스매수/토스매도'로"
+        raw = await redis.get(FX_USDKRW_KEY)
+        rate = None
+        if raw:
+            try:
+                rate = float(json.loads(raw).get("rate") or 0) or None
+            except (json.JSONDecodeError, TypeError, ValueError):
+                rate = None
+        if not rate:
+            return False, "환율(USD/KRW) 미확보 — 잠시 후 재시도(수집기가 곧 갱신)"
+        est = est * rate
     if broker == "kis":
         if kis is None or not kis.enabled:
             return False, "한투 키 미설정(.env KIS_APP_KEY/SECRET)"
@@ -80,8 +94,9 @@ async def place_gated_order(redis: aioredis.Redis, *, side: str, code: str,
         return False, f"주문 실패: {exc}"
     oid = res.get("order_id") or "OK"
     logger.info("[order/%s] %s %s x%s @%s → %s", broker, side, code, qty, price, oid)
+    px = f"{price:,.0f}원" if is_kr_code(code) else f"${price:,.2f}"
     return True, (f"[{label}] {'매수' if side == 'BUY' else '매도'} 접수 — {code} "
-                  f"{qty:g}주 @{price:,.0f}원 (주문ID {oid})")
+                  f"{qty:g}주 @{px} (주문ID {oid})")
 
 
 async def cancel_gated_order(redis: aioredis.Redis, toss: TossClient,

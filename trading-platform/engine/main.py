@@ -238,7 +238,8 @@ async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> Non
         cur, avg = h.get("cur_price"), h.get("avg_price")
         if not code or not cur:
             continue
-        lv = trade_levels(await _closes(redis, code), cur)
+        kr = code.isdigit()
+        lv = trade_levels(await _closes(redis, code), cur, kr=kr)
         if not lv:
             continue
         kind = "target" if cur >= lv["target"] else ("stop" if cur <= lv["stop"] else None)
@@ -253,12 +254,13 @@ async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> Non
         if last.get("kind") == kind and time.time() - (last.get("ts") or 0) < 86400:
             continue                                        # 같은 상태 24h 내 재알림 금지
         pnl = f" · 평단 대비 {((cur / avg) - 1) * 100:+.1f}%" if avg else ""
+        fmt = (lambda v: f"{v:,.0f}") if kr else (lambda v: f"${v:,.2f}")
         if kind == "target":
             msg = (f"🎯 목표가 도달 — {name}({code})\n"
-                   f"현재 {cur:,.0f} ≥ 목표 {lv['target']:,.0f}{pnl}\n익절 검토 타이밍")
+                   f"현재 {fmt(cur)} ≥ 목표 {fmt(lv['target'])}{pnl}\n익절 검토 타이밍")
         else:
             msg = (f"🛑 손절선 이탈 — {name}({code})\n"
-                   f"현재 {cur:,.0f} ≤ 손절 {lv['stop']:,.0f}{pnl}\n손절 검토 타이밍")
+                   f"현재 {fmt(cur)} ≤ 손절 {fmt(lv['stop'])}{pnl}\n손절 검토 타이밍")
         await sender.send(msg + "\n※ 판단 보조 — 최종 결정은 직접")
         await redis.hset(ENGINE_ALERTS_KEY, code,
                          json.dumps({"kind": kind, "ts": time.time()}))
@@ -293,6 +295,8 @@ async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
             names.setdefault(h["symbol"], h.get("name", ""))
     today = time.strftime("%Y-%m-%d")
     for code, name in names.items():
+        if not code.isdigit():
+            continue   # 빛의기둥 기준(거래대금 억원)은 국내 전용
         raw = await redis.get(stock_ohlcv_key(code))
         if not raw:
             continue

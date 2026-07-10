@@ -52,12 +52,16 @@ def parse_command(text: str) -> dict | None:
     t = (text or "").strip()
     if t in ("잔고", "상태", "후보", "도움말", "/start", "help"):
         return {"cmd": {"/start": "도움말", "help": "도움말"}.get(t, t)}
-    m = re.fullmatch(r"(한투|토스)?(매수|매도)\s+(\d{6})\s+(\d+(?:\.\d+)?)(?:\s+(\d+))?", t)
+    # 코드: 국내 6자리 또는 미국 티커(NVDA, BRK.B). 가격: 미국은 소수점(달러) 허용.
+    m = re.fullmatch(r"(한투|토스)?(매수|매도)\s+(\d{6}|[A-Za-z]{1,6}(?:\.[A-Za-z]{1,2})?)"
+                     r"\s+(\d+(?:\.\d+)?)(?:\s+(\d+(?:\.\d+)?))?", t)
     if m:
         broker = {"한투": "kis", "토스": "toss"}.get(m.group(1))   # None=기본 브로커
+        code = m.group(3)
         return {"cmd": "order", "broker": broker,
                 "side": "BUY" if m.group(2) == "매수" else "SELL",
-                "code": m.group(3), "qty": float(m.group(4)),
+                "code": code if code.isdigit() else code.upper(),
+                "qty": float(m.group(4)),
                 "price": float(m.group(5)) if m.group(5) else None}
     m = re.fullmatch(r"확인\s+(\d+)", t)
     if m:
@@ -130,16 +134,22 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
             await sender.send(f"{p['code']} 가격을 몰라요 — 가격을 지정해 주세요")
             return
         n = str(int(time.time()) % 100000)
+        kr = p["code"].isdigit()
         bk = p.get("broker") or settings.auto_trade_broker
+        if not kr:
+            bk = "toss"   # 미국 종목은 토스 전용(한투는 국내만)
         await redis.hset(TG_PENDING_KEY, n, json.dumps(
             {**p, "broker": bk, "price": price, "ts": time.time()},
             ensure_ascii=False))
         side_kr = "매수" if p["side"] == "BUY" else "매도"
         broker_kr = ("한투" + ("(모의)" if settings.kis_paper else "")
                      if bk == "kis" else "토스")
+        px = f"{price:,.0f}원" if kr else f"${price:,.2f}"
+        est = (f"{p['qty'] * price:,.0f}원" if kr
+               else f"${p['qty'] * price:,.2f}")
         await sender.send(
             f"⚠️ 실주문 확인 필요 [{broker_kr}]\n{side_kr} {p['code']} {p['qty']:g}주 "
-            f"@{price:,.0f}원 (예상 {p['qty'] * price:,.0f}원)\n"
+            f"@{px} (예상 {est})\n"
             f"→ 2분 내 '확인 {n}' 회신 시 실행")
     elif cmd == "confirm":
         raw = await redis.hget(TG_PENDING_KEY, p["n"])
