@@ -24,6 +24,8 @@ from shared.redis_keys import (
     DART_CORP_KEY,
     ENGINE_PILLAR_KEY,
     FX_USDKRW_KEY,
+    MARKET_INDICATORS_KEY,
+    MARKET_RANKINGS_KEY,
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
@@ -358,6 +360,83 @@ async def us_history_loop(redis: aioredis.Redis, toss: TossClient) -> None:
         await asyncio.sleep(21600)   # 6시간
 
 
+async def indicators_loop(redis: aioredis.Redis, toss: TossClient) -> None:
+    """코스피·코스닥 지수 + 투자자별(외국인/기관) 순매수 — 10분마다(토스 v1.2.2).
+
+    아침 점검(코치)의 '외국인/기관 수급' 실데이터 + 홈 시장온도 카드 소스.
+    """
+    if not toss.enabled:
+        return
+    await asyncio.sleep(12)
+    while True:
+        try:
+            out: dict = {"ts": time.time()}
+            async with httpx.AsyncClient(timeout=15) as client:
+                prices = await toss.fetch_indicator_prices(client, ["KOSPI", "KOSDAQ"])
+                for sym in ("KOSPI", "KOSDAQ"):
+                    cur = prices.get(sym)
+                    if cur is None:
+                        continue
+                    rec: dict = {"price": cur}
+                    try:
+                        candles = await toss.fetch_indicator_candles(client, sym, count=2)
+                        done = [c for c in candles
+                                if str(c.get("date", ""))[:10]
+                                != time.strftime("%Y-%m-%d")]
+                        prev = done[-1]["close"] if done else None
+                        if prev:
+                            rec["change_pct"] = round((cur / prev - 1) * 100, 2)
+                    except Exception:
+                        pass
+                    out[sym.lower()] = rec
+                inv: dict = {}
+                for sym in ("KOSPI", "KOSDAQ"):
+                    try:
+                        recs = await toss.fetch_investor_trading(client, sym, count=1)
+                        if recs:
+                            inv[sym.lower()] = recs[0]
+                    except Exception as exc:
+                        logger.warning("[indicators] %s 수급 실패: %s", sym, exc)
+                if inv:
+                    out["investor"] = inv
+            await redis.set(MARKET_INDICATORS_KEY,
+                            json.dumps(out, ensure_ascii=False))
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] 시장 지표 수집 실패: %s", exc)
+        await asyncio.sleep(600)
+
+
+async def rankings_loop(redis: aioredis.Redis, toss: TossClient) -> None:
+    """국내·미국 급등/거래대금 상위 랭킹 — 10분마다(토스 v1.2.2). 홈 카드 소스."""
+    if not toss.enabled:
+        return
+    await asyncio.sleep(18)
+    jobs = [("kr_gainers", "TOP_GAINERS", "KR", "1d"),
+            ("us_gainers", "TOP_GAINERS", "US", "1d"),
+            ("kr_amount", "MARKET_TRADING_AMOUNT", "KR", "realtime"),
+            ("us_amount", "MARKET_TRADING_AMOUNT", "US", "realtime")]
+    while True:
+        try:
+            out: dict = {"ts": time.time()}
+            names = {u["code"]: u.get("name", "")
+                     for u in await _universe_codes(redis)}   # KR+US 이름 매핑
+            async with httpx.AsyncClient(timeout=15) as client:
+                for key, type_, country, dur in jobs:
+                    try:
+                        rows = await toss.fetch_rankings(
+                            client, type_, country, dur, count=10)
+                        for r in rows:
+                            r["name"] = names.get(r["symbol"], "")
+                        out[key] = rows
+                    except Exception as exc:
+                        logger.warning("[rankings] %s 실패: %s", key, exc)
+                    await asyncio.sleep(0.5)
+            await redis.set(MARKET_RANKINGS_KEY, json.dumps(out, ensure_ascii=False))
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] 랭킹 수집 실패: %s", exc)
+        await asyncio.sleep(600)
+
+
 async def universe_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     """전체 시장 유니버스(코스피/코스닥 종목마스터) — 하루 1회 갱신. 실패 시 관심종목 폴백."""
     if not kis.enabled:
@@ -675,6 +754,8 @@ async def main() -> None:
             toss_history_loop(redis, toss),
             toss_price_loop(redis, toss),
             us_history_loop(redis, toss),
+            indicators_loop(redis, toss),
+            rankings_loop(redis, toss),
         )
         # 여기 도달 = 모든 루프가 키 미설정으로 종료. 프로세스가 그냥 끝나면
         # restart 정책이 20초마다 재기동(크래시 루프처럼 보임) → idle로 살아있게 대기.

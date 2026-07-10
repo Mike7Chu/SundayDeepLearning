@@ -87,3 +87,19 @@ def test_build_coach_prompt_usd_holding():
     assert "NVDA, 미국) | 비중 50.0% | 평가 $10,000.00" in block
     assert "삼성전자(005930) | 비중 50.0%" in block
     assert "1달러 = 1,400.0원" in block
+
+
+def test_market_block_in_prompt():
+    from research.coach import market_block
+
+    ind = {"kospi": {"price": 8123.45, "change_pct": 0.52},
+           "kosdaq": {"price": 912.3},
+           "investor": {"kospi": {"date": "2026-07-09", "foreigner": 3800.0,
+                                  "institution": -800.0, "individual": -1500.0}}}
+    lines = market_block(ind)
+    assert any("코스피 8,123.45 (+0.52%)" in s for s in lines)
+    assert any("외국인 +3,800" in s and "기관 -800" in s for s in lines)
+    assert market_block(None) == []
+    # 프롬프트 전체에 시장 블록이 앞머리로 붙는다
+    block = build_coach_prompt(_snap(), None, {}, {}, [], {}, indicators=ind)
+    assert block.startswith("[시장 지표]")

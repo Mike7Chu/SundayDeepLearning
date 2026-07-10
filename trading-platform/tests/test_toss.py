@@ -157,3 +157,61 @@ def test_parse_order_normalizes():
     assert o["side"] == "BUY"
     assert o["status"] == "OPEN"
     assert o["order_type"] == "LIMIT"
+
+
+# ---------- v1.2.2 신규: 랭킹·시장지표·수급·조건주문 파서 ----------
+def test_parse_rankings():
+    from collector.stock.toss import parse_rankings
+
+    res = {"rankedAt": "2026-06-10T14:30:00+09:00", "rankings": [
+        {"rank": 1, "symbol": "005930", "currency": "KRW",
+         "price": {"lastPrice": "56500", "basePrice": "55800", "changeRate": "0.0125"},
+         "tradingVolume": "18432100", "tradingAmount": "1041436650000"},
+        {"rank": 2, "symbol": "NVDA", "currency": "USD",
+         "price": {"lastPrice": "131.38", "basePrice": "128.45", "changeRate": None},
+         "tradingVolume": "342100", "tradingAmount": "44942580"},
+    ]}
+    rows = parse_rankings(res)
+    assert rows[0]["symbol"] == "005930" and rows[0]["change_pct"] == 1.25
+    assert rows[0]["amount_eok"] == 10414.4          # 1조 414억
+    assert rows[1]["currency"] == "USD" and rows[1]["change_pct"] is None
+    assert parse_rankings({"rankedAt": None, "rankings": []}) == []
+
+
+def test_parse_indicator_prices_and_investor():
+    from collector.stock.toss import parse_indicator_prices, parse_investor_trading
+
+    out = parse_indicator_prices([
+        {"symbol": "KOSPI", "lastPrice": "2812.45"},
+        {"symbol": "KR_BOND_10Y", "lastPrice": "3.25"},
+    ])
+    assert out == {"KOSPI": 2812.45, "KR_BOND_10Y": 3.25}
+    inv = parse_investor_trading({"nextUntil": None, "records": [{
+        "date": "2026-06-11",
+        "individual": {"buyAmount": "5200000000000", "sellAmount": "5350000000000"},
+        "foreigner": {"buyAmount": "3800000000000", "sellAmount": "3600000000000"},
+        "institution": {"buyAmount": "2100000000000", "sellAmount": "2180000000000"},
+        "otherCorporation": {"buyAmount": "450000000000", "sellAmount": "420000000000"},
+    }]})
+    assert inv[0]["foreigner"] == 2000.0     # +2,000억 순매수
+    assert inv[0]["individual"] == -1500.0
+    assert inv[0]["institution"] == -800.0
+
+
+def test_parse_conditional_orders():
+    from collector.stock.toss import parse_conditional_orders
+
+    res = {"conditionalOrders": [{
+        "conditionalOrderId": "gaZIG", "type": "OCO", "status": "WATCHING",
+        "symbol": "005930", "market": "KR", "quantity": "100",
+        "orderType": "LIMIT", "expireDate": "2026-09-10",
+        "first": {"type": "STOP", "status": "WATCHING", "triggerPrice": "305",
+                  "orderPrice": "305", "triggeredOrderId": None},
+        "second": {"type": "STOP", "status": "WATCHING", "triggerPrice": "295",
+                   "orderPrice": "294.5", "triggeredOrderId": None},
+        "createdAt": "2026-06-12T09:00:00+09:00"}], "hasNext": False}
+    rows = parse_conditional_orders(res)
+    assert rows[0]["id"] == "gaZIG" and rows[0]["type"] == "OCO"
+    assert rows[0]["first"]["trigger"] == 305.0
+    assert rows[0]["second"]["price"] == 294.5
+

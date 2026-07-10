@@ -222,7 +222,7 @@ async function render(){
 }
 
 async function renderHome(){
-  const [q,v,sc,d,n,pf,eng,co]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine"),jget("/coach")]);
+  const [q,v,sc,d,n,pf,eng,co,mk]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine"),jget("/coach"),jget("/market")]);
   const quotes=q.rows||[], scores=sc.rows||[];
   const buys=scores.filter(r=>r.score>=60), sells=scores.filter(r=>r.score<45);
   const up=quotes.filter(r=>(r.change_pct||0)>0).length, dn=quotes.filter(r=>(r.change_pct||0)<0).length;
@@ -231,6 +231,10 @@ async function renderHome(){
   const autoEval=(pf&&pf.total_eval!=null)?(Number(pf.total_eval)+Number(pf.buying_power||pf.cash||0)):null;
   const cur=autoEval!=null?autoEval:Number(localStorage.getItem("curAsset")||0);
   const pct=Math.min(100,(cur/TARGET*100));
+  const IND=(mk&&mk.indicators)||{}, RK=(mk&&mk.rankings)||{};
+  const INVK=IND.investor&&IND.investor.kospi;
+  const idxRow=(lab,d)=>d&&d.price!=null?`<div class="row"><span>${lab}</span><b class="num">${numC(d.price)} ${d.change_pct!=null?`<span class="${d.change_pct>=0?'pos':'neg'}">${d.change_pct>=0?'+':''}${numC(d.change_pct)}%</span>`:''}</b></div>`:'';
+  const rkCard=(title,rows)=>(rows&&rows.length)?`<div class="card"><h3>${title}</h3>${rows.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.symbol}','${qesc(r.name||'')}')"><span>${r.name||r.symbol}</span><b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${numC(r.change_pct)}%</b></div>`).join("")}</div>`:'';
   const movers=[...quotes].sort((a,b)=>Math.abs(b.change_pct||0)-Math.abs(a.change_pct||0)).slice(0,5);
   const topval=(v.rows||[]).filter(r=>r.magic_rank!=null).slice(0,4);
   const topdiv=(d.rows||[]).filter(r=>r.yield_pct).slice(0,4);
@@ -248,11 +252,16 @@ async function renderHome(){
     </div>
     ${coachCardHTML(co)}
     <div class="card"><h3>시장 온도</h3>
+      ${idxRow("코스피",IND.kospi)}${idxRow("코스닥",IND.kosdaq)}
+      ${INVK&&INVK.foreigner!=null?`<div class="row"><span>외국인 순매수(코스피·${(INVK.date||'').slice(5)})</span><b class="${INVK.foreigner>=0?'pos':'neg'}">${INVK.foreigner>=0?'+':''}${numC(INVK.foreigner,0)}억</b></div>`:''}
+      ${INVK&&INVK.institution!=null?`<div class="row"><span>기관 순매수(코스피)</span><b class="${INVK.institution>=0?'pos':'neg'}">${INVK.institution>=0?'+':''}${numC(INVK.institution,0)}억</b></div>`:''}
       <div class="row"><span>관심종목</span><b>${quotes.length}</b></div>
       <div class="row"><span>상승 / 하락</span><b><span class="pos">${up}</span> / <span class="neg">${dn}</span></b></div>
       <div class="row"><span>매수후보(60+) / 회피(45-)</span><b><span class="buy">${buys.length}</span> / <span class="sell">${sells.length}</span></b></div>
       ${pf&&pf.fx_usdkrw?`<div class="row"><span>환율(달러)</span><b class="num">1$ = ${numC(pf.fx_usdkrw,1)}원</b></div>`:''}
     </div>
+    ${rkCard("🇰🇷 오늘 급등 TOP (전체 시장)",RK.kr_gainers)}
+    ${rkCard("🇺🇸 미국 급등 TOP (1일)",RK.us_gainers)}
     <div class="card"><h3>등락 TOP</h3>${movers.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span>
       <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</b></div>`).join("")||'<div class="empty">데이터 없음(KIS 키 필요)</div>'}</div>
     <div class="card"><h3>🎯 오늘의 매수 후보 (매력도)</h3>${buys.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name} <span class="badge">${r.verdict}</span></span><b class="num strong ${VC(r.score)}">${numC(r.score,0)}</b></div>`).join("")||'<div class="empty">후보 없음 (KIS 키 필요)</div>'}</div>
@@ -319,6 +328,8 @@ async function renderPortfolio(){
     return;
   }
   const hs=pf.holdings||[];
+  let oco=[];
+  if(pf.trading_enabled){ try{ oco=(await jget("/portfolio/oco")).rows||[]; }catch(e){} }
   const kpi=(k,v,cls="")=>`<div class="card" style="min-width:150px"><h3>${k}</h3><div class="kpi ${cls}">${v}</div></div>`;
   const pcls=(pf.pnl||0)>=0?"pos":"neg";
   $("portfolioBox").innerHTML=`
@@ -329,6 +340,7 @@ async function renderPortfolio(){
       ${kpi("매수여력", won(pf.buying_power))}
     </div>
     ${orderPanelHTML(pf)}
+    ${ocoPanelHTML(pf,oco)}
     <div class="scroll" id="pfTable"></div>`;
   dataTable("pfTable", [
     {label:"종목", key:"name", num:false, fmt:r=>`${r.name||r.symbol}<span class="num" style="opacity:.6"> ${r.symbol}</span>`},
@@ -359,6 +371,47 @@ function orderPanelHTML(pf){
       <button class="btn buy" onclick="submitOrder('BUY')">매수</button>
       <button class="btn sell" onclick="submitOrder('SELL')">매도</button>
     </div></div>`;
+}
+
+function ocoPanelHTML(pf,oco){
+  if(!pf.trading_enabled) return '';
+  const legTxt=l=>l&&l.trigger!=null?numC(l.trigger):'–';
+  const rows=(oco||[]).map(r=>`<div class="row"><span>${r.symbol} ${r.type} <span class="badge">${r.status}</span> 목표 ${legTxt(r.first)} / 손절 ${legTxt(r.second)} · ${r.qty!=null?numC(r.qty,0)+'주':''} · ~${r.expire||''}</span>
+    <button class="btn sell" onclick="cancelOco('${qesc(r.id)}')">취소</button></div>`).join("");
+  return `<div class="card" style="grid-column:1/-1;margin-bottom:12px">
+    <h3>자동 익절·손절 (OCO 조건주문) <span class="badge" title="목표가에 닿으면 익절 매도, 손절가로 떨어지면 손절 매도 — 토스 서버가 실시간 감시해 하나가 실행되면 다른 쪽은 자동 취소돼요. 매매 가격 가이드의 목표가/손절가를 그대로 쓰면 됩니다">?</span></h3>
+    <div class="arow" style="flex-wrap:wrap;gap:8px">
+      <input id="ocoSym" placeholder="005930 또는 NVDA" style="width:140px">
+      <input id="ocoQty" type="number" placeholder="수량" style="width:80px">
+      <input id="ocoTarget" type="number" step="any" placeholder="목표가(익절)" style="width:110px">
+      <input id="ocoStop" type="number" step="any" placeholder="손절가" style="width:100px">
+      <input id="ocoExp" type="date" style="width:140px">
+      <button class="btn buy" onclick="submitOco()">등록</button>
+    </div>
+    ${rows?`<div style="margin-top:8px">${rows}</div>`:'<div class="num" style="margin-top:6px">등록된 조건주문 없음</div>'}</div>`;
+}
+async function submitOco(){
+  const symbol=$("ocoSym").value.trim(), quantity=Number($("ocoQty").value),
+        target=Number($("ocoTarget").value), stop=Number($("ocoStop").value),
+        expire_date=$("ocoExp").value;
+  if(!symbol||!(quantity>0)||!(target>0)||!(stop>0)||!expire_date){ alert("종목·수량·목표가·손절가·만료일을 모두 입력하세요"); return; }
+  if(!(target>stop)){ alert("목표가는 손절가보다 높아야 해요 (목표가 > 현재가 > 손절가)"); return; }
+  if(!confirm(`OCO 등록 — ${symbol} ${quantity}주\n목표 ${fmt(target)} 도달 시 익절 매도 / 손절 ${fmt(stop)} 이탈 시 손절 매도\n토스 서버가 자동 실행합니다. 진행할까요?`)) return;
+  try{
+    const r=await fetch("/portfolio/oco",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({symbol,quantity,target,stop,expire_date})});
+    const d=await r.json();
+    if(!r.ok){ alert("등록 실패: "+(d.detail||r.status)); return; }
+    alert("조건주문 등록됨: "+(d.conditional_order_id||"OK")); renderPortfolio();
+  }catch(e){ alert("오류: "+e.message); }
+}
+async function cancelOco(id){
+  if(!confirm("이 조건주문을 취소할까요?")) return;
+  try{
+    const r=await fetch("/portfolio/oco/"+encodeURIComponent(id)+"/cancel",{method:"POST"});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); alert("취소 실패: "+(d.detail||r.status)); return; }
+    renderPortfolio();
+  }catch(e){ alert("오류: "+e.message); }
 }
 
 async function submitOrder(side){

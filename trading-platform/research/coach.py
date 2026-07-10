@@ -18,6 +18,7 @@ from shared.redis_keys import (
     DART_RECENT_KEY,
     ENGINE_RISK_KEY,
     FX_USDKRW_KEY,
+    MARKET_INDICATORS_KEY,
     TOSS_ACCOUNT_KEY,
     TOSS_HOLDINGS_KEY,
 )
@@ -41,10 +42,35 @@ def _pct(part: float, total: float) -> float:
     return round(part / total * 100, 1) if total else 0.0
 
 
+def market_block(ind: dict | None) -> list[str]:
+    """시장 지표(지수·투자자별 수급) → 프롬프트 라인(순수 함수). 없으면 빈 리스트."""
+    if not isinstance(ind, dict):
+        return []
+    lines: list[str] = []
+    idx = []
+    for sym, label in (("kospi", "코스피"), ("kosdaq", "코스닥")):
+        d = ind.get(sym) or {}
+        if d.get("price") is not None:
+            chg = (f" ({d['change_pct']:+.2f}%)"
+                   if d.get("change_pct") is not None else "")
+            idx.append(f"{label} {d['price']:,.2f}{chg}")
+    if idx:
+        lines.append("[시장 지표] " + " · ".join(idx))
+    inv = (ind.get("investor") or {}).get("kospi")
+    if isinstance(inv, dict) and inv.get("foreigner") is not None:
+        lines.append(
+            f"[수급 — 코스피 투자자별 순매수({inv.get('date', '최근일')}, 억원)] "
+            f"외국인 {inv['foreigner']:+,.0f} · "
+            f"기관 {(inv.get('institution') or 0):+,.0f} · "
+            f"개인 {(inv.get('individual') or 0):+,.0f}")
+    return lines
+
+
 def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
                        details: dict[str, dict], filings: list[dict],
                        risk: dict, today: str = "",
-                       fx_usdkrw: float | None = None) -> str:
+                       fx_usdkrw: float | None = None,
+                       indicators: dict | None = None) -> str:
     """보유 스냅샷 + 목표 + 종목 정량 + 공시 + 리스크 → 데이터 블록(순수 함수).
 
     details: {종목코드: {"score","verdict","ni_growth_q_pct","ni_growth_q_label",
@@ -60,7 +86,8 @@ def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
         return ev
 
     total = sum(_krw(h) for h in hs)
-    lines = [f"[내 실계좌 — {today or '오늘'} 기준]" if today else "[내 실계좌]"]
+    lines = market_block(indicators)
+    lines.append(f"[내 실계좌 — {today or '오늘'} 기준]" if today else "[내 실계좌]")
     te = snap.get("total_eval") or total
     lines.append(f"- 총 평가액: {te:,.0f}원"
                  + (f" · 현금(매수여력): {cash:,.0f}원" if cash else ""))
@@ -176,6 +203,13 @@ async def gather_coach(redis: aioredis.Redis) -> str | None:
                 "ni_growth_q_pct": sd.ni_growth_q_pct,
                 "ni_growth_q_label": sd.ni_growth_q_label,
             }
+    ind = None
+    ind_raw = await redis.get(MARKET_INDICATORS_KEY)
+    if ind_raw:
+        try:
+            ind = json.loads(ind_raw)
+        except (json.JSONDecodeError, TypeError):
+            ind = None
     today = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return build_coach_prompt(snap, cash, goal, details, filings, risk, today,
-                              fx_usdkrw=fx)
+                              fx_usdkrw=fx, indicators=ind)

@@ -54,6 +54,13 @@ RESEARCH_INV_KEY = "research:inversion"
 # USD/KRW 환율(토스 exchange-rate, 포트폴리오 루프가 갱신). json{rate, ts}
 FX_USDKRW_KEY = "fx:usdkrw"
 
+# 시장 지표(토스 v1.2.2): 지수·수급. json{kospi:{price,change_pct}, kosdaq:{...},
+#   investor:{kospi:{foreigner,institution,individual,date}, kosdaq:{...}}, ts}
+MARKET_INDICATORS_KEY = "market:indicators"
+# 시장 랭킹(토스 v1.2.2). json{kr_gainers:[...], us_gainers:[...], kr_amount:[...],
+#   us_amount:[...], ts} — 각 항목 parse_rankings 형식
+MARKET_RANKINGS_KEY = "market:rankings"
+
 # AI 포트폴리오 코치(아침 점검). report=json{report,ts,...}, goal=json{target_pct,deadline,memo},
 # requests=set(온디맨드 '지금 점검' 요청 — 호스트 research가 처리)
 COACH_KEY = "coach:report"

@@ -156,6 +156,42 @@ class TossClient:
         return await self._get(client, "/api/v1/exchange-rate",
                              params={"baseCurrency": base, "quoteCurrency": quote})
 
+    async def fetch_rankings(self, client: httpx.AsyncClient, type_: str,
+                             market_country: str, duration: str = "1d",
+                             count: int = 10) -> list[dict]:
+        """주식 랭킹(v1.2.2) — 급상승/급하락·거래대금/거래량 상위. KR·US 지원.
+
+        type_: MARKET_TRADING_AMOUNT|MARKET_TRADING_VOLUME|TOP_GAINERS|TOP_LOSERS|
+        TOSS_SECURITIES_*. (TOP_GAINERS/LOSERS는 duration=realtime 미지원 → 1d 기본)
+        """
+        res = await self._get(client, "/api/v1/rankings",
+                              params={"type": type_, "marketCountry": market_country,
+                                      "duration": duration, "count": count})
+        return parse_rankings(res)
+
+    async def fetch_indicator_prices(self, client: httpx.AsyncClient,
+                                     symbols: list[str]) -> dict[str, float]:
+        """시장 지표 현재가(v1.2.2) — KOSPI/KOSDAQ 지수·국채 금리."""
+        res = await self._get(client, "/api/v1/market-indicators/prices",
+                              params={"symbols": ",".join(symbols)})
+        return parse_indicator_prices(res)
+
+    async def fetch_indicator_candles(self, client: httpx.AsyncClient, symbol: str,
+                                      count: int = 2) -> list[dict]:
+        """시장 지표 일봉(v1.2.2) — 지수 전일종가(등락률 계산용)."""
+        res = await self._get(client, f"/api/v1/market-indicators/{symbol}/candles",
+                              params={"interval": "1d", "count": count})
+        return parse_candles(res)
+
+    async def fetch_investor_trading(self, client: httpx.AsyncClient,
+                                     symbol: str = "KOSPI",
+                                     count: int = 1) -> list[dict]:
+        """투자자별 매매대금(v1.2.2) — 개인/외국인/기관 순매수(KRX 일별, 최신순)."""
+        res = await self._get(
+            client, f"/api/v1/market-indicators/{symbol}/investor-trading",
+            params={"interval": "1d", "count": count})
+        return parse_investor_trading(res)
+
     async def fetch_open_orders(self, client: httpx.AsyncClient, account: str,
                                 status: str = "OPEN") -> list[dict]:
         res = await self._get(client, "/api/v1/orders",
@@ -172,10 +208,11 @@ class TossClient:
                           symbol: str, side: str, quantity: float,
                           price: float | None = None,
                           order_type: str = "LIMIT") -> dict:
+        # v1.2.2 스펙: quantity/price는 문자열(decimal) 형식
         body = {"symbol": symbol, "side": side.upper(),
-                "quantity": quantity, "orderType": order_type.upper()}
+                "quantity": f"{quantity:g}", "orderType": order_type.upper()}
         if price is not None:
-            body["price"] = price
+            body["price"] = f"{price:g}"
         return parse_order(await self._post(
             client, "/api/v1/orders", json=body, account=account))
 
@@ -186,14 +223,52 @@ class TossClient:
 
     async def modify_order(self, client: httpx.AsyncClient, account: str,
                            order_id: str, *, quantity: float | None = None,
-                           price: float | None = None) -> dict:
-        body: dict = {}
+                           price: float | None = None,
+                           order_type: str = "LIMIT") -> dict:
+        body: dict = {"orderType": order_type.upper()}   # v1.2.2 스펙상 필수
         if quantity is not None:
-            body["quantity"] = quantity
+            body["quantity"] = f"{quantity:g}"
         if price is not None:
-            body["price"] = price
+            body["price"] = f"{price:g}"
         return parse_order(await self._post(
             client, f"/api/v1/orders/{order_id}/modify", json=body, account=account))
+
+    # ---- 조건주문 (v1.2.2, 게이트 동일 — 서버가 감시가 도달 시 자동 주문) ----
+    async def place_oco_order(self, client: httpx.AsyncClient, account: str, *,
+                              symbol: str, quantity: float, target: float,
+                              stop: float, expire_date: str) -> dict:
+        """OCO 매도 조건주문: 목표가(target) 익절 + 손절가(stop) 손절 동시 감시.
+
+        하나가 발동하면 반대편은 자동 취소. 스펙 제약: first 감시가 > 현재가 >
+        second 감시가, 둘 다 SELL, 지정가(LIMIT)만. 가격은 문자열(decimal) 전송.
+        """
+        body = {
+            "symbol": symbol, "type": "OCO", "quantity": f"{quantity:g}",
+            "orderType": "LIMIT", "expireDate": expire_date,
+            "first": {"orderSide": "SELL", "triggerPrice": f"{target:g}",
+                      "orderPrice": f"{target:g}"},
+            "second": {"orderSide": "SELL", "triggerPrice": f"{stop:g}",
+                       "orderPrice": f"{stop:g}"},
+        }
+        res = await self._post(client, "/api/v1/conditional-orders",
+                               json=body, account=account)
+        return {"conditional_order_id": (res or {}).get("conditionalOrderId")}
+
+    async def fetch_conditional_orders(self, client: httpx.AsyncClient, account: str,
+                                       status: str = "OPEN") -> list[dict]:
+        res = await self._get(client, "/api/v1/conditional-orders",
+                              params={"status": status}, account=account)
+        return parse_conditional_orders(res)
+
+    async def cancel_conditional_order(self, client: httpx.AsyncClient, account: str,
+                                       cond_id: str) -> bool:
+        token = await self._token_value(client)
+        r = await client.delete(f"{self.base}/api/v1/conditional-orders/{cond_id}",
+                                headers=self._headers(token, account))
+        if r.status_code == 204:
+            return True
+        _json_or_raise(r)   # 에러 봉투면 TossError
+        return True
 
 
 # ===== 순수 함수 (네트워크 無 · 유닛테스트) =================================
@@ -336,6 +411,89 @@ def parse_prices(res) -> list[dict]:
             "symbol": str(_first(p, "symbol", "code", "ticker") or ""),
             "price": _f(_first(p, "lastPrice", "price", "currentPrice")),
             "change_pct": _f(_first(p, "changeRate", "changePercent", "fluctuationRate")),
+        })
+    return out
+
+
+def parse_rankings(res) -> list[dict]:
+    """랭킹(v1.2.2) → [{rank, symbol, price, change_pct, volume, amount_eok}].
+
+    changeRate는 소수비율(0.0125=1.25%) → ×100. 거래대금은 억(현지통화) 환산.
+    """
+    out: list[dict] = []
+    if not isinstance(res, dict):
+        return out
+    for r in res.get("rankings") or []:
+        p = r.get("price") or {}
+        amt = _f(r.get("tradingAmount"))
+        rate = _f(p.get("changeRate"))
+        out.append({
+            "rank": r.get("rank"),
+            "symbol": str(r.get("symbol") or ""),
+            "currency": r.get("currency") or "KRW",
+            "price": _f(p.get("lastPrice")),
+            "change_pct": round(rate * 100, 2) if rate is not None else None,
+            "amount_eok": round(amt / 1e8, 1) if amt is not None else None,
+        })
+    return out
+
+
+def parse_indicator_prices(res) -> dict[str, float]:
+    """시장 지표 현재가(v1.2.2) → {symbol: lastPrice}. (KOSPI 포인트, 국채 %)"""
+    out: dict[str, float] = {}
+    for it in _as_list(res, "prices", "items"):
+        sym = str(it.get("symbol") or "")
+        v = _f(it.get("lastPrice"))
+        if sym and v is not None:
+            out[sym] = v
+    return out
+
+
+def parse_investor_trading(res) -> list[dict]:
+    """투자자별 매매대금(v1.2.2) → [{date, individual, foreigner, institution,
+    other} — 각 순매수(매수-매도, 억원)]. 최신순."""
+    out: list[dict] = []
+    if not isinstance(res, dict):
+        return out
+
+    def net_eok(o: dict | None) -> float | None:
+        if not isinstance(o, dict):
+            return None
+        b, s = _f(o.get("buyAmount")), _f(o.get("sellAmount"))
+        if b is None or s is None:
+            return None
+        return round((b - s) / 1e8, 0)
+
+    for rec in res.get("records") or []:
+        out.append({
+            "date": rec.get("date"),
+            "individual": net_eok(rec.get("individual")),
+            "foreigner": net_eok(rec.get("foreigner")),
+            "institution": net_eok(rec.get("institution")),
+            "other": net_eok(rec.get("otherCorporation")),
+        })
+    return out
+
+
+def parse_conditional_orders(res) -> list[dict]:
+    """조건주문 목록(v1.2.2) → 요약 [{id, type, status, symbol, qty, first, second}]."""
+    out: list[dict] = []
+    if not isinstance(res, dict):
+        return out
+
+    def leg(o: dict | None) -> dict | None:
+        if not isinstance(o, dict):
+            return None
+        return {"status": o.get("status"), "trigger": _f(o.get("triggerPrice")),
+                "price": _f(o.get("orderPrice"))}
+
+    for c in res.get("conditionalOrders") or []:
+        out.append({
+            "id": c.get("conditionalOrderId"), "type": c.get("type"),
+            "status": c.get("status"), "symbol": str(c.get("symbol") or ""),
+            "market": c.get("market"), "qty": _f(c.get("quantity")),
+            "expire": c.get("expireDate"),
+            "first": leg(c.get("first")), "second": leg(c.get("second")),
         })
     return out
 

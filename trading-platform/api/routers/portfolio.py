@@ -140,6 +140,76 @@ async def place_order(req: OrderRequest) -> dict:
         raise HTTPException(502, f"토스 주문 오류: {exc.message}")
 
 
+class OcoRequest(BaseModel):
+    """자동 익절·손절(OCO): 목표가 도달 시 익절 매도 + 손절가 이탈 시 손절 매도.
+
+    토스 서버가 실시간 감시 — 엔진 알림(10분 주기)보다 빠르고, 앱을 안 봐도 실행.
+    """
+    symbol: str
+    quantity: float
+    target: float             # 목표가(익절 매도 감시가) — 현재가보다 높아야 함
+    stop: float               # 손절가(손절 매도 감시가) — 현재가보다 낮아야 함
+    expire_date: str          # 만료일 YYYY-MM-DD
+
+
+@router.post("/portfolio/oco")
+async def place_oco(req: OcoRequest) -> dict:
+    """OCO 조건주문 등록(게이트). 매도 전용이라 주문금액 한도는 미적용.
+
+    (한도는 '돈이 나가는' 매수 보호 장치 — 보유분 매도 예약은 리스크를 줄이는
+    방향이므로 키+실매매 플래그만 검증. 리스크 실드도 매도는 항상 허용.)
+    """
+    if not _toss.enabled:
+        raise HTTPException(403, "토스 키 미설정 (.env TOSS_CLIENT_ID/SECRET)")
+    if not settings.toss_trading_enabled:
+        raise HTTPException(403, "실매매 비활성 — TOSS_TRADING_ENABLED=true 필요")
+    if req.quantity <= 0 or req.stop <= 0 or req.target <= req.stop:
+        raise HTTPException(400, "target > stop > 0, quantity > 0 이어야 함")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            account = await _toss.resolve_account_seq(client)
+            if not account:
+                raise HTTPException(502, "토스 계좌 조회 실패")
+            res = await _toss.place_oco_order(
+                client, account, symbol=req.symbol, quantity=req.quantity,
+                target=req.target, stop=req.stop, expire_date=req.expire_date)
+        return {"ok": True, **res}
+    except TossError as exc:
+        raise HTTPException(502, f"토스 거부: {exc.message}")
+
+
+@router.get("/portfolio/oco")
+async def list_oco(status: str = "OPEN") -> dict:
+    """등록된 조건주문 조회(읽기 — 앱에서 등록한 것도 포함)."""
+    if not _toss.enabled:
+        return {"rows": [], "enabled": False}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            account = await _toss.resolve_account_seq(client)
+            if not account:
+                return {"rows": [], "enabled": True}
+            rows = await _toss.fetch_conditional_orders(client, account, status)
+        return {"rows": rows, "enabled": True}
+    except TossError as exc:
+        raise HTTPException(502, f"토스 오류: {exc.message}")
+
+
+@router.post("/portfolio/oco/{cond_id}/cancel")
+async def cancel_oco(cond_id: str) -> dict:
+    """조건주문 취소(게이트)."""
+    if not settings.toss_trading_enabled:
+        raise HTTPException(403, "실매매 비활성 — TOSS_TRADING_ENABLED=true 필요")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            account = await _toss.resolve_account_seq(client)
+            if not account:
+                raise HTTPException(502, "토스 계좌 조회 실패")
+            await _toss.cancel_conditional_order(client, account, cond_id)
+        return {"ok": True}
+    except TossError as exc:
+        raise HTTPException(502, f"토스 거부: {exc.message}")
+
+
 @router.post("/portfolio/order/{order_id}/cancel")
 async def cancel_order(order_id: str) -> dict:
     """주문 취소(게이트). 실매매 활성 상태에서만."""
