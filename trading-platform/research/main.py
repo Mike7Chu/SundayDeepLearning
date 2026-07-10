@@ -36,10 +36,9 @@ logger = logging.getLogger("research")
 
 
 def brief(report: dict) -> str:
-    """리포트에서 텔레그램 브리핑 문구 추출(앞부분 발췌)."""
-    head = (report.get("report") or "").strip().splitlines()
-    snippet = "\n".join(head[:6]) if head else "(내용 없음)"
-    return f"🧠가치투자 리서치 {report.get('name','')}({report.get('code','')})\n{snippet}"
+    """리포트 텔레그램 문구 — 전문 그대로(발송은 send_long이 잘리지 않게 분할)."""
+    body = (report.get("report") or "").strip() or "(내용 없음)"
+    return f"🧠가치투자 리서치 {report.get('name','')}({report.get('code','')})\n{body}"
 
 
 async def run_one(redis: aioredis.Redis, analyst: Analyst, sender: TelegramSender,
@@ -52,7 +51,7 @@ async def run_one(redis: aioredis.Redis, analyst: Analyst, sender: TelegramSende
     report = await analyst.analyze(data)
     await redis.hset(RESEARCH_KEY, code, json.dumps(report, ensure_ascii=False))
     if report.get("enabled"):
-        await sender.send(brief(report))
+        await sender.send_long(brief(report))   # 전문 발송(4096자 한도 분할)
     return report
 
 
@@ -116,7 +115,7 @@ async def run() -> None:
         result = await analyst.analyze_coach(block)
         await redis.set(COACH_KEY, json.dumps(result, ensure_ascii=False))
         if result.get("enabled") and not result["report"].startswith("⚠️"):
-            await sender.send(result["report"][:3500])
+            await sender.send_long(result["report"])   # 전문 발송(잘림 없이 분할)
         logger.info("[coach] 아침 점검 완료(%s)", reason)
 
     async def coach_last_ts() -> float:
