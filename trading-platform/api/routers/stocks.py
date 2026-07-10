@@ -166,6 +166,7 @@ async def stock_detail(code: str) -> dict:
     미수집이면 토스/DART에서 온디맨드 수집 후 계산(캐시 저장).
     """
     redis = get_redis()
+    code = code if code.isdigit() else code.upper()   # 미국 티커 대문자 통일
     raw = await redis.hget(STOCK_QUOTE_KEY, code) or await redis.hget(STOCK_MARKET_KEY, code)
     quote = json.loads(raw) if raw else {"code": code}
     # 일봉: 저장분 → 없으면 토스 온디맨드
@@ -195,8 +196,24 @@ async def stock_detail(code: str) -> dict:
                       "high_52w": quote.get("high_52w") or m.get("high_52w"),
                       "low_52w": quote.get("low_52w") or m.get("low_52w")})
     kr = is_kr_code(code)
-    if not kr and not quote.get("currency"):
+    if not kr:
         quote["currency"] = "USD"   # 미국 티커 — UI 통화 표시
+        # 이름·주식수 온디맨드 보강(토스) → 시총 계산 + 이후 종목 탭 검색에 뜨도록 저장
+        if not quote.get("name") and _toss.enabled:
+            try:
+                async with httpx.AsyncClient(timeout=15) as tc:
+                    meta = (await _toss.fetch_stocks(tc, [code])).get(code) or {}
+                if meta.get("name"):
+                    quote["name"] = meta["name"]
+                if meta.get("shares"):
+                    quote["shares"] = meta["shares"]
+            except Exception:
+                pass
+        if quote.get("price") and quote.get("shares") and not quote.get("market_cap"):
+            quote["market_cap"] = round(quote["price"] * quote["shares"] / 1e8, 1)
+        if quote.get("price"):   # 한 번 조회한 미국 종목은 목록·검색에 재등장
+            await redis.hset(STOCK_QUOTE_KEY, code,
+                             _json.dumps(quote, ensure_ascii=False))
     sig = ({"code": code, "name": quote.get("name", ""), **evaluate_signals(closes)}
            if len(closes) >= 20 else None)
     score = compute_score(quote, closes)

@@ -510,7 +510,12 @@ async def toss_history_loop(redis: aioredis.Redis, toss: TossClient) -> None:
                 for h in held if h.get("symbol") and h["symbol"] not in wset]
             codes = [w["code"] for w in watch]
             async with httpx.AsyncClient(timeout=20) as client:
-                info = await toss.fetch_stocks(client, codes)
+                try:
+                    info = await toss.fetch_stocks(client, codes)
+                except Exception as exc:
+                    # 종목정보 일괄 실패가 일봉 수집 전체를 막지 않게(이름·시총만 결손)
+                    logger.warning("[toss] 종목정보 일괄 실패(%s) — 일봉은 계속", exc)
+                    info = {}
                 for w in watch:
                     code = w["code"]
                     try:
@@ -550,7 +555,17 @@ async def toss_price_loop(redis: aioredis.Redis, toss: TossClient) -> None:
         try:
             codes = [w["code"] for w in await effective_watchlist(redis)]
             async with httpx.AsyncClient(timeout=15) as client:
-                prices = await toss.fetch_prices(client, codes)
+                try:
+                    prices = await toss.fetch_prices(client, codes)
+                except Exception as exc:
+                    # 잘못된 심볼 1개가 일괄 호출을 깨면 전 종목이 멈춤 → 종목별 재시도
+                    logger.warning("[toss] 시세 일괄 실패(%s) — 종목별 재시도", exc)
+                    prices = []
+                    for c in codes:
+                        try:
+                            prices += await toss.fetch_prices(client, [c])
+                        except Exception as e2:
+                            logger.warning("[DATA_ERROR] %s 시세 실패: %s", c, e2)
             n = 0
             for p in prices:
                 price = p.get("price")

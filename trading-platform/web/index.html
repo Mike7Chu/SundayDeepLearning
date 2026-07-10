@@ -157,6 +157,11 @@ const HELP={
   divy:"1년 배당을 주가로 나눈 비율", div:"1주당 받는 배당금",
 };
 const TARGET=10000000000;   // 100억
+// 미국 주요 종목 한글명 → 티커 (미장은 유니버스가 없어 검색 보조용)
+const USMAP={"엔비디아":"NVDA","애플":"AAPL","마이크로소프트":"MSFT","아마존":"AMZN","구글":"GOOGL","알파벳":"GOOGL","메타":"META","테슬라":"TSLA","브로드컴":"AVGO","TSMC":"TSM","티에스엠씨":"TSM","넷플릭스":"NFLX","인텔":"INTC","마이크론":"MU","퀄컴":"QCOM","팔란티어":"PLTR","코카콜라":"KO","버크셔":"BRK.B","일라이릴리":"LLY","비자":"V","마스터카드":"MA","월마트":"WMT","코스트코":"COST","오라클":"ORCL","엑슨모빌":"XOM","JP모건":"JPM","존슨앤존슨":"JNJ","AMD":"AMD","IBM":"IBM"};
+function usTicker(t){ if(!t) return null; const s=t.replace(/\s/g,"");
+  if(/^[A-Za-z]{1,6}(\.[A-Za-z]{1,2})?$/.test(s)) return s.toUpperCase();
+  return USMAP[s]||null; }
 
 function tableHTML(head, body){
   return `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead>
@@ -376,7 +381,11 @@ const pctFmt=(k)=>(r)=>r[k]==null?"–":`${r[k]>=0?"+":""}${numC(r[k])}%`;
 
 async function renderStocks(){
   const rows=((await jget("/stocks/all")).rows||[]).filter(r=>match(r.name)||match(r.code));
-  dataTable("stocksBox", [
+  const tick=usTicker(term());
+  const usBtn=(tick&&!rows.some(r=>(r.code||"")===tick))
+    ?`<div class="card" style="margin-bottom:8px"><div class="row"><span>🇺🇸 미국 종목은 티커로 바로 조회할 수 있어요 — 한 번 열어보면 목록·검색에도 추가돼요</span><button class="btn buy" onclick="openStock('${tick}','')">${tick} 바로 조회</button></div></div>`:"";
+  $("stocksBox").innerHTML=usBtn+'<div id="stocksTbl"></div>';
+  dataTable("stocksTbl", [
     {label:"종목", key:"name", num:false, fmt:nameCell},
     {label:"현재가", key:"price", hint:HELP.price, fmt:r=>r.currency==="USD"?money(r.price,"USD"):fmt(r.price), cls:()=>"num strong"},
     {label:"등락률", key:"change_pct", hint:HELP.change, fmt:pctFmt("change_pct"), cls:pctCls("change_pct")},
@@ -517,6 +526,7 @@ async function openStock(code,name){
   try{
     const d=await jget("/stocks/"+encodeURIComponent(code));
     const Q=d.quote||{}, S=d.signal, D=d.dividend;
+    if(!name&&Q.name) $("mTitle").textContent=`${Q.name} (${code})`;   // 온디맨드 조회 시 이름 보강
     const US=Q.currency==="USD", MN=(v)=>US?money(v,"USD"):fmt(v)+"원";
     const fund=`<div class="cgrid">${kv("현재가",MN(Q.price),HELP.price)}${kv("등락률",Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–",HELP.change)}
       ${kv("PER",numC(Q.per),HELP.per)}${kv("PBR",numC(Q.pbr),HELP.pbr)}${kv("EPS",numC(Q.eps,0),HELP.eps)}${kv("BPS",numC(Q.bps,0),HELP.bps)}
@@ -553,7 +563,8 @@ async function openStock(code,name){
       <div class="num" style="margin-top:6px">손실은 -${numC(-L.stop_pct,1)}%에서 자르고, 이익은 그 2배(+${numC(L.target_pct,1)}%)를 노리는 구조예요. 판단 보조이며 매매 신호가 아닙니다.</div>`
       :`<div class="empty">가격 가이드 ${collectHint}</div>`;
     const hist=(D&&D.history&&D.history.length)?`<div class="scroll" style="margin-top:8px">${tableHTML(["연도","1주당 배당금","수익률"], D.history.map(h=>`<tr><td>${h.year}년</td><td class="num">${numC(h.per_share,0)}원</td><td class="num pos">${h.yield_pct!=null?h.yield_pct+"%":"–"}</td></tr>`).join(""))}</div>`:'';
-    const dvH=(D&&(D.yield_pct!=null||hist))?`<div class="cgrid">${kv("배당수익률",D.yield_pct!=null?D.yield_pct+"%":"–",HELP.divy)}${kv("1주당 배당금",numC(D.annual_per_share,0)+"원",HELP.div)}${kv("다음 배당일",D.next_ex_date||"–")}</div>${hist}`:`<div class="empty">배당금 ${collectHint}</div>`;
+    const dvH=US?`<div class="empty">미국 종목은 배당 이력을 아직 지원하지 않아요(국내 공시 DART 전용). 테슬라처럼 배당을 아예 안 주는 회사도 많아요.</div>`
+      :(D&&(D.yield_pct!=null||hist))?`<div class="cgrid">${kv("배당수익률",D.yield_pct!=null?D.yield_pct+"%":"–",HELP.divy)}${kv("1주당 배당금",numC(D.annual_per_share,0)+"원",HELP.div)}${kv("다음 배당일",D.next_ex_date||"–")}</div>${hist}`:`<div class="empty">배당금 ${collectHint}</div>`;
     const wbtn=d.in_watchlist?'<span class="badge pos">✓ 내 관심종목</span>':`<button class="btn buy" onclick="addWatchModal('${qesc(code)}','${qesc(name)}')">＋ 관심종목에 담기</button>`;
     $("mBody").innerHTML=`<div class="arow" style="margin-bottom:8px">${wbtn}</div>
       <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}
