@@ -63,6 +63,10 @@ async def stocks_score(limit: int = 200) -> dict:
     """투자 매력도 랭킹 — 가치·품질·모멘텀·타이밍 통합 0~100 + 판정. 전체시장∪관심."""
     redis = get_redis()
     quotes = [q for q in await load_quotes(redis) if q.get("price") and q.get("code")]
+    # 미국(재무 미확보): 가치·품질·성장 축이 0이라 점수가 '회피'로 왜곡 → 랭킹 제외.
+    # (개별 조회는 상세 모달에서 추세·타이밍 참고용으로 표시. KIS 해외 재무 연동 시 포함 예정)
+    quotes = [q for q in quotes
+              if not (q.get("currency") == "USD" and q.get("eps") is None)]
     codes = [q["code"] for q in quotes]
     closes_map: dict[str, list] = {}
     if codes:

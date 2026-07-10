@@ -538,12 +538,13 @@ async function openStock(code,name){
     const bar=(lab,val,max)=>`<div class="row"><span style="width:56px">${lab}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:${Math.max(0,Math.min(100,(val||0)/max*100))}%"></i></div><b class="num">${numC(val,0)}/${max}</b></div>`;
     const growCaveat=(SC.margin_pct!=null&&SC.margin_pct<0&&(SC.ni_growth_pct||0)>=15)?' <span class="num">(이익이 크게 느는 성장주는 가치 기준으로 비싸 보일 수 있어요)</span>':'';
     const marginTxt=SC.margin_pct==null?"":(SC.margin_pct>0?`<b class="pos">적정가보다 ${numC(SC.margin_pct,0)}% 싸요</b>`:`<b class="neg">그레이엄 가치 기준 ${numC(-SC.margin_pct,0)}% 비싸요</b>${growCaveat}`);
+    const usScoreNote=US?`<div class="num" style="margin-top:6px">🇺🇸 미국 종목은 재무(가치·품질·성장) 데이터가 아직 없어 점수는 <b>추세·타이밍만</b> 반영돼요 — 낮게 나와도 회사가 나쁘다는 뜻이 아니에요. 참고용으로만 보세요.</div>`:"";
     const scoreH=SC.score!=null?`<div class="card" style="margin-bottom:10px">
       <div class="kpi ${VC(SC.score)}">${numC(SC.score,0)}<span class="u">점 / 100 · ${SC.verdict||''}</span></div>
       <div class="num" style="margin:2px 0 8px">${HELP.score}. ${marginTxt}</div>
       ${bar("가치",SC.value,30)}${bar("품질",SC.quality,20)}${bar("성장",SC.growth,15)}${bar("추세",SC.momentum,25)}${bar("타이밍",SC.timing,10)}
       <div class="num" style="margin-top:6px">싼가·튼튼한가·크는가·오르는가·살 때인가를 종합. ${(SC.reasons||[]).join(" · ")}</div>
-      ${SC.has_chart?"":'<div class="num" style="opacity:.7">※ 차트 미수집 — 관심종목 추가하면 추세·타이밍도 반영돼요</div>'}</div>`:'';
+      ${SC.has_chart?"":'<div class="num" style="opacity:.7">※ 차트 미수집 — 관심종목 추가하면 추세·타이밍도 반영돼요</div>'}${usScoreNote}</div>`:'';
     // 주가흐름은 위 종합점수의 '추세' 축과 같은 기준으로 표시(판정 이중화 방지).
     const align=(S&&S.sma20!=null&&S.sma60!=null)?(S.sma20>S.sma60?'정배열(상승 배열)':'역배열(하락 배열)'):'–';
     const smaTxt=align+(S&&S.sma_cross==='golden'?' · 골든크로스':S&&S.sma_cross==='dead'?' · 데드크로스':'');
