@@ -192,3 +192,16 @@ def test_load_quotes_merge_and_value():
         await redis.aclose()
 
     asyncio.run(run())
+
+
+def test_load_us_universe():
+    from collector.stock.us_master import load_us_universe
+
+    us = load_us_universe()
+    assert len(us) >= 80                      # 주요 종목 커버
+    codes = {u["code"] for u in us}
+    assert {"NVDA", "AAPL", "TSLA", "MSFT"} <= codes
+    assert all(u["market"] == "US" for u in us)
+    assert all(u["code"] == u["code"].upper() for u in us)
+    nvda = next(u for u in us if u["code"] == "NVDA")
+    assert nvda["name"] == "엔비디아"

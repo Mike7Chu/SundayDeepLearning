@@ -19,6 +19,7 @@ from collector.stock.kis import KISClient, effective_watchlist, is_kr_code, load
 from notifier.telegram import TelegramSender
 from collector.stock.kis_master import fetch_universe
 from collector.stock.toss import TossClient, candle_metrics
+from collector.stock.us_master import load_us_universe
 from shared.redis_keys import (
     DART_CORP_KEY,
     ENGINE_PILLAR_KEY,
@@ -159,6 +160,8 @@ async def _upsert_market_price(redis: aioredis.Redis, code: str, name: str,
             rec = {"code": code}
     if name and not rec.get("name"):
         rec["name"] = name
+    if not is_kr_code(code):
+        rec["currency"] = "USD"   # 미장 — UI 달러 표시
     rec["price"] = price
     prev = rec.get("prev_close")
     if prev:
@@ -193,8 +196,16 @@ async def market_price_loop(redis: aioredis.Redis, toss: TossClient) -> None:
                     try:
                         prices = await toss.fetch_prices(client, chunk)
                     except Exception as exc:
-                        logger.warning("[market-price] 청크 실패(%d~): %s", i, exc)
-                        continue
+                        # 심볼 1개 문제로 200개가 통째로 죽지 않게 소분 재시도
+                        logger.warning("[market-price] 청크 실패(%d~): %s — 소분 재시도", i, exc)
+                        prices = []
+                        for j in range(0, len(chunk), 20):
+                            try:
+                                prices += await toss.fetch_prices(client, chunk[j:j + 20])
+                            except Exception as e2:
+                                logger.warning("[DATA_ERROR] 시세 소분(%s…) 실패: %s",
+                                               chunk[j], e2)
+                            await asyncio.sleep(0.2)
                     for p in prices:
                         if p.get("price"):
                             await _upsert_market_price(
@@ -294,6 +305,59 @@ async def stock_history_loop(redis: aioredis.Redis,
         await asyncio.sleep(settings.stock_history_interval_sec if got else 600)
 
 
+async def us_history_loop(redis: aioredis.Redis, toss: TossClient) -> None:
+    """미장 유니버스 일봉 — 전일종가(등락률 기반)·52주·차트를 6시간마다 채움.
+
+    가격 스윕(market_price_loop)이 5분마다 현재가를 넣고, 여기서 채운 prev_close로
+    등락률을 재계산한다. 관심/보유 미국 종목은 toss_history_loop가 별도 커버.
+    """
+    if not toss.enabled:
+        return
+    us = load_us_universe()
+    if not us:
+        return
+    await asyncio.sleep(25)
+    while True:
+        n = 0
+        async with httpx.AsyncClient(timeout=20) as client:
+            for item in us:
+                code = item["code"]
+                try:
+                    candles = await toss.fetch_candles(client, code)
+                except Exception as exc:
+                    logger.warning("[DATA_ERROR] us %s 일봉 실패: %s", code, exc)
+                    continue
+                if not candles:
+                    continue
+                await redis.set(stock_ohlcv_key(code),
+                                json.dumps(candles, ensure_ascii=False))
+                m = candle_metrics(candles)
+                raw = await redis.hget(STOCK_MARKET_KEY, code)
+                rec: dict = {"code": code}
+                if raw:
+                    try:
+                        rec = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        rec = {"code": code}
+                rec.update({"name": rec.get("name") or item.get("name", ""),
+                            "currency": "USD", "market": "US",
+                            "prev_close": m.get("prev_close"),
+                            "high_52w": m.get("high_52w"),
+                            "low_52w": m.get("low_52w")})
+                if not rec.get("price") and m.get("last_close"):
+                    rec["price"] = m["last_close"]
+                prev = rec.get("prev_close")
+                if rec.get("price") and prev:
+                    rec["change_pct"] = round((rec["price"] / prev - 1) * 100, 2)
+                rec["ts"] = time.time()
+                await redis.hset(STOCK_MARKET_KEY, code,
+                                 json.dumps(rec, ensure_ascii=False))
+                n += 1
+                await asyncio.sleep(0.3)   # 토스 콜 페이싱
+        logger.info("[us] 미장 일봉 %d/%d종목", n, len(us))
+        await asyncio.sleep(21600)   # 6시간
+
+
 async def universe_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     """전체 시장 유니버스(코스피/코스닥 종목마스터) — 하루 1회 갱신. 실패 시 관심종목 폴백."""
     if not kis.enabled:
@@ -304,10 +368,12 @@ async def universe_loop(redis: aioredis.Redis, kis: KISClient) -> None:
                 uni = await fetch_universe(client)
             uni = uni[: settings.market_universe_max]
             if uni:
+                us = load_us_universe()   # 미장 주요 종목(config/us_stocks.yaml) 상시 포함
+                uni = uni + [u for u in us if u["code"] not in {x["code"] for x in uni}]
                 await redis.set(STOCK_UNIVERSE_KEY, json.dumps(uni, ensure_ascii=False))
                 kq = sum(1 for u in uni if u.get("market") == "KOSDAQ")
-                logger.info("[universe] %d종목 저장(코스닥 %d, 상한 %d)",
-                            len(uni), kq, settings.market_universe_max)
+                logger.info("[universe] %d종목 저장(코스닥 %d, 미국 %d, 상한 %d)",
+                            len(uni), kq, len(us), settings.market_universe_max)
                 if kq == 0:
                     logger.warning("[universe] 코스닥 0종목 — MARKET_UNIVERSE_MAX(.env) 확인")
         except Exception as exc:
@@ -392,6 +458,8 @@ async def market_loop(redis: aioredis.Redis, kis: KISClient,
         out: dict[str, str] = {}
         for item in batch:
             code = item["code"]
+            if not is_kr_code(code):
+                continue   # 미국 티커: KIS 펀더멘털 없음 — us_history_loop가 담당
             try:
                 q = await kis.fetch_price(client, code)
             except Exception:
@@ -606,6 +674,7 @@ async def main() -> None:
             portfolio_loop(redis, toss),
             toss_history_loop(redis, toss),
             toss_price_loop(redis, toss),
+            us_history_loop(redis, toss),
         )
         # 여기 도달 = 모든 루프가 키 미설정으로 종료. 프로세스가 그냥 끝나면
         # restart 정책이 20초마다 재기동(크래시 루프처럼 보임) → idle로 살아있게 대기.
