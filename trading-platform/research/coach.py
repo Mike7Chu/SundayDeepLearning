@@ -19,11 +19,17 @@ from shared.redis_keys import (
     ENGINE_RISK_KEY,
     FX_USDKRW_KEY,
     MARKET_INDICATORS_KEY,
+    STOCK_MARKET_KEY,
     TOSS_ACCOUNT_KEY,
     TOSS_HOLDINGS_KEY,
 )
 
 KST = timezone(timedelta(hours=9))
+
+# 미국 반도체 참조 바스켓 — 토스 미장 유니버스가 수집한 간밤 종가·등락을 코치에 주입.
+# (SOX 지수는 토스 미제공 → 대표 종목 바스켓 평균으로 근사. 웹검색 불필요·실측.)
+US_SEMI_REFS = [("NVDA", "엔비디아"), ("AMD", "AMD"), ("AVGO", "브로드컴"),
+                ("TSM", "TSMC"), ("MU", "마이크론"), ("INTC", "인텔")]
 
 
 def should_run(now_ts: float, last_ts: float | None, hour_kst: int = 8) -> bool:
@@ -66,11 +72,37 @@ def market_block(ind: dict | None) -> list[str]:
     return lines
 
 
+def us_semi_block(rows: list[dict] | None) -> list[str]:
+    """미국 반도체 간밤 종가·등락 → 프롬프트 라인(순수 함수). 데이터 없으면 빈 리스트.
+
+    rows: [{name, symbol, price, change_pct}] — 토스 수집 실측(전일 종가 기준).
+    """
+    rows = [r for r in (rows or []) if r.get("price") is not None]
+    if not rows:
+        return []
+    parts = []
+    chgs = []
+    for r in rows:
+        c = r.get("change_pct")
+        txt = f"{r.get('name') or r.get('symbol')} ${r['price']:,.2f}"
+        if c is not None:
+            txt += f" ({c:+.2f}%)"
+            chgs.append(c)
+        parts.append(txt)
+    lines = ["[미국 반도체 — 간밤 종가·등락(실측, 토스)] " + " · ".join(parts)]
+    if chgs:
+        avg = sum(chgs) / len(chgs)
+        lines.append(f"- 반도체 바스켓 평균 등락: {avg:+.2f}% "
+                     "(SOX 지수 근사 — 위 대표 종목 단순평균)")
+    return lines
+
+
 def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
                        details: dict[str, dict], filings: list[dict],
                        risk: dict, today: str = "",
                        fx_usdkrw: float | None = None,
-                       indicators: dict | None = None) -> str:
+                       indicators: dict | None = None,
+                       us_semis: list[dict] | None = None) -> str:
     """보유 스냅샷 + 목표 + 종목 정량 + 공시 + 리스크 → 데이터 블록(순수 함수).
 
     details: {종목코드: {"score","verdict","ni_growth_q_pct","ni_growth_q_label",
@@ -86,7 +118,7 @@ def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
         return ev
 
     total = sum(_krw(h) for h in hs)
-    lines = market_block(indicators)
+    lines = market_block(indicators) + us_semi_block(us_semis)
     lines.append(f"[내 실계좌 — {today or '오늘'} 기준]" if today else "[내 실계좌]")
     te = snap.get("total_eval") or total
     lines.append(f"- 총 평가액: {te:,.0f}원"
@@ -210,6 +242,19 @@ async def gather_coach(redis: aioredis.Redis) -> str | None:
             ind = json.loads(ind_raw)
         except (json.JSONDecodeError, TypeError):
             ind = None
+    # 미국 반도체 간밤 실측(토스 미장 유니버스 수집분) — 웹검색 없이 주입
+    us_semis: list[dict] = []
+    for sym, name in US_SEMI_REFS:
+        raw_m = await redis.hget(STOCK_MARKET_KEY, sym)
+        if not raw_m:
+            continue
+        try:
+            rec = json.loads(raw_m)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        us_semis.append({"symbol": sym, "name": rec.get("name") or name,
+                         "price": rec.get("price"),
+                         "change_pct": rec.get("change_pct")})
     today = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return build_coach_prompt(snap, cash, goal, details, filings, risk, today,
-                              fx_usdkrw=fx, indicators=ind)
+                              fx_usdkrw=fx, indicators=ind, us_semis=us_semis)

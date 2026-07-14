@@ -103,3 +103,21 @@ def test_market_block_in_prompt():
     # 프롬프트 전체에 시장 블록이 앞머리로 붙는다
     block = build_coach_prompt(_snap(), None, {}, {}, [], {}, indicators=ind)
     assert block.startswith("[시장 지표]")
+
+
+def test_us_semi_block_in_prompt():
+    from research.coach import us_semi_block
+
+    rows = [
+        {"symbol": "NVDA", "name": "엔비디아", "price": 131.38, "change_pct": 2.28},
+        {"symbol": "AMD", "name": "AMD", "price": 162.5, "change_pct": -1.1},
+        {"symbol": "TSM", "name": "TSMC", "price": 210.0, "change_pct": None},
+    ]
+    lines = us_semi_block(rows)
+    assert any("엔비디아 $131.38 (+2.28%)" in s for s in lines)
+    # 바스켓 평균은 등락률 있는 종목만: (2.28 - 1.1) / 2 = +0.59
+    assert any("바스켓 평균 등락: +0.59%" in s for s in lines)
+    assert us_semi_block([]) == [] and us_semi_block(None) == []
+    # 프롬프트에 미국 블록 포함
+    block = build_coach_prompt(_snap(), None, {}, {}, [], {}, us_semis=rows)
+    assert "[미국 반도체 — 간밤 종가·등락(실측, 토스)]" in block
