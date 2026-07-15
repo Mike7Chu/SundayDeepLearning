@@ -11,7 +11,13 @@ import redis.asyncio as aioredis
 from pydantic import BaseModel
 
 from api.services.stock_score import compute_score
-from shared.redis_keys import STOCK_MARKET_KEY, STOCK_QUOTE_KEY, stock_ohlcv_key
+from collector.news.dart import find_earnings_flash
+from shared.redis_keys import (
+    DART_RECENT_KEY,
+    STOCK_MARKET_KEY,
+    STOCK_QUOTE_KEY,
+    stock_ohlcv_key,
+)
 
 
 class StockData(BaseModel):
@@ -33,6 +39,7 @@ class StockData(BaseModel):
     verdict: str | None = None        # 판정
     margin_pct: float | None = None   # 안전마진 %
     score_reasons: list[str] = []     # 축별 근거
+    earnings_flash: dict | None = None  # 최신 잠정실적 공시 {title,date,url}
     news: list[str] = []
 
     def has_fundamentals(self) -> bool:
@@ -84,6 +91,14 @@ async def gather(redis: aioredis.Redis, code: str) -> StockData | None:
     sc = compute_score(quote, closes)
     sd.score, sd.verdict, sd.margin_pct = sc["score"], sc["verdict"], sc.get("margin_pct")
     sd.score_reasons = sc.get("reasons", [])
+    # 실적발표 시즌: 정기보고서(45일 지연)보다 먼저 뜨는 잠정실적 공시 감지
+    filings: list[dict] = []
+    for item in await redis.lrange(DART_RECENT_KEY, 0, 100):
+        try:
+            filings.append(json.loads(item))
+        except (json.JSONDecodeError, TypeError):
+            continue
+    sd.earnings_flash = find_earnings_flash(filings, code)
     return sd
 
 
@@ -111,6 +126,13 @@ def format_for_prompt(d: StockData) -> str:
         _fmt("판정", d.verdict),
         _fmt("안전마진(그레이엄 대비)", d.margin_pct, "%"),
     ]
+    if d.earnings_flash:
+        f = d.earnings_flash
+        lines.append(
+            f"🆕 최신 실적 공시(잠정): {f.get('title', '')} — {f.get('date', '')} 발표. "
+            "정기보고서보다 최신인 '이번 분기 잠정실적'이 이미 나왔다. 위 분기 YoY는 "
+            "직전 정기보고서 기준이므로, 이 잠정실적 발표를 최우선 최신 정보로 감안해 "
+            "분석하라(웹 검색이 가능하면 발표 수치를 확인).")
     if d.price and d.low_52w:
         up = (d.price / d.low_52w - 1) * 100
         lines.append(f"- 최근 1년 저점 대비 등락: {up:+.0f}% (실측 — 시장 대세를 반영한 실제 수치)")

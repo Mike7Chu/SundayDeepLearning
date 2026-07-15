@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as _dt
 import io
 import logging
+import re
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -128,17 +129,38 @@ def parse_net_income_growth(payload: dict) -> float | None:
 def quarter_candidates(today: _dt.date) -> list[tuple[str, int, str]]:
     """오늘 날짜 기준, 공시됐을 가장 최근 분기보고서 후보(최신→과거, 순수 함수).
 
-    공시 마감: 1Q=5월중순, 반기=8월중순, 3Q=11월중순 → 여유 두고 6/9/12월부터 조회.
+    공시 마감: 1Q=5월중순, 반기=8월중순, 3Q=11월중순. 후보를 순서대로 조회해
+    데이터 있는 첫 분기를 쓰므로(폴백 안전) 마감 달부터 공격적으로 시도 —
+    예: 8월 중순 반기보고서가 뜨는 즉시 2Q 실적이 반영된다.
     reprt_code: 11013=1분기, 11012=반기, 11014=3분기.
     """
     y, m = today.year, today.month
-    if m >= 12:
+    if m >= 11:
         return [("11014", y, f"{y}.3Q"), ("11012", y, f"{y}.2Q")]
-    if m >= 9:
+    if m >= 8:
         return [("11012", y, f"{y}.2Q"), ("11013", y, f"{y}.1Q")]
-    if m >= 6:
+    if m >= 5:
         return [("11013", y, f"{y}.1Q"), ("11014", y - 1, f"{y-1}.3Q")]
     return [("11014", y - 1, f"{y-1}.3Q"), ("11012", y - 1, f"{y-1}.2Q")]
+
+
+# 잠정실적(공정공시) 제목 패턴 — 정기보고서(45일 뒤)보다 먼저 나오는 최신 실적 신호.
+# 예: "연결재무제표기준영업(잠정)실적(공정공시)", "영업(잠정)실적(공정공시)"
+_FLASH_RE = re.compile(r"잠정.{0,3}실적|실적.{0,3}잠정")
+
+
+def find_earnings_flash(disclosures: list[dict], code: str) -> dict | None:
+    """최근 공시 목록에서 해당 종목의 최신 '잠정실적' 공시 1건(순수 함수).
+
+    실적발표 시즌엔 분기 마감 직후 잠정실적이 먼저 뜨므로, 정기보고서 기반
+    분기 YoY보다 최신 신호로 AI 리서치·화면에 표시한다. 없으면 None.
+    """
+    for d in disclosures:   # dart:recent는 최신순
+        if (d.get("stock_code") == code
+                and _FLASH_RE.search(d.get("report_nm") or "")):
+            return {"title": d.get("report_nm", ""), "date": d.get("rcept_dt", ""),
+                    "url": d.get("url", "")}
+    return None
 
 
 class DartClient:

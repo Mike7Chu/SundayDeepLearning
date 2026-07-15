@@ -58,6 +58,9 @@ def _metrics(q: dict) -> dict:
         "code": q.get("code"), "name": q.get("name"), "price": price,
         "per": per, "pbr": q.get("pbr"), "roe": roe, "earnings_yield": ey,
         "quality": quality,
+        # 최신 분기 실적(정기보고서 기준) — 화면에 '어느 분기 수치'인지 함께 표시
+        "ni_growth_q_pct": q.get("ni_growth_q_pct"),
+        "ni_growth_q_label": q.get("ni_growth_q_label"),
     }
 
 

@@ -205,3 +205,34 @@ def test_load_us_universe():
     assert all(u["code"] == u["code"].upper() for u in us)
     nvda = next(u for u in us if u["code"] == "NVDA")
     assert nvda["name"] == "엔비디아"
+
+
+def test_find_earnings_flash():
+    from collector.news.dart import find_earnings_flash
+
+    filings = [
+        {"stock_code": "005930", "corp_name": "삼성전자",
+         "report_nm": "연결재무제표기준영업(잠정)실적(공정공시)",
+         "rcept_dt": "20260708", "url": "https://dart.example/1"},
+        {"stock_code": "005930", "corp_name": "삼성전자",
+         "report_nm": "주요사항보고서", "rcept_dt": "20260707", "url": "u2"},
+        {"stock_code": "000660", "corp_name": "SK하이닉스",
+         "report_nm": "기타경영사항", "rcept_dt": "20260707", "url": "u3"},
+    ]
+    f = find_earnings_flash(filings, "005930")
+    assert f and "잠정" in f["title"] and f["date"] == "20260708"
+    assert find_earnings_flash(filings, "000660") is None   # 잠정실적 아님
+    assert find_earnings_flash([], "005930") is None
+
+
+def test_quarter_candidates_august_halfyear():
+    import datetime as dt
+
+    from collector.news.dart import quarter_candidates
+    # 8월: 반기보고서(2Q) 마감 달 — 뜨는 즉시 반영(폴백은 1Q)
+    c = quarter_candidates(dt.date(2026, 8, 5))
+    assert c[0] == ("11012", 2026, "2026.2Q") and c[1][2] == "2026.1Q"
+    # 11월: 3Q 마감 달
+    assert quarter_candidates(dt.date(2026, 11, 20))[0][2] == "2026.3Q"
+    # 5월: 1Q 마감 달
+    assert quarter_candidates(dt.date(2026, 5, 20))[0][2] == "2026.1Q"

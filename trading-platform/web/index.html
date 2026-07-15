@@ -428,6 +428,8 @@ async function submitOrder(side){
 }
 
 const nameCell=(r)=>`${r.name||r.code}<span class="num" style="opacity:.5"> ${r.code}</span>`;
+// 분기 순이익 YoY 셀 — 어느 분기 수치인지(2026.1Q 등) 함께 표시
+const qGrowthFmt=(r)=>r.ni_growth_q_pct==null?"–":`${r.ni_growth_q_pct>=0?"+":""}${numC(r.ni_growth_q_pct,0)}%<span class="num" style="opacity:.55"> ${r.ni_growth_q_label||""}</span>`;
 const rowOpen=(r)=>`openStock('${qesc(r.code)}','${qesc(r.name)}')`;
 const pctCls=(k)=>(r)=>"num strong "+((r[k]||0)>=0?"pos":"neg");
 const pctFmt=(k)=>(r)=>r[k]==null?"–":`${r[k]>=0?"+":""}${numC(r[k])}%`;
@@ -445,6 +447,7 @@ async function renderStocks(){
     {label:"PER", key:"per", hint:HELP.per, fmt:r=>numC(r.per)},
     {label:"PBR", key:"pbr", hint:HELP.pbr, fmt:r=>numC(r.pbr)},
     {label:"ROE%", key:"roe", hint:"자본으로 얼마 버는지", fmt:r=>numC(r.roe)},
+    {label:"분기이익 성장", key:"ni_growth_q_pct", hint:"최근 분기 순이익이 작년 같은 분기 대비 얼마나 늘었나 — 가장 최신 공식 실적", fmt:qGrowthFmt, cls:r=>"num "+((r.ni_growth_q_pct||0)>=0?"pos":"neg")},
     {label:"1년 최고가", key:"high_52w", hint:HELP.w52, fmt:r=>r.currency==="USD"?money(r.high_52w,"USD"):fmt(r.high_52w)},
     {label:"시가총액", key:"market_cap", hint:HELP.cap, fmt:r=>r.currency==="USD"?(r.market_cap==null?"–":numC(r.market_cap,0)+"억$"):capF(r.market_cap)},
   ], rows, {rowClick:rowOpen, sort:{key:"change_pct",dir:-1}, empty:"수집 대기 (시세 없음)"});
@@ -460,6 +463,7 @@ async function renderValue(){
     {label:"PBR", key:"pbr", hint:HELP.pbr, fmt:r=>numC(r.pbr)},
     {label:"ROE%", key:"roe", hint:"자본으로 얼마 버는지 · 높을수록 좋음", fmt:r=>numC(r.roe)},
     {label:"이익률%", key:"earnings_yield", hint:"주가 대비 이익 · 높을수록 저렴", fmt:r=>numC(r.earnings_yield)},
+    {label:"분기이익 성장", key:"ni_growth_q_pct", hint:"최근 분기 순이익 YoY — 싼 이유가 '이익 감소'인지 확인", fmt:qGrowthFmt, cls:r=>"num "+((r.ni_growth_q_pct||0)>=0?"pos":"neg")},
     {label:"우량도", key:"quality", hint:"흑자·저부채 등 체크 통과 수", fmt:r=>"★".repeat(r.quality||0)||"–"},
   ], rows, {rowClick:rowOpen, sort:{key:"magic_rank",dir:1}, empty:"저평가 데이터 수집 대기 (KIS 키 필요)"});
   $("metaInfo").textContent=`저평가 · ${rows.length}종목`;
@@ -620,9 +624,14 @@ async function openStock(code,name){
     const dvH=US?`<div class="empty">미국 종목은 배당 이력을 아직 지원하지 않아요(국내 공시 DART 전용). 테슬라처럼 배당을 아예 안 주는 회사도 많아요.</div>`
       :(D&&(D.yield_pct!=null||hist))?`<div class="cgrid">${kv("배당수익률",D.yield_pct!=null?D.yield_pct+"%":"–",HELP.divy)}${kv("1주당 배당금",numC(D.annual_per_share,0)+"원",HELP.div)}${kv("다음 배당일",D.next_ex_date||"–")}</div>${hist}`:`<div class="empty">배당금 ${collectHint}</div>`;
     const wbtn=d.in_watchlist?'<span class="badge pos">✓ 내 관심종목</span>':`<button class="btn buy" onclick="addWatchModal('${qesc(code)}','${qesc(name)}')">＋ 관심종목에 담기</button>`;
+    const EF=d.earnings_flash;
+    const flashH=EF?`<div class="card" style="margin-bottom:10px;border-left:3px solid var(--pos,#2e7d32)">
+      <b>🆕 이번 분기 잠정실적 발표됨</b> <span class="num">(${(EF.date||'').replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3')})</span>
+      <div class="num" style="margin-top:4px"><a class="clk" href="${EF.url}" target="_blank">${escH(EF.title)}</a></div>
+      <div class="num" style="opacity:.7;margin-top:2px">아래 '분기 성장' 수치는 직전 정기보고서 기준 — 이 공시가 가장 최신 실적이에요. 공식 반영은 분기보고서 공시(마감 후 45일) 때 자동으로 갱신됩니다.</div></div>`:'';
     $("mBody").innerHTML=`<div class="arow" style="margin-bottom:8px">${wbtn}</div>
       <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}
-      <div class="modal-sec">회사 가치·실적</div>${fund}
+      <div class="modal-sec">회사 가치·실적</div>${flashH}${fund}
       <div class="modal-sec">주가 흐름</div>${sgH}
       <div class="modal-sec">매매 가격 가이드</div>${lvH}
       <div class="modal-sec">배당금</div>${dvH}

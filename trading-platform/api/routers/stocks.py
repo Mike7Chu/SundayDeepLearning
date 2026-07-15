@@ -27,6 +27,7 @@ from collector.stock.kis import effective_watchlist, is_kr_code
 from fastapi import HTTPException
 from shared.redis_keys import (
     DART_CORP_KEY,
+    DART_RECENT_KEY,
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
@@ -237,7 +238,18 @@ async def stock_detail(code: str) -> dict:
             items = await _ondemand_dividend(redis, code)
     if items:
         div = compute_dividend(quote, items)
+    # 실적발표 시즌: 잠정실적 공시(정기보고서보다 최신) 배지 — 국내만(DART)
+    flash = None
+    if kr:
+        from collector.news.dart import find_earnings_flash
+        filings = []
+        for item in await redis.lrange(DART_RECENT_KEY, 0, 100):
+            try:
+                filings.append(_json.loads(item))
+            except (ValueError, TypeError):
+                continue
+        flash = find_earnings_flash(filings, code)
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
-            "levels": levels, "pillar": pillar,
+            "levels": levels, "pillar": pillar, "earnings_flash": flash,
             "in_watchlist": any(w.get("code") == code for w in wl)}
