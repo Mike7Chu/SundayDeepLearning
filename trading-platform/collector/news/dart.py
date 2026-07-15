@@ -275,12 +275,18 @@ class DartClient:
             text = raw.decode("utf-8", errors="ignore")
         return parse_flash_figures(re.sub(r"<[^>]+>", " ", text))
 
-    async def fetch_recent(self, client: httpx.AsyncClient, page_count: int = 100) -> list[dict]:
-        """오늘자 최근 공시(전 종목) 목록. 최신순으로 page_count건."""
-        today = _dt.date.today().strftime("%Y%m%d")
+    async def fetch_recent(self, client: httpx.AsyncClient, page_count: int = 100,
+                           days_back: int = 3) -> list[dict]:
+        """최근 공시(전 종목) 목록 — 최근 days_back일, 최신순 page_count건.
+
+        오늘만 보면 재시작·장애 사이에 발표된 공시(예: 어제 잠정실적)를 영영
+        놓친다 → 3일 범위로 조회(중복은 dart:seen이 걸러 알림 재발송 없음).
+        """
+        today = _dt.date.today()
         params = {
             "crtfc_key": settings.dart_api_key,
-            "bgn_de": today, "end_de": today,
+            "bgn_de": (today - _dt.timedelta(days=days_back)).strftime("%Y%m%d"),
+            "end_de": today.strftime("%Y%m%d"),
             "page_no": 1, "page_count": page_count, "sort": "date", "sort_mth": "desc",
         }
         r = await client.get(_LIST_URL, params=params)
