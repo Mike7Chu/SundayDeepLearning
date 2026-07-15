@@ -134,6 +134,18 @@ def sell_checks(h: dict, closes: list[float]) -> dict:
     if g is not None and g < 0:
         sev += 1
         reasons.append(f"실적 감소 {g:.0f}%")
+    # ---- 펀더멘털·당일 흐름 상쇄: 기술 신호만으로 '정리'를 재촉하지 않는다 ----
+    # (예: 실적 서프라이즈로 상한가 치는 날 'SMA60 아래'는 사실이어도 맥락이 다름.
+    #  SMA는 하락기 과거 60일 평균이라 급반등 초기를 항상 '이탈'로 읽는다.)
+    chg = h.get("_chg")
+    if chg is not None and chg >= 5 and sev > 0:
+        sev = max(0, sev - 1)
+        reasons.append(f"오늘 {chg:+.1f}% 급등 중")
+    if g is not None and g >= 20 and sev > 0:
+        sev = max(0, sev - 2)
+        reasons.append(f"단, 실적 {g:+.0f}% 개선 — 기술 신호와 상충(펀더멘털 우위)")
+        if action in ("정리 검토", "손절 검토") and sev < 3:
+            action = "관찰(실적 우위)"
     return {"severity": sev, "action": action, "reasons": reasons}
 
 

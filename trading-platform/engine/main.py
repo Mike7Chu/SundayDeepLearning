@@ -341,9 +341,15 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict) -> No
         if not code:
             continue
         q = qmap.get(code, {})
-        h2 = {**h, "_growth": q.get("flash_ni_yoy") or q.get("ni_growth_q_pct")}
+        g = q.get("flash_ni_yoy")
+        if g is None:
+            g = q.get("flash_op_yoy")
+        if g is None:
+            g = q.get("ni_growth_q_pct")
+        h2 = {**h, "_growth": g, "_chg": q.get("change_pct")}
         chk = sell_checks(h2, await _closes(redis, code))
-        if chk["severity"] > 0:
+        # 약한 단일 신호(예: 추세 이탈 하나)는 소음 — 심각도 3 이상만 목록에
+        if chk["severity"] >= 3:
             sells.append({"code": code, "name": h.get("name", ""),
                           "pnl_pct": h.get("pnl_pct"), **chk})
     sells.sort(key=lambda s: s["severity"], reverse=True)
