@@ -14,12 +14,14 @@ import redis.asyncio as aioredis
 
 from research.data import gather
 from shared.redis_keys import (
+    ADR_KEY,
     COACH_GOAL_KEY,
     DART_RECENT_KEY,
     ENGINE_RISK_KEY,
     FX_USDKRW_KEY,
     MARKET_INDICATORS_KEY,
     STOCK_MARKET_KEY,
+    STOCK_QUOTE_KEY,
     TOSS_ACCOUNT_KEY,
     TOSS_HOLDINGS_KEY,
 )
@@ -120,13 +122,36 @@ def us_ai_block(rows: list[dict] | None) -> list[str]:
             + " (HBM 최종 수요 심리의 간접 지표)"]
 
 
+def adr_block(rows: list[dict] | None) -> list[str]:
+    """ADR 괴리율(프리미엄) — 본주 대비 ADR 환산가 괴리(순수 함수).
+
+    프리미엄 = ADR$ × 환율 ÷ (비율 × 본주₩) − 1. 외국인 수급의 선행 지표로
+    ADR가 본주보다 크게 비싸면(+) 다음 날 본주 갭업 압력, 싸면(−) 반대.
+    """
+    out: list[str] = []
+    for r in rows or []:
+        usd, krw, fx = r.get("usd"), r.get("kr_price"), r.get("fx")
+        ratio = r.get("ratio") or 1.0
+        if not (usd and krw and fx):
+            continue
+        equiv = usd * fx / ratio
+        prem = (equiv / krw - 1) * 100
+        note = "" if ratio != 1.0 else " · 비율 1:1 가정(다르면 ADR_MAP에서 조정)"
+        out.append(
+            f"[ADR 괴리] {r.get('name') or r.get('code')} ADR({r.get('us_symbol')}) "
+            f"${usd:,.2f} → 환산 {equiv:,.0f}원 vs 본주 {krw:,.0f}원 = "
+            f"프리미엄 {prem:+.1f}%{note}")
+    return out
+
+
 def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
                        details: dict[str, dict], filings: list[dict],
                        risk: dict, today: str = "",
                        fx_usdkrw: float | None = None,
                        indicators: dict | None = None,
                        us_semis: list[dict] | None = None,
-                       us_ai: list[dict] | None = None) -> str:
+                       us_ai: list[dict] | None = None,
+                       adrs: list[dict] | None = None) -> str:
     """보유 스냅샷 + 목표 + 종목 정량 + 공시 + 리스크 → 데이터 블록(순수 함수).
 
     details: {종목코드: {"score","verdict","ni_growth_q_pct","ni_growth_q_label",
@@ -142,7 +167,10 @@ def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
         return ev
 
     total = sum(_krw(h) for h in hs)
-    lines = market_block(indicators) + us_semi_block(us_semis) + us_ai_block(us_ai)
+    lines = (market_block(indicators) + us_semi_block(us_semis)
+             + us_ai_block(us_ai) + adr_block(adrs))
+    if today and (us_semis or us_ai):
+        lines.append(f"(위 미국 시세 기준: {today} KST 수집분 — 직전 거래일 종가)")
     lines.append(f"[내 실계좌 — {today or '오늘'} 기준]" if today else "[내 실계좌]")
     te = snap.get("total_eval") or total
     lines.append(f"- 총 평가액: {te:,.0f}원"
@@ -287,7 +315,26 @@ async def gather_coach(redis: aioredis.Redis) -> str | None:
 
     us_semis = await _refs(US_SEMI_REFS)
     us_ai = await _refs(US_AI_REFS)
+    # ADR 괴리율: collector adr_loop 수집분 + 본주 시세 + 환율
+    adrs: list[dict] = []
+    for code, raw_a in (await redis.hgetall(ADR_KEY)).items():
+        try:
+            a = json.loads(raw_a)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        kr_raw = (await redis.hget(STOCK_QUOTE_KEY, code)
+                  or await redis.hget(STOCK_MARKET_KEY, code))
+        kr_price = kr_name = None
+        if kr_raw:
+            try:
+                kr = json.loads(kr_raw)
+                kr_price, kr_name = kr.get("price"), kr.get("name")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        adrs.append({"code": code, "name": kr_name, "us_symbol": a.get("us_symbol"),
+                     "usd": a.get("usd"), "ratio": a.get("ratio"),
+                     "kr_price": kr_price, "fx": fx})
     today = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return build_coach_prompt(snap, cash, goal, details, filings, risk, today,
                               fx_usdkrw=fx, indicators=ind, us_semis=us_semis,
-                              us_ai=us_ai)
+                              us_ai=us_ai, adrs=adrs)

@@ -144,3 +144,26 @@ def test_us_ai_block_and_expired_goal():
                             {"target_pct": 35, "deadline": "2026-12-31"},
                             {}, [], {}, today="2026-07-16 08:00")
     assert "기한 경과" not in ok
+
+
+def test_adr_block_premium():
+    from research.coach import adr_block
+
+    rows = [{"code": "000660", "name": "SK하이닉스", "us_symbol": "SKH",
+             "usd": 170.0, "ratio": 1.0, "kr_price": 207_000.0, "fx": 1400.0}]
+    lines = adr_block(rows)
+    # $170 × 1,400 = 238,000원 vs 본주 207,000원 → +15.0%
+    assert lines and "SKH" in lines[0] and "+15.0%" in lines[0]
+    assert "238,000원" in lines[0]
+    # 데이터 결손(환율/본주가 없음)이면 조용히 생략
+    assert adr_block([{"usd": 170.0, "kr_price": None, "fx": None}]) == []
+    assert adr_block(None) == []
+
+
+def test_parse_adr_map():
+    from collector.stock.us_master import parse_adr_map
+
+    m = parse_adr_map("000660:SKH|HXSCL:1, 005930:SSNLF:2")
+    assert m[0] == {"code": "000660", "cands": ["SKH", "HXSCL"], "ratio": 1.0}
+    assert m[1]["cands"] == ["SSNLF"] and m[1]["ratio"] == 2.0
+    assert parse_adr_map("") == [] and parse_adr_map("broken") == []

@@ -57,6 +57,8 @@ RESEARCH_INV_KEY = "research:inversion"
 
 # USD/KRW 환율(토스 exchange-rate, 포트폴리오 루프가 갱신). json{rate, ts}
 FX_USDKRW_KEY = "fx:usdkrw"
+# ADR 시세(hash{본주코드: json{us_symbol, usd, ratio, ts}}) — 괴리율 계산용
+ADR_KEY = "adr:quotes"
 
 # 시장 지표(토스 v1.2.2): 지수·수급. json{kospi:{price,change_pct}, kosdaq:{...},
 #   investor:{kospi:{foreigner,institution,individual,date}, kosdaq:{...}}, ts}

@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     research_use_cli: bool = False           # True+claude 바이너리 존재 시 구독 CLI로 분석
     research_cli_bin: str = "claude"         # Claude Code 실행 파일명/경로
 
+    # ADR 괴리율 추적: "본주코드:후보티커1|후보티커2:비율(1 ADR당 본주 수)".
+    # 토스 앱에서 보이는 실제 ADR 티커로 맞추면 아침 점검에 괴리율이 표시됨.
+    adr_map: str = "000660:SKH|HXSCL:1"
+    adr_interval_sec: float = 1800.0         # ADR 시세 갱신 주기(30분)
+
     # SEC EDGAR(미국 공시 — 무료·키 불필요): 미장 분기 실적·실적발표 감지.
     # SEC 정책상 UA에 연락처 표기 권장 — 본인 이메일로 바꾸면 좋음.
     sec_user_agent: str = "StockLab/1.0 (personal research)"

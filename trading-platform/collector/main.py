@@ -20,8 +20,9 @@ from collector.stock.kis import KISClient, effective_watchlist, is_kr_code, load
 from notifier.telegram import TelegramSender
 from collector.stock.kis_master import fetch_universe
 from collector.stock.toss import TossClient, candle_metrics
-from collector.stock.us_master import load_us_universe
+from collector.stock.us_master import load_us_universe, parse_adr_map
 from shared.redis_keys import (
+    ADR_KEY,
     DART_CORP_KEY,
     ENGINE_PILLAR_KEY,
     FX_USDKRW_KEY,
@@ -359,7 +360,7 @@ async def us_history_loop(redis: aioredis.Redis, toss: TossClient) -> None:
                 n += 1
                 await asyncio.sleep(0.3)   # 토스 콜 페이싱
         logger.info("[us] 미장 일봉 %d/%d종목", n, len(us))
-        await asyncio.sleep(21600)   # 6시간
+        await asyncio.sleep(10800)   # 3시간 — 전일종가(등락률 기준) 신선도 확보
 
 
 async def indicators_loop(redis: aioredis.Redis, toss: TossClient) -> None:
@@ -437,6 +438,46 @@ async def rankings_loop(redis: aioredis.Redis, toss: TossClient) -> None:
         except Exception as exc:
             logger.warning("[DATA_ERROR] 랭킹 수집 실패: %s", exc)
         await asyncio.sleep(600)
+
+
+async def adr_loop(redis: aioredis.Redis, toss: TossClient) -> None:
+    """ADR 시세 추적(30분) — 본주 대비 괴리율(프리미엄) 계산용.
+
+    설정(ADR_MAP)의 후보 티커를 순서대로 시도해 시세가 잡히는 심볼을 사용.
+    (예: SK하이닉스 ADR — 토스 앱에 보이는 티커를 설정에 넣으면 즉시 추적)
+    """
+    if not toss.enabled:
+        return
+    pairs = parse_adr_map(settings.adr_map)
+    if not pairs:
+        return
+    await asyncio.sleep(30)
+    resolved: dict[str, str] = {}   # 본주코드 → 확인된 ADR 티커
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                for p in pairs:
+                    code = p["code"]
+                    cands = ([resolved[code]] if code in resolved else p["cands"])
+                    for sym in cands:
+                        try:
+                            rows = await toss.fetch_prices(client, [sym])
+                        except Exception:
+                            continue
+                        price = rows[0].get("price") if rows else None
+                        if price:
+                            resolved[code] = sym
+                            await redis.hset(ADR_KEY, code, json.dumps(
+                                {"us_symbol": sym, "usd": price,
+                                 "ratio": p["ratio"], "ts": time.time()}))
+                            break
+                    else:
+                        logger.info("[adr] %s ADR 티커 미확인(%s) — "
+                                    "ADR_MAP에 토스 앱 티커를 넣어주세요",
+                                    code, "|".join(p["cands"]))
+        except Exception as exc:
+            logger.warning("[adr] 수집 실패: %s", exc)
+        await asyncio.sleep(settings.adr_interval_sec)
 
 
 async def us_fundamentals_loop(redis: aioredis.Redis) -> None:
@@ -842,6 +883,7 @@ async def main() -> None:
             indicators_loop(redis, toss),
             rankings_loop(redis, toss),
             us_fundamentals_loop(redis),
+            adr_loop(redis, toss),
         )
         # 여기 도달 = 모든 루프가 키 미설정으로 종료. 프로세스가 그냥 끝나면
         # restart 정책이 20초마다 재기동(크래시 루프처럼 보임) → idle로 살아있게 대기.

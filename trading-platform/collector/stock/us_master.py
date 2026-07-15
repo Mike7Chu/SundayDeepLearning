@@ -13,6 +13,28 @@ import yaml
 _US = Path(__file__).resolve().parent.parent.parent / "config" / "us_stocks.yaml"
 
 
+def parse_adr_map(s: str) -> list[dict]:
+    """ADR 매핑 문자열 파싱(순수 함수).
+
+    형식: "본주코드:후보티커1|후보티커2:비율, ..." 예) "000660:SKH|HXSCL:1"
+    비율 = 1 ADR당 본주 주식 수(모르면 1로 두고 괴리율 표시에 '비율 확인' 주석).
+    """
+    out: list[dict] = []
+    for item in (s or "").split(","):
+        parts = [p.strip() for p in item.strip().split(":")]
+        if len(parts) < 2 or not parts[0]:
+            continue
+        cands = [c.strip().upper() for c in parts[1].split("|") if c.strip()]
+        if not cands:
+            continue
+        try:
+            ratio = float(parts[2]) if len(parts) > 2 and parts[2] else 1.0
+        except ValueError:
+            ratio = 1.0
+        out.append({"code": parts[0], "cands": cands, "ratio": ratio or 1.0})
+    return out
+
+
 @lru_cache(maxsize=1)
 def load_us_universe() -> list[dict]:
     """[{code, name, market:"US"}] — 파일 없거나 손상이면 빈 리스트(안전)."""
