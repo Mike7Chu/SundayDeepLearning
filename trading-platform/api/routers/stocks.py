@@ -172,8 +172,16 @@ async def stock_detail(code: str) -> dict:
     """
     redis = get_redis()
     code = code if code.isdigit() else code.upper()   # 미국 티커 대문자 통일
-    raw = await redis.hget(STOCK_QUOTE_KEY, code) or await redis.hget(STOCK_MARKET_KEY, code)
-    quote = json.loads(raw) if raw else {"code": code}
+    # 두 해시 병합: market(분기실적·실적발표 배지 등) 위에 quote(실시간가) 덮기
+    quote = {"code": code}
+    for key in (STOCK_MARKET_KEY, STOCK_QUOTE_KEY):
+        raw = await redis.hget(key, code)
+        if raw:
+            try:
+                quote.update({k: v for k, v in json.loads(raw).items()
+                              if v is not None})
+            except (ValueError, TypeError):
+                pass
     # 일봉: 저장분 → 없으면 토스 온디맨드
     candles: list = []
     oraw = await redis.get(stock_ohlcv_key(code))
@@ -238,7 +246,7 @@ async def stock_detail(code: str) -> dict:
             items = await _ondemand_dividend(redis, code)
     if items:
         div = compute_dividend(quote, items)
-    # 실적발표 시즌: 잠정실적 공시(정기보고서보다 최신) 배지 — 국내만(DART)
+    # 실적발표 시즌 배지: 국내=DART 잠정실적 공시, 미국=SEC 8-K/10-Q(수집분)
     flash = None
     if kr:
         from collector.news.dart import find_earnings_flash
@@ -249,6 +257,8 @@ async def stock_detail(code: str) -> dict:
             except (ValueError, TypeError):
                 continue
         flash = find_earnings_flash(filings, code)
+    else:
+        flash = quote.get("earnings_flash")
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
             "levels": levels, "pillar": pillar, "earnings_flash": flash,

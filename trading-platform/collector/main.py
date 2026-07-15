@@ -15,6 +15,7 @@ import redis.asyncio as aioredis
 
 from api.services.stock_signal import candle_trading_value, pillar_precheck
 from collector.news.dart import DartClient
+from collector.news.sec import SecClient
 from collector.stock.kis import KISClient, effective_watchlist, is_kr_code, load_watchlist
 from notifier.telegram import TelegramSender
 from collector.stock.kis_master import fetch_universe
@@ -26,6 +27,7 @@ from shared.redis_keys import (
     FX_USDKRW_KEY,
     MARKET_INDICATORS_KEY,
     MARKET_RANKINGS_KEY,
+    SEC_TICKER_KEY,
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
@@ -437,6 +439,80 @@ async def rankings_loop(redis: aioredis.Redis, toss: TossClient) -> None:
         await asyncio.sleep(600)
 
 
+async def us_fundamentals_loop(redis: aioredis.Redis) -> None:
+    """미장 분기 실적(SEC EDGAR, 하루 1회) — 국내 DART 분기 YoY와 동형.
+
+    유니버스+관심+보유 미국 티커의 ①분기 순이익 YoY(10-Q XBRL)
+    ②최근 실적발표(8-K Item 2.02) 배지를 stock:market 레코드에 병합.
+    SEC는 무료·키 불필요(UA에 연락처 권장) — 0.6s 페이싱으로 예의 준수.
+    """
+    sec = SecClient()
+    await asyncio.sleep(40)
+    while True:
+        try:
+            watch = await effective_watchlist(redis)
+            us_codes = {u["code"] for u in load_us_universe()}
+            us_codes |= {w["code"] for w in watch if not is_kr_code(w["code"])}
+            try:
+                raw = await redis.get(TOSS_HOLDINGS_KEY)
+                held = json.loads(raw).get("holdings", []) if raw else []
+                us_codes |= {h["symbol"] for h in held
+                             if h.get("symbol") and not is_kr_code(h["symbol"])}
+            except (json.JSONDecodeError, TypeError):
+                pass
+            async with httpx.AsyncClient(timeout=25) as client:
+                # 티커→CIK 매핑(7일 캐시)
+                cmap_raw = await redis.get(SEC_TICKER_KEY)
+                cmap: dict = {}
+                if cmap_raw:
+                    try:
+                        cmap = json.loads(cmap_raw)
+                    except (json.JSONDecodeError, TypeError):
+                        cmap = {}
+                if not cmap:
+                    cmap = await sec.fetch_ticker_map(client)
+                    if cmap:
+                        await redis.set(SEC_TICKER_KEY, json.dumps(cmap),
+                                        ex=7 * 86400)
+                n = 0
+                for code in sorted(us_codes):
+                    cik = cmap.get(code)
+                    if not cik:
+                        continue
+                    fields: dict = {}
+                    try:
+                        g = await sec.fetch_quarterly_growth(client, cik)
+                        if g:
+                            fields["ni_growth_q_pct"] = g["growth"]
+                            fields["ni_growth_q_label"] = g["label"]
+                    except Exception as exc:
+                        logger.warning("[DATA_ERROR] sec %s 분기실적 실패: %s",
+                                       code, exc)
+                    await asyncio.sleep(0.6)
+                    try:
+                        flash = await sec.fetch_earnings_flash(client, cik)
+                        fields["earnings_flash"] = flash   # None이면 배지 해제
+                    except Exception as exc:
+                        logger.warning("[sec %s] 공시 조회 실패: %s", code, exc)
+                    if fields:
+                        raw_m = await redis.hget(STOCK_MARKET_KEY, code)
+                        rec = {"code": code}
+                        if raw_m:
+                            try:
+                                rec = json.loads(raw_m)
+                            except (json.JSONDecodeError, TypeError):
+                                rec = {"code": code}
+                        rec.update(fields)
+                        await redis.hset(STOCK_MARKET_KEY, code,
+                                         json.dumps(rec, ensure_ascii=False))
+                        n += 1
+                    await asyncio.sleep(0.6)
+            logger.info("[sec] 미장 분기실적 %d/%d종목", n, len(us_codes))
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] SEC 수집 실패: %s", exc)
+        await asyncio.sleep(settings.sec_interval_sec)
+
+
 async def universe_loop(redis: aioredis.Redis, kis: KISClient) -> None:
     """전체 시장 유니버스(코스피/코스닥 종목마스터) — 하루 1회 갱신. 실패 시 관심종목 폴백."""
     if not kis.enabled:
@@ -756,6 +832,7 @@ async def main() -> None:
             us_history_loop(redis, toss),
             indicators_loop(redis, toss),
             rankings_loop(redis, toss),
+            us_fundamentals_loop(redis),
         )
         # 여기 도달 = 모든 루프가 키 미설정으로 종료. 프로세스가 그냥 끝나면
         # restart 정책이 20초마다 재기동(크래시 루프처럼 보임) → idle로 살아있게 대기.

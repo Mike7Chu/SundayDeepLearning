@@ -72,13 +72,19 @@ async def gather(redis: aioredis.Redis, code: str) -> StockData | None:
 
     관심종목(stock:quote) 없으면 전체시장(stock:market)에서. 둘 다 없으면 None.
     """
-    raw = await redis.hget(STOCK_QUOTE_KEY, code) or await redis.hget(STOCK_MARKET_KEY, code)
-    if not raw:
+    # 두 해시 병합: market(분기실적·배지) 위에 quote(실시간가) 덮기 — 미장 포함
+    quote: dict = {}
+    for key in (STOCK_MARKET_KEY, STOCK_QUOTE_KEY):
+        raw = await redis.hget(key, code)
+        if raw:
+            try:
+                quote.update({k: v for k, v in json.loads(raw).items()
+                              if v is not None})
+            except (json.JSONDecodeError, TypeError):
+                pass
+    if not quote:
         return None
-    try:
-        quote = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return None
+    quote.setdefault("code", code)
     closes: list = []
     oraw = await redis.get(stock_ohlcv_key(code))
     if oraw:
@@ -91,14 +97,17 @@ async def gather(redis: aioredis.Redis, code: str) -> StockData | None:
     sc = compute_score(quote, closes)
     sd.score, sd.verdict, sd.margin_pct = sc["score"], sc["verdict"], sc.get("margin_pct")
     sd.score_reasons = sc.get("reasons", [])
-    # 실적발표 시즌: 정기보고서(45일 지연)보다 먼저 뜨는 잠정실적 공시 감지
-    filings: list[dict] = []
-    for item in await redis.lrange(DART_RECENT_KEY, 0, 100):
-        try:
-            filings.append(json.loads(item))
-        except (json.JSONDecodeError, TypeError):
-            continue
-    sd.earnings_flash = find_earnings_flash(filings, code)
+    # 실적발표 시즌: 국내=DART 잠정실적 공시 감지, 미국=SEC 수집분(quote에 병합됨)
+    if code.isdigit():
+        filings: list[dict] = []
+        for item in await redis.lrange(DART_RECENT_KEY, 0, 100):
+            try:
+                filings.append(json.loads(item))
+            except (json.JSONDecodeError, TypeError):
+                continue
+        sd.earnings_flash = find_earnings_flash(filings, code)
+    else:
+        sd.earnings_flash = quote.get("earnings_flash")
     return sd
 
 

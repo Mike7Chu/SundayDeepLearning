@@ -24,6 +24,8 @@ DART_RECENT_KEY = "dart:recent"
 DART_SEEN_KEY = "dart:seen"
 # DART 종목코드→corp_code 매핑 캐시(json, 7일 TTL)
 DART_CORP_KEY = "dart:corpmap"
+# SEC EDGAR 티커→CIK 매핑 캐시(json, 7일 TTL) — 미장 분기실적용
+SEC_TICKER_KEY = "sec:tickermap"
 
 # 토스증권 포트폴리오. json{holdings:[{symbol,name,qty,avg_price,cur_price,eval_amount,pnl,pnl_pct}],
 #   cash, total_eval, pnl, pnl_pct, ts}

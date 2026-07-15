@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     research_use_cli: bool = False           # True+claude 바이너리 존재 시 구독 CLI로 분석
     research_cli_bin: str = "claude"         # Claude Code 실행 파일명/경로
 
+    # SEC EDGAR(미국 공시 — 무료·키 불필요): 미장 분기 실적·실적발표 감지.
+    # SEC 정책상 UA에 연락처 표기 권장 — 본인 이메일로 바꾸면 좋음.
+    sec_user_agent: str = "StockLab/1.0 (personal research)"
+    sec_interval_sec: float = 86400.0        # 미장 분기실적 수집 주기(하루 1회)
+
     # AI 포트폴리오 코치(아침 점검) — 실보유 비중 기준 종목별 '보유/일부매도/위험신호' 판정.
     # 매일 1회(코치 시각, KST) 텔레그램 발송 + 대시보드 홈 카드. 리서치 백엔드 공유(하루 1콜).
     coach_enabled: bool = True
