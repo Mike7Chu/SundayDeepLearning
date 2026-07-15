@@ -35,6 +35,91 @@ def rsi(values: list[float], n: int = 14) -> float | None:
     return round(100 - 100 / (1 + rs), 2)
 
 
+def ema_series(values: list[float], n: int) -> list[float] | None:
+    """지수이동평균 시계열(values[n-1:]과 정렬). 데이터 부족 시 None."""
+    if len(values) < n or n <= 0:
+        return None
+    k = 2 / (n + 1)
+    e = sum(values[:n]) / n
+    out = [e]
+    for v in values[n:]:
+        e = v * k + e * (1 - k)
+        out.append(e)
+    return out
+
+
+def macd(closes: list[float], fast: int = 12, slow: int = 26,
+         signal_n: int = 9) -> dict | None:
+    """MACD(12·26·9) — 추세의 방향과 전환(순수 함수). RSI보다 추세장에 강건.
+
+    hist>0 = 상승 힘 우세. state: 직전 봉 대비 히스토그램 부호 전환(golden/dead).
+    recent_golden: 최근 3봉 내 상승 전환(스윙 진입 타이밍).
+    """
+    if len(closes) < slow + signal_n:
+        return None
+    ef, es = ema_series(closes, fast), ema_series(closes, slow)
+    line = [f - s for f, s in zip(ef[-len(es):], es)]
+    sig = ema_series(line, signal_n)
+    if not sig:
+        return None
+    hist = [ln - s for ln, s in zip(line[-len(sig):], sig)]
+    state = None
+    if len(hist) >= 2:
+        if hist[-1] > 0 >= hist[-2]:
+            state = "golden"
+        elif hist[-1] < 0 <= hist[-2]:
+            state = "dead"
+    recent_golden = (state == "golden")
+    if len(hist) >= 4:
+        recent_golden = any(h2 > 0 >= h1
+                            for h1, h2 in zip(hist[-4:-1], hist[-3:]))
+    return {"hist": round(hist[-1], 4), "line": round(line[-1], 4),
+            "signal": round(sig[-1], 4), "state": state,
+            "rising": len(hist) >= 2 and hist[-1] > hist[-2],
+            "recent_golden": recent_golden}
+
+
+def adx(candles: list[dict], n: int = 14) -> float | None:
+    """ADX(14) — 추세 '강도'(순수 함수). 25↑ 강한 추세, 20↓ 횡보(방향 무관).
+
+    스윙에서 '진짜 추세 vs 횡보'를 거르는 용도. 고가/저가 없는 데이터면 None.
+    """
+    rows = []
+    for c in candles or []:
+        h, low, cl = c.get("high"), c.get("low"), c.get("close")
+        if None in (h, low, cl):
+            return None
+        rows.append((h, low, cl))
+    if len(rows) < 2 * n + 1:
+        return None
+    trs, pdms, ndms = [], [], []
+    for (ph, pl, pc), (h, low, _c) in zip(rows, rows[1:]):
+        trs.append(max(h - low, abs(h - pc), abs(low - pc)))
+        up, dn = h - ph, pl - low
+        pdms.append(up if (up > dn and up > 0) else 0.0)
+        ndms.append(dn if (dn > up and dn > 0) else 0.0)
+
+    def wilder(xs: list[float]) -> list[float]:
+        s = sum(xs[:n])
+        out = [s]
+        for x in xs[n:]:
+            s = s - s / n + x
+            out.append(s)
+        return out
+
+    dxs = []
+    for a, p, q in zip(wilder(trs), wilder(pdms), wilder(ndms)):
+        if a <= 0:
+            continue
+        pdi, ndi = 100 * p / a, 100 * q / a
+        tot = pdi + ndi
+        if tot:
+            dxs.append(100 * abs(pdi - ndi) / tot)
+    if len(dxs) < n:
+        return None
+    return round(sum(dxs[-n:]) / n, 1)
+
+
 def momentum_pct(values: list[float], n: int) -> float | None:
     if len(values) < n + 1 or values[-n - 1] == 0:
         return None
@@ -68,6 +153,7 @@ def evaluate_signals(closes: list[float]) -> dict:
     r = rsi(closes)
     mom = momentum_pct(closes, 60)
     boll = bollinger_pos(closes)
+    m = macd(closes)
 
     score = 0
     if cross == "golden":
@@ -88,6 +174,9 @@ def evaluate_signals(closes: list[float]) -> dict:
         "rsi": r, "rsi_state": (None if r is None else
                                 "oversold" if r < 30 else "overbought" if r > 70 else "neutral"),
         "momentum_pct": mom, "bollinger_pos": boll,
+        "macd_hist": m["hist"] if m else None,
+        "macd_state": m["state"] if m else None,
+        "macd_up": (m["hist"] > 0) if m else None,
         "score": score, "signal": signal, "bars": len(closes),
     }
 

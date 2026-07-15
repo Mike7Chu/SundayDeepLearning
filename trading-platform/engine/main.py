@@ -310,18 +310,25 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict) -> No
     async with httpx.AsyncClient(timeout=15) as client:
         for q in stage1_rank(quotes, held, top=40):
             code = q["code"]
-            closes = await _closes(redis, code)
-            if len(closes) < 60 and toss.enabled:   # 일봉 없으면 온디맨드(6h 캐시)
+            candles: list = []
+            raw_c = await redis.get(stock_ohlcv_key(code))
+            if raw_c:
+                try:
+                    candles = json.loads(raw_c)
+                except (json.JSONDecodeError, TypeError):
+                    candles = []
+            if len(candles) < 60 and toss.enabled:   # 일봉 없으면 온디맨드(6h 캐시)
                 try:
                     candles = await toss.fetch_daily_history(client, code)
                     if candles:
                         await redis.set(stock_ohlcv_key(code),
                                         json.dumps(candles, ensure_ascii=False),
                                         ex=21600)
-                        closes = [c["close"] for c in candles if c.get("close")]
                 except Exception:
                     continue
-            m = swing_metrics(q, closes)
+            closes = [c["close"] for c in candles
+                      if isinstance(c, dict) and c.get("close")]
+            m = swing_metrics(q, candles)
             if not m:
                 continue
             kr = code.isdigit()

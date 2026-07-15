@@ -154,6 +154,8 @@ const HELP={
   value:"이익·자산 대비 싼가", quality:"돈 잘 버는 튼튼한 회사인가",
   momentum:"주가가 오르는 추세인가", timing:"지금 사기 좋은 때인가",
   rsi:"과열(70↑)·침체(30↓) 정도", sma:"평균선 교차 · 골든=상승 신호",
+  macd:"추세의 힘이 어느 쪽인지 — 상승 우세/하락 우세. '골든'은 상승 전환 신호",
+  adx:"추세가 얼마나 강한지(방향 무관) · 25↑ 강한 추세, 20↓ 횡보",
   divy:"1년 배당을 주가로 나눈 비율", div:"1주당 받는 배당금",
 };
 const TARGET=10000000000;   // 100억
@@ -638,7 +640,9 @@ async function openStock(code,name){
       P.pillar?'<span class="buy">💡 빛의기둥</span>':numC(P.value_eok,0)+"억",
       P.pillar?`거래대금 ${numC(P.value_eok,0)}억 · 평소의 ${numC(P.surge_x,1)}배 · 고가 마감 장대양봉 — 추격 주의`
               :`오늘 거래대금 ${numC(P.value_eok,0)}억${P.surge_x?` · 평소의 ${numC(P.surge_x,1)}배`:''}`):'';
-    const sgH=S?`<div class="cgrid">${kv("흐름",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"위 종합점수의 '추세'와 같은 기준")}${kv("RSI",numC(S.rsi),HELP.rsi)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}${pillarCard}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
+    const macdTxt=S&&S.macd_hist!=null?((S.macd_hist>0?'<span class="pos">상승 우세</span>':'<span class="neg">하락 우세</span>')+(S.macd_state==="golden"?' · <b class="buy">골든</b>':S.macd_state==="dead"?' · <b class="sell">데드</b>':'')):'–';
+    const adxTxt=S&&S.adx!=null?(numC(S.adx,0)+(S.adx>=25?' · <span class="pos">강한 추세</span>':S.adx<20?' · 횡보':'')):'–';
+    const sgH=S?`<div class="cgrid">${kv("흐름",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"위 종합점수의 '추세'와 같은 기준")}${kv("추세 힘(MACD)",macdTxt,HELP.macd)}${kv("추세 강도(ADX)",adxTxt,HELP.adx)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}${pillarCard}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
     const L=d.levels;
     const lvH=L?`<div class="cgrid">
       ${kv("추천 매수가",`<span class="pos">${MN(L.entry)}</span>`,`${L.entry_basis} 기준 · 추격 매수 방지`)}

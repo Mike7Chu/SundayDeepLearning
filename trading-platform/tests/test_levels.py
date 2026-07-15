@@ -70,3 +70,30 @@ def test_trade_levels_us_cents():
     assert lv["stop"] < lv["entry"] < lv["target"]
     for k in ("entry", "stop", "target"):
         assert abs(lv[k] - round(lv[k], 2)) < 1e-9   # 센트 단위
+
+
+def test_macd_and_adx():
+    from api.services.stock_signal import adx, macd
+
+    # 하락 후 상승 전환 시계열: MACD 히스토그램이 음→양 골든
+    closes = [1000 - i * 5 for i in range(50)] + [750 + i * 12 for i in range(40)]
+    m = macd(closes)
+    assert m and m["hist"] > 0 and m["recent_golden"] in (True, False)
+    # 상승 지속 구간이면 MACD 라인(단기-장기)이 0 위
+    up = []
+    v = 1000.0
+    for i in range(90):
+        v += 15 if i % 2 == 0 else -10
+        up.append(v)
+    assert macd(up)["line"] > 0
+    assert macd(up[:20]) is None                       # 데이터 부족
+
+    def bar(c, spread=10):
+        return {"high": c + spread, "low": c - spread, "close": c}
+
+    # 뚜렷한 추세 vs 횡보: ADX가 추세 쪽이 확연히 높다
+    trend = [bar(1000 + i * 12) for i in range(60)]
+    chop = [bar(1000 + (5 if i % 2 == 0 else -5)) for i in range(60)]
+    at, ac = adx(trend), adx(chop)
+    assert at is not None and ac is not None and at > 25 and at > ac
+    assert adx([{"close": 1}] * 60) is None            # 고가/저가 없음

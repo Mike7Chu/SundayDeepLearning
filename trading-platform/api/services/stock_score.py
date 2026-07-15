@@ -127,14 +127,18 @@ def _momentum_axis(closes: list[float]) -> tuple[float, list[str], dict]:
 
 
 def _timing_axis(q: dict, closes: list[float], sig: dict) -> tuple[float, list[str]]:
-    """타이밍 10점: RSI 과열 아님(5) + 52주 하단 근접(5). 일봉 없으면 5(중립)."""
+    """타이밍 10점: MACD 상승 힘(5) + 52주 하단 근접(5). 일봉 없으면 5(중립).
+
+    (RSI는 강한 추세에서 계속 과열로 읽혀 랠리 주도주를 감점하는 오판이 잦아
+    추세 전환·방향에 강건한 MACD로 교체.)
+    """
     if not sig:
         return 5.0, []
     reasons = []
-    rsi = sig.get("rsi")
-    rsi_score = 2.5 if rsi is None else (5.0 if rsi <= 70 else 0.0)
-    if rsi is not None and rsi <= 70:
-        reasons.append(f"RSI {rsi:.0f}")
+    up = sig.get("macd_up")
+    rsi_score = 2.5 if up is None else (5.0 if up else 0.0)
+    if up:
+        reasons.append("MACD 상승")
     price = q.get("price") or (closes[-1] if closes else None)
     hi, lo = q.get("high_52w"), q.get("low_52w")
     entry_score = 5.0

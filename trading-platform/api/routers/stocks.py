@@ -15,6 +15,7 @@ from collector.news.dart import DartClient
 from collector.stock.toss import TossClient, candle_metrics
 from api.services.stock_dividend import compute_dividend, dividend_view
 from api.services.stock_signal import (
+    adx,
     evaluate_signals,
     light_pillar,
     signals_for,
@@ -253,6 +254,8 @@ async def stock_detail(code: str) -> dict:
                              _json.dumps(quote, ensure_ascii=False))
     sig = ({"code": code, "name": quote.get("name", ""), **evaluate_signals(closes)}
            if len(closes) >= 20 else None)
+    if sig is not None:
+        sig["adx"] = adx(candles)   # 추세 강도(고가·저가 필요 — 캔들 원본 기준)
     score = compute_score(quote, closes)
     levels = trade_levels(closes, quote.get("price"), kr=kr)
     pillar = light_pillar(candles) if kr else None   # 수급 기준(억원)은 국내 전용

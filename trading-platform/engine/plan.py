@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from api.services.stock_signal import evaluate_signals, trade_levels
+from api.services.stock_signal import adx, evaluate_signals, macd, trade_levels
 
 
 def _growth_of(q: dict) -> tuple[float | None, str]:
@@ -49,48 +49,69 @@ def stage1_rank(quotes: list[dict], held: set[str], top: int = 40) -> list[dict]
     return [q for _, q in rows[:top]]
 
 
-def swing_metrics(q: dict, closes: list[float]) -> dict | None:
+def swing_metrics(q: dict, candles: list) -> dict | None:
     """2차 스윙 점수(0~100, 순수 함수): 실적 40 + 추세 40 + 타이밍 20.
 
-    상승추세(정배열·SMA60 위)가 아니거나 RSI 75↑ 과열이면 탈락(None).
+    지표는 RSI 대신 스윙 검증력이 높은 조합:
+    - MACD(12·26·9): 추세 방향·전환 — 강한 추세에서 RSI처럼 조기 과열 오판 없음
+    - ADX(14): 추세 '강도' — 진짜 추세와 횡보를 구분(25↑ 강추세)
+    - 이격 과열: SMA20 대비 +15% 초과 확장만 추격 금지(실적 랠리 주도주는 통과)
+    입력은 캔들 dict 리스트(고가·저가로 ADX 계산) 또는 종가 리스트(ADX 생략).
+    탈락 조건: 하락추세(SMA60 아래·역배열) 또는 이격 과열.
     """
+    if candles and isinstance(candles[0], dict):
+        closes = [c["close"] for c in candles if c.get("close")]
+        a = adx(candles)
+    else:
+        closes = list(candles or [])
+        a = None
     if len(closes) < 60:
         return None
     price = q.get("price") or closes[-1]
     sig = evaluate_signals(closes)
-    s20, s60, rsi = sig.get("sma20"), sig.get("sma60"), sig.get("rsi")
+    s20, s60 = sig.get("sma20"), sig.get("sma60")
     if not (s20 and s60 and price > s60 and s20 > s60):
         return None                                    # 스윙은 상승추세만
-    if rsi is not None and rsi > 75:
-        return None                                    # 과열 추격 금지
+    if price > s20 * 1.15:
+        return None                                    # 단기 이격 +15%↑ = 추격 금지
     g, g_label = _growth_of(q)
     g_pts = 15.0 if g is None else max(0.0, min(1.0, (g + 10) / 60)) * 40
-    mom3 = sig.get("momentum_pct")
-    t_pts = 10.0 + (10.0 if price > s20 else 0.0)      # 정배열 10 + SMA20 위 10
-    if mom3 is not None and mom3 > 0:
-        t_pts += 10.0
-        if mom3 >= 15:
-            t_pts += 10.0
-    if rsi is None:
-        tm = 10.0
-    elif 40 <= rsi <= 60:
-        tm = 20.0                                      # 눌림·재출발 스위트스팟
-    elif rsi < 40:
-        tm = 14.0
-    elif rsi <= 70:
-        tm = 10.0
+    m = macd(closes)
+    t_pts = 10.0                                       # 정배열·SMA60 위(게이트 통과)
+    if a is not None:
+        t_pts += 15.0 if a >= 25 else (10.0 if a >= 20 else 3.0)
     else:
-        tm = 4.0
+        t_pts += 8.0                                   # ADX 계산 불가 → 중립
+    if m:
+        if m["hist"] > 0:
+            t_pts += 15.0
+        elif m["rising"]:
+            t_pts += 7.0                               # 하락이지만 반전 중
+    if m is None:
+        tm = 10.0
+    elif m["recent_golden"]:
+        tm = 20.0                                      # MACD 상승 전환 직후 = 진입 적기
+    elif m["hist"] > 0:
+        tm = 12.0
+    else:
+        tm = 5.0
+    if s20 and abs(price / s20 - 1) <= 0.04:
+        tm = max(tm, 14.0)                             # SMA20 눌림목 근처
     reasons = []
     if g is not None:
         reasons.append(f"실적 {g:+.0f}%({g_label})")
-    reasons.append("정배열·SMA60↑" + ("·SMA20↑" if price > s20 else ""))
-    if mom3 is not None:
-        reasons.append(f"3개월 {mom3:+.0f}%")
-    if rsi is not None:
-        reasons.append(f"RSI {rsi:.0f}")
+    reasons.append("정배열·SMA60↑")
+    if m:
+        reasons.append("MACD " + ("골든(상승 전환)" if m["recent_golden"]
+                                  else "상승" if m["hist"] > 0
+                                  else "반전 중" if m["rising"] else "하락"))
+    if a is not None:
+        reasons.append(f"추세강도 {a:.0f}" + ("(강함)" if a >= 25 else ""))
+    if s20 and abs(price / s20 - 1) <= 0.04:
+        reasons.append("눌림목(SMA20 근처)")
     return {"swing": round(g_pts + t_pts + tm, 1), "reasons": reasons,
-            "rsi": rsi, "momentum_pct": mom3}
+            "adx": a, "macd_hist": m["hist"] if m else None,
+            "momentum_pct": sig.get("momentum_pct")}
 
 
 def sell_checks(h: dict, closes: list[float]) -> dict:
@@ -121,9 +142,10 @@ def sell_checks(h: dict, closes: list[float]) -> dict:
             reasons.append("추세 이탈(SMA60 아래)")
             if action == "보유":
                 action = "정리 검토"
-        if sig.get("sma_cross") == "dead":
+        m = macd(closes)
+        if m and m["hist"] < 0 and not m["rising"]:
             sev += 1
-            reasons.append("데드크로스")
+            reasons.append("MACD 하락(추세 힘 약화)")
     pnl = h.get("pnl_pct")
     if pnl is not None and pnl <= -8:                  # 중립 성향 손절폭
         sev += 2

@@ -40,9 +40,13 @@ def test_swing_metrics_gates_and_score():
     m = swing_metrics(q, up)
     assert m and m["swing"] > 50
     assert any("실적 +40%" in r for r in m["reasons"])
-    # 순수 단조 상승(RSI 100 과열)은 추격 금지 → 탈락
-    hot = [1000 + i * 10 for i in range(80)]
-    assert swing_metrics(_q("H", hot[-1], g=40), hot) is None
+    # 꾸준한 상승(과거 RSI 게이트라면 100으로 탈락)도 이젠 통과 — 실적 랠리
+    # 주도주를 놓치던 오판 제거(한미반도체 케이스)
+    steady = [1000 + i * 10 for i in range(80)]
+    assert swing_metrics(_q("H", steady[-1], g=40), steady) is not None
+    # 단, SMA20 대비 +15% 넘게 튄 포물선 급등(진짜 추격 위험)은 탈락
+    para = [1000.0] * 65 + [1000 * 1.08 ** i for i in range(1, 16)]
+    assert swing_metrics(_q("P", para[-1], g=40), para) is None
     # 하락 추세(SMA60 아래)면 탈락
     down = [2000 - i * 10 for i in range(80)]
     assert swing_metrics(_q("B", down[-1], g=40), down) is None
