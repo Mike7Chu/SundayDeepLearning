@@ -6,10 +6,16 @@ import json
 from fastapi import APIRouter
 
 from api.redis_client import get_redis
-from shared.redis_keys import ENGINE_BUYLIST_KEY, ENGINE_RISK_KEY
+from shared.redis_keys import ENGINE_BUYLIST_KEY, ENGINE_PLAN_KEY, ENGINE_RISK_KEY
 from shared.settings import settings
 
 router = APIRouter()
+
+
+@router.get("/plan")
+async def trade_plan() -> dict:
+    """오늘의 매매 플랜(실적+추세 스윙, 설문 맞춤) — 엔진이 10분마다 갱신."""
+    return await _jget(ENGINE_PLAN_KEY) or {"buys": [], "sells": [], "style": None}
 
 
 async def _jget(key: str) -> dict:

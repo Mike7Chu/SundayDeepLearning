@@ -15,6 +15,7 @@ import json
 import logging
 import time
 
+import httpx
 import redis.asyncio as aioredis
 
 from api.services.stock_score import compute_score
@@ -23,6 +24,7 @@ from api.services.stock_value import load_quotes
 from collector.stock.kis import effective_watchlist
 from collector.stock.toss import TossClient
 from engine.orders import place_gated_order
+from engine.plan import sell_checks, stage1_rank, suggest_qty, swing_metrics
 from engine.risk import evaluate_risk
 from engine.screener import final_score, quant_filter
 from engine.telegram_cmd import command_loop
@@ -33,7 +35,9 @@ from shared.redis_keys import (
     ENGINE_PILLAR_KEY,
     ENGINE_BUYLIST_KEY,
     ENGINE_PEAK_KEY,
+    ENGINE_PLAN_KEY,
     ENGINE_RISK_KEY,
+    FX_USDKRW_KEY,
     RESEARCH_INV_KEY,
     RESEARCH_INV_REQ_KEY,
     TOSS_ACCOUNT_KEY,
@@ -275,10 +279,81 @@ async def _cycle_loop(redis: aioredis.Redis, sender: TelegramSender,
             await _holdings_alerts(redis, sender)
             await _pillar_scan(redis, sender)
             await _pipeline(redis, sender, risk, toss, kis)
+            await _swing_plan(redis, toss, risk)
         except Exception as exc:
             # 어떤 오류도 엔진을 죽이지 않는다 — 기록 후 다음 주기.
             logger.warning("[DATA_ERROR] engine 사이클 실패: %s", exc)
         await asyncio.sleep(settings.engine_interval_sec)
+
+
+async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict) -> None:
+    """오늘의 매매 플랜(설문 맞춤: 실적+추세 스윙 · 후보 3개+근거 · 중립 · KR+US).
+
+    1차(실적·52주 위치)로 전 시장에서 상위 40개 → 일봉(없으면 토스 온디맨드,
+    6h 캐시)으로 스윙 점수 → 매수 후보 3. 보유는 매도 신호 심각도 상위 3.
+    """
+    quotes = await load_quotes(redis)
+    qmap = {q.get("code"): q for q in quotes if q.get("code")}
+    hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
+    holdings = hold.get("holdings", [])
+    held = {h.get("symbol") for h in holdings if h.get("symbol")}
+    asset, _cash = await _assets(redis)
+    fx_raw = await redis.get(FX_USDKRW_KEY)
+    fx = None
+    if fx_raw:
+        try:
+            fx = float(json.loads(fx_raw).get("rate") or 0) or None
+        except (json.JSONDecodeError, TypeError, ValueError):
+            fx = None
+
+    buys: list[dict] = []
+    async with httpx.AsyncClient(timeout=15) as client:
+        for q in stage1_rank(quotes, held, top=40):
+            code = q["code"]
+            closes = await _closes(redis, code)
+            if len(closes) < 60 and toss.enabled:   # 일봉 없으면 온디맨드(6h 캐시)
+                try:
+                    candles = await toss.fetch_daily_history(client, code)
+                    if candles:
+                        await redis.set(stock_ohlcv_key(code),
+                                        json.dumps(candles, ensure_ascii=False),
+                                        ex=21600)
+                        closes = [c["close"] for c in candles if c.get("close")]
+                except Exception:
+                    continue
+            m = swing_metrics(q, closes)
+            if not m:
+                continue
+            kr = code.isdigit()
+            lv = trade_levels(closes, q.get("price"), kr=kr) or {}
+            qty = suggest_qty(lv.get("entry") or 0, asset,
+                              risk.get("per_stock_cap"), fx=fx, usd=not kr)
+            buys.append({"code": code, "name": q.get("name", ""),
+                         "price": q.get("price"), "currency": q.get("currency", "KRW"),
+                         "swing": m["swing"], "reasons": m["reasons"],
+                         "entry": lv.get("entry"), "stop": lv.get("stop"),
+                         "target": lv.get("target"), "qty": qty})
+    buys.sort(key=lambda b: b["swing"], reverse=True)
+
+    sells: list[dict] = []
+    for h in holdings:
+        code = h.get("symbol") or ""
+        if not code:
+            continue
+        q = qmap.get(code, {})
+        h2 = {**h, "_growth": q.get("flash_ni_yoy") or q.get("ni_growth_q_pct")}
+        chk = sell_checks(h2, await _closes(redis, code))
+        if chk["severity"] > 0:
+            sells.append({"code": code, "name": h.get("name", ""),
+                          "pnl_pct": h.get("pnl_pct"), **chk})
+    sells.sort(key=lambda s: s["severity"], reverse=True)
+
+    await redis.set(ENGINE_PLAN_KEY, json.dumps(
+        {"style": "실적+추세 스윙 · 중립 리스크 · 국내 전체+미국",
+         "buys": buys[:3], "sells": sells[:3], "ts": time.time()},
+        ensure_ascii=False))
+    logger.info("[plan] 매수 후보 %d(검증 %d) · 매도 점검 %d",
+                min(3, len(buys)), len(buys), min(3, len(sells)))
 
 
 async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:

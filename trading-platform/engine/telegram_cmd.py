@@ -27,6 +27,7 @@ from notifier.telegram import TelegramSender
 from shared.redis_keys import (
     COACH_REQ_KEY,
     ENGINE_BUYLIST_KEY,
+    ENGINE_PLAN_KEY,
     ENGINE_RISK_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
@@ -40,7 +41,8 @@ from shared.settings import settings
 logger = logging.getLogger(__name__)
 
 _PENDING_TTL = 120.0   # '확인' 유효시간(초)
-_HELP = ("명령: 잔고 · 상태 · 후보 · 점검 · 도움말\n"
+_HELP = ("명령: 잔고 · 상태 · 후보 · 플랜 · 점검 · 도움말\n"
+         "플랜  ← 오늘의 매매 플랜(매수 후보 3 + 매도 점검 3, 스윙 맞춤)\n"
          "점검  ← AI 아침 점검(보유 종목 판정)을 지금 바로 요청\n"
          "매수 코드 수량 [가격] / 매도 코드 수량 [가격]  ← 기본 브로커(한투)\n"
          "토스매수 코드 수량 [가격] / 토스매도 …  ← 토스 계좌로 주문\n"
@@ -52,8 +54,9 @@ _HELP = ("명령: 잔고 · 상태 · 후보 · 점검 · 도움말\n"
 def parse_command(text: str) -> dict | None:
     """명령 문자열 → {cmd, ...} (순수 함수). 모르는 명령은 None."""
     t = (text or "").strip()
-    if t in ("잔고", "상태", "후보", "도움말", "/start", "help"):
-        return {"cmd": {"/start": "도움말", "help": "도움말"}.get(t, t)}
+    if t in ("잔고", "상태", "후보", "플랜", "매매플랜", "도움말", "/start", "help"):
+        return {"cmd": {"/start": "도움말", "help": "도움말",
+                        "매매플랜": "플랜"}.get(t, t)}
     if t.replace(" ", "") in ("점검", "지금점검", "아침점검", "오늘점검"):
         return {"cmd": "점검"}
     # 코드: 국내 6자리 또는 미국 티커(NVDA, BRK.B). 가격: 미국은 소수점(달러) 허용.
@@ -106,6 +109,31 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
     cmd = p["cmd"]
     if cmd == "도움말":
         await sender.send(_HELP)
+    elif cmd == "플랜":
+        p_ = await _jget(redis, ENGINE_PLAN_KEY)
+        buys, sells = p_.get("buys") or [], p_.get("sells") or []
+        if not buys and not sells:
+            await sender.send("🎯 매매 플랜 준비 중 — 엔진이 10분 주기로 갱신해요. "
+                              "잠시 후 다시 '플랜'을 보내주세요.")
+            return
+        lines = [f"🎯 오늘의 매매 플랜 ({p_.get('style', '')})"]
+        if buys:
+            lines.append("── 매수 후보 ──")
+            for i, b in enumerate(buys, 1):
+                us = b.get("currency") == "USD"
+                f = (lambda v: f"${v:,.2f}") if us else (lambda v: f"{v:,.0f}")
+                lines.append(
+                    f"{i}. {b.get('name') or b['code']}({b['code']}) 스윙 {b['swing']:.0f}점\n"
+                    f"   {' · '.join(b.get('reasons', []))}\n"
+                    f"   매수 {f(b['entry'])} / 손절 {f(b['stop'])} / 목표 {f(b['target'])}"
+                    + (f" · 제안 {b['qty']}주" if b.get("qty") else ""))
+        if sells:
+            lines.append("── 보유 매도 점검 ──")
+            for i, s in enumerate(sells, 1):
+                lines.append(f"{i}. {s.get('name') or s['code']} — {s['action']}: "
+                             f"{' · '.join(s.get('reasons', []))}")
+        lines.append("※ 판단 보조 — 최종 결정과 주문은 직접(매수 예: 토스매수 코드 수량 가격)")
+        await sender.send("\n".join(lines))
     elif cmd == "점검":
         # 호스트 research 프로세스가 큐를 소비(15초 폴링) → 완료 시 리포트 발송
         await redis.sadd(COACH_REQ_KEY, "now")

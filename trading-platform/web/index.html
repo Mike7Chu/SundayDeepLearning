@@ -226,7 +226,7 @@ async function render(){
 }
 
 async function renderHome(){
-  const [q,v,sc,d,n,pf,eng,co,mk]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine"),jget("/coach"),jget("/market")]);
+  const [q,v,sc,d,n,pf,eng,co,mk,pl]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine"),jget("/coach"),jget("/market"),jget("/plan")]);
   const quotes=q.rows||[], scores=sc.rows||[];
   const buys=scores.filter(r=>r.score>=60), sells=scores.filter(r=>r.score<45);
   const up=quotes.filter(r=>(r.change_pct||0)>0).length, dn=quotes.filter(r=>(r.change_pct||0)<0).length;
@@ -255,6 +255,7 @@ async function renderHome(){
              <span class="badge">목표까지 ${eok(Math.max(0,TARGET-cur))}</span></div>`}
     </div>
     ${coachCardHTML(co)}
+    ${planCardHTML(pl)}
     <div class="card"><h3>시장 온도</h3>
       ${idxRow("코스피",IND.kospi)}${idxRow("코스닥",IND.kosdaq)}
       ${INVK&&INVK.foreigner!=null?`<div class="row"><span>외국인 순매수(코스피·${(INVK.date||'').slice(5)})</span><b class="${INVK.foreigner>=0?'pos':'neg'}">${INVK.foreigner>=0?'+':''}${numC(INVK.foreigner,0)}억</b></div>`:''}
@@ -282,6 +283,28 @@ async function renderHome(){
   $("metaInfo").textContent=`관심종목 ${quotes.length} · 매수후보 ${buys.length}`;
 }
 function saveAsset(){ localStorage.setItem("curAsset", $("curAsset").value||0); renderHome(); }
+
+function planCardHTML(pl){
+  pl=pl||{};
+  const buys=pl.buys||[], sells=pl.sells||[];
+  if(!buys.length&&!sells.length) return '';
+  const mn=(v,us)=>v==null?"–":(us?money(v,"USD"):won(v));
+  const buyRows=buys.map((b,i)=>{const us=b.currency==="USD";
+    return `<div class="card" style="margin-top:8px"><div class="row clk" onclick="openStock('${b.code}','${qesc(b.name||'')}')">
+      <span><b>${i+1}. ${b.name||b.code}</b> <span class="num">${b.code}</span></span><b class="buy">스윙 ${numC(b.swing,0)}점</b></div>
+      <div class="num" style="margin:4px 0">${(b.reasons||[]).join(" · ")}</div>
+      <div class="row"><span>매수 <b class="pos">${mn(b.entry,us)}</b> · 손절 <b class="neg">${mn(b.stop,us)}</b> · 목표 <b class="buy">${mn(b.target,us)}</b></span>
+      <span>${b.qty?`제안 ${numC(b.qty,0)}주`:''}</span></div></div>`;}).join("");
+  const sellRows=sells.map((s,i)=>`<div class="row clk" onclick="openStock('${s.code}','${qesc(s.name||'')}')">
+    <span>${i+1}. ${s.name||s.code} <span class="badge sell">${s.action}</span></span>
+    <span class="num">${(s.reasons||[]).slice(0,2).join(" · ")}</span></div>`).join("");
+  return `<div class="card" style="grid-column:1/-1">
+    <h3>🎯 오늘의 매매 플랜 <span class="badge">${pl.style||''}</span>
+      <span class="badge" title="설문으로 맞춘 기준: 실적 개선(+10%↑) + 상승추세(정배열·SMA60 위) + 과열 아님(RSI 75↓)만 통과. 10분마다 전 시장에서 다시 뽑아요">?</span></h3>
+    ${buys.length?`<div><b>매수 후보</b> — 실적·추세·타이밍 상위 3</div>${buyRows}`:'<div class="empty">지금 기준을 통과한 매수 후보가 없어요(무리한 추천은 하지 않아요)</div>'}
+    ${sells.length?`<div style="margin-top:10px"><b>보유 매도 점검</b></div>${sellRows}`:''}
+    <div class="num" style="margin-top:8px">판단 보조 — 최종 결정·주문은 직접. 텔레그램 '플랜'으로도 받아볼 수 있어요.</div></div>`;
+}
 
 function coachCardHTML(co){
   co=co||{};
