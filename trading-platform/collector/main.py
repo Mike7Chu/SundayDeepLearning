@@ -776,7 +776,16 @@ async def toss_price_loop(redis: aioredis.Redis, toss: TossClient) -> None:
     await asyncio.sleep(10)   # 최초 일봉(prev_close) 적재 여유
     while True:
         try:
-            codes = [w["code"] for w in await effective_watchlist(redis)]
+            codes = {w["code"] for w in await effective_watchlist(redis)}
+            # 보유 종목도 실시간 시세 대상 — 관심에 없어도 잔고 화면·알림이 실시간이어야
+            try:
+                raw_h = await redis.get(TOSS_HOLDINGS_KEY)
+                if raw_h:
+                    codes |= {h["symbol"] for h in json.loads(raw_h).get("holdings", [])
+                              if h.get("symbol")}
+            except (json.JSONDecodeError, TypeError):
+                pass
+            codes = sorted(codes)
             async with httpx.AsyncClient(timeout=15) as client:
                 try:
                     prices = await toss.fetch_prices(client, codes)

@@ -14,11 +14,12 @@ from pydantic import BaseModel
 
 from api.redis_client import get_redis
 from api.services.cache import get_or_compute
-from collector.stock.toss import TossClient, TossError
+from collector.stock.toss import TossClient, TossError, live_overlay
 from engine.risk import order_allowed
 from shared.redis_keys import (
     ENGINE_RISK_KEY,
     FX_USDKRW_KEY,
+    STOCK_QUOTE_KEY,
     TOSS_ACCOUNT_KEY,
     TOSS_HOLDINGS_KEY,
 )
@@ -44,16 +45,37 @@ async def portfolio() -> dict:
             fx = json.loads(f_raw).get("rate")
         except (json.JSONDecodeError, TypeError):
             fx = None
+    # 실시간 오버레이: 잔고 스냅샷(30초)에 시세(15초, toss_price_loop가 보유 포함)를
+    # 덮어 화면이 장중 가격을 따라가게 한다. 시세 없으면 스냅샷 그대로.
+    holdings = snap.get("holdings", [])
+    totals = None
+    if holdings:
+        prices: dict[str, float] = {}
+        async with redis.pipeline(transaction=False) as pipe:
+            for h in holdings:
+                pipe.hget(STOCK_QUOTE_KEY, h.get("symbol") or "")
+            raws = await pipe.execute()
+        for h, raw_q in zip(holdings, raws):
+            if not raw_q:
+                continue
+            try:
+                p = json.loads(raw_q).get("price")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if p:
+                prices[h.get("symbol") or ""] = p
+        if prices:
+            totals = live_overlay(holdings, prices, fx)
     return {
         "fx_usdkrw": fx,
         "enabled": _toss.enabled,
         "trading_enabled": settings.toss_trading_enabled,
         "max_order_krw": settings.toss_max_order_krw,
-        "holdings": snap.get("holdings", []),
+        "holdings": holdings,
         "cash": snap.get("cash"),
-        "total_eval": snap.get("total_eval"),
-        "pnl": snap.get("pnl"),
-        "pnl_pct": snap.get("pnl_pct"),
+        "total_eval": (totals or {}).get("total_eval", snap.get("total_eval")),
+        "pnl": (totals or {}).get("pnl", snap.get("pnl")),
+        "pnl_pct": (totals or {}).get("pnl_pct", snap.get("pnl_pct")),
         "buying_power": acc.get("buying_power"),
         "ts": snap.get("ts"),
     }

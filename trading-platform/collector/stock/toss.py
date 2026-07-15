@@ -415,6 +415,42 @@ def parse_prices(res) -> list[dict]:
     return out
 
 
+def live_overlay(holdings: list[dict], prices: dict[str, float],
+                 fx_usdkrw: float | None) -> dict | None:
+    """보유 스냅샷(30초 주기)에 실시간 시세(15초 주기)를 덮어 재계산(순수 함수).
+
+    holdings 각 행의 cur_price/eval_amount/pnl/pnl_pct를 제자리 갱신하고,
+    원화 환산 합계 {"total_eval","pnl","pnl_pct"}를 반환.
+    USD 보유가 있는데 환율이 없으면 합계는 None(스냅샷 합계 유지) — 행은 갱신.
+    """
+    tot = cost = 0.0
+    convertible = True
+    for h in holdings:
+        lp = prices.get(h.get("symbol") or "")
+        qty, avg = h.get("qty") or 0.0, h.get("avg_price") or 0.0
+        if lp and qty:
+            h["cur_price"] = lp
+            h["eval_amount"] = round(lp * qty, 2)
+            if avg:
+                h["pnl"] = round((lp - avg) * qty, 2)
+                h["pnl_pct"] = round((lp / avg - 1) * 100, 2)
+        ev, cs = h.get("eval_amount") or 0.0, avg * qty
+        if h.get("currency") == "USD":
+            if not fx_usdkrw:
+                convertible = False
+                continue
+            ev, cs = ev * fx_usdkrw, cs * fx_usdkrw
+        tot += ev
+        cost += cs
+    if not convertible:
+        return None
+    out = {"total_eval": round(tot, 2)}
+    if cost > 0:
+        out["pnl"] = round(tot - cost, 2)
+        out["pnl_pct"] = round((tot / cost - 1) * 100, 2)
+    return out
+
+
 def parse_rankings(res) -> list[dict]:
     """랭킹(v1.2.2) → [{rank, symbol, price, change_pct, volume, amount_eok}].
 

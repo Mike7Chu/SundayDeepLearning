@@ -242,3 +242,34 @@ def test_ttl_cache_get_or_compute():
         await get_or_compute("t:key3", 0, factory)
         assert calls["n"] == 4
     asyncio.run(run())
+
+
+def test_live_overlay_recomputes_rows_and_totals():
+    from collector.stock.toss import live_overlay
+
+    holdings = [
+        {"symbol": "005930", "currency": "KRW", "qty": 100.0,
+         "avg_price": 65000.0, "cur_price": 70000.0, "eval_amount": 7_000_000.0,
+         "pnl": 500_000.0, "pnl_pct": 7.69},
+        {"symbol": "NVDA", "currency": "USD", "qty": 10.0,
+         "avg_price": 150.0, "cur_price": 170.0, "eval_amount": 1700.0},
+    ]
+    prices = {"005930": 72000.0, "NVDA": 180.0}
+    totals = live_overlay(holdings, prices, fx_usdkrw=1400.0)
+    # 행: 실시간가로 평가·손익 재계산
+    assert holdings[0]["cur_price"] == 72000.0
+    assert holdings[0]["eval_amount"] == 7_200_000.0
+    assert holdings[0]["pnl"] == 700_000.0 and holdings[0]["pnl_pct"] == 10.77
+    assert holdings[1]["eval_amount"] == 1800.0
+    # 합계: KR 720만 + US $1,800×1,400 = 972만 / 원금 650만+210만=860만
+    assert totals["total_eval"] == 9_720_000.0
+    assert totals["pnl"] == 1_120_000.0
+    # USD 보유 있는데 환율 없으면 합계 None(스냅샷 유지), 행은 갱신
+    h2 = [dict(h) for h in holdings]
+    assert live_overlay(h2, prices, fx_usdkrw=None) is None
+    assert h2[0]["cur_price"] == 72000.0
+    # 시세 없는 종목은 스냅샷 값 유지
+    h3 = [{"symbol": "X", "currency": "KRW", "qty": 1.0, "avg_price": 100.0,
+           "cur_price": 110.0, "eval_amount": 110.0}]
+    t3 = live_overlay(h3, {}, None)
+    assert h3[0]["cur_price"] == 110.0 and t3["total_eval"] == 110.0
