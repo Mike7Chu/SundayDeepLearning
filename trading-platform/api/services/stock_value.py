@@ -17,18 +17,26 @@ from shared.redis_keys import STOCK_MARKET_KEY, STOCK_QUOTE_KEY
 
 
 async def load_quotes(redis: aioredis.Redis) -> list[dict]:
-    """전체 시장(stock:market) ∪ 관심종목(stock:quote) 시세를 병합(코드 중복은 market 우선)."""
-    merged: dict[str, dict] = {}
-    for key in (STOCK_QUOTE_KEY, STOCK_MARKET_KEY):
-        raw = await redis.hgetall(key)
-        for v in raw.values():
-            try:
-                q = json.loads(v)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if q.get("code"):
-                merged[q["code"]] = q
-    return list(merged.values())
+    """전체 시장(stock:market) ∪ 관심종목(stock:quote) 시세를 병합(코드 중복은 market 우선).
+
+    3,600+종목 HGETALL+파싱은 Pi에서 수백 ms~수 초 — 여러 엔드포인트(전체종목·
+    살까말까·저평가·배당)가 각자 스캔하지 않게 12초 공유 캐시(시세 스윕 주기보다 짧음).
+    """
+    from api.services.cache import get_or_compute
+
+    async def _scan() -> list[dict]:
+        merged: dict[str, dict] = {}
+        for key in (STOCK_QUOTE_KEY, STOCK_MARKET_KEY):
+            raw = await redis.hgetall(key)
+            for v in raw.values():
+                try:
+                    q = json.loads(v)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if q.get("code"):
+                    merged[q["code"]] = q
+        return list(merged.values())
+    return await get_or_compute("load_quotes", 12, _scan)
 
 
 def _roe(eps: float | None, bps: float | None) -> float | None:

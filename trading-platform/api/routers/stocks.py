@@ -52,10 +52,16 @@ async def stocks_all() -> dict:
 
     전체 시장 파싱은 무겁고 원본은 5분 주기 갱신 → 20초 캐시(대시보드 12초 자동갱신 대응).
     """
+    # 응답 슬림화: 표에 쓰는 컬럼만 전송(전 필드 3,600행은 수 MB → 직렬화·전송 지연)
+    _COLS = ("code", "name", "price", "change_pct", "per", "pbr", "roe",
+             "ni_growth_q_pct", "ni_growth_q_label", "high_52w", "market_cap",
+             "currency")
+
     async def _build() -> dict:
         rows = [r for r in await load_quotes(get_redis()) if r.get("price")]
         rows.sort(key=lambda r: r.get("change_pct") or 0, reverse=True)
-        return {"rows": rows, "total": len(rows)}
+        slim = [{k: r.get(k) for k in _COLS if r.get(k) is not None} for r in rows]
+        return {"rows": slim, "total": len(slim)}
     return await get_or_compute("stocks_all", 20, _build)
 
 

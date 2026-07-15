@@ -186,10 +186,14 @@ function drawTable(id){
       return dir*String(x).localeCompare(String(y),"ko"); }); }
   const head=s.cols.map((c,i)=>{ const a=(s.sort&&s.sort.key===c.key)?`<span class="arrow">${s.sort.dir<0?"▼":"▲"}</span>`:"";
     return `<th ${c.hint?`title="${c.hint}"`:""} onclick="sortBy('${id}',${i})">${c.label}${a}</th>`; }).join("");
-  const body=rows.length? rows.map(r=>{
+  // DOM 행수 제한: 수천 행 렌더링이 탭 전환·자동갱신을 수 초씩 지연시키는 주범
+  const cap=s.opts.maxRows||0, total=rows.length;
+  const shown=(cap&&total>cap)?rows.slice(0,cap):rows;
+  const more=(cap&&total>cap)?`<tr><td colspan="${s.cols.length}" class="empty">전체 ${total.toLocaleString("ko-KR")}종목 중 상위 ${cap}개 표시 — 검색·정렬로 좁혀보세요</td></tr>`:"";
+  const body=shown.length? shown.map(r=>{
       const clk=s.opts.rowClick?` class="clk" onclick="${s.opts.rowClick(r)}"`:"";
       const tds=s.cols.map(c=>`<td class="${c.cls?c.cls(r):(c.num===false?"":"num")}">${c.fmt?c.fmt(r):(r[c.key]??"–")}</td>`).join("");
-      return `<tr${clk}>${tds}</tr>`; }).join("")
+      return `<tr${clk}>${tds}</tr>`; }).join("")+more
     : `<tr><td colspan="${s.cols.length}" class="empty">${s.opts.empty||"데이터 없음"}</td></tr>`;
   document.getElementById(id).innerHTML=`<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
@@ -450,7 +454,7 @@ async function renderStocks(){
     {label:"분기이익 성장", key:"ni_growth_q_pct", hint:"최근 분기 순이익이 작년 같은 분기 대비 얼마나 늘었나 — 가장 최신 공식 실적", fmt:qGrowthFmt, cls:r=>"num "+((r.ni_growth_q_pct||0)>=0?"pos":"neg")},
     {label:"1년 최고가", key:"high_52w", hint:HELP.w52, fmt:r=>r.currency==="USD"?money(r.high_52w,"USD"):fmt(r.high_52w)},
     {label:"시가총액", key:"market_cap", hint:HELP.cap, fmt:r=>r.currency==="USD"?(r.market_cap==null?"–":numC(r.market_cap,0)+"억$"):capF(r.market_cap)},
-  ], rows, {rowClick:rowOpen, sort:{key:"change_pct",dir:-1}, empty:"수집 대기 (시세 없음)"});
+  ], rows, {rowClick:rowOpen, sort:{key:"change_pct",dir:-1}, empty:"수집 대기 (시세 없음)", maxRows:300});
   $("metaInfo").textContent=`${rows.length}종목 · 전체 시장${term()?" (검색)":""}`;
 }
 async function renderValue(){
@@ -495,7 +499,7 @@ async function renderDividend(){
     {label:"1주당 배당금", key:"annual_per_share", hint:HELP.div, fmt:r=>numC(r.annual_per_share,0)},
     {label:"배당수익률", key:"yield_pct", hint:HELP.divy, fmt:r=>r.yield_pct!=null?r.yield_pct+"%":"–", cls:()=>"num strong pos"},
     {label:"다음 배당일", key:"next_ex_date", num:false, fmt:r=>r.next_ex_date||"–"},
-  ], rows, {rowClick:rowOpen, sort:{key:"yield_pct",dir:-1}, empty:"배당금 데이터 대기 (KIS 키 필요)"});
+  ], rows, {rowClick:rowOpen, sort:{key:"yield_pct",dir:-1}, empty:"배당금 데이터 대기 (KIS 키 필요)", maxRows:300});
   $("metaInfo").textContent=`배당금 · ${rows.length}종목`;
 }
 async function renderNews(){
