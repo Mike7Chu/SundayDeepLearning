@@ -30,6 +30,10 @@ KST = timezone(timedelta(hours=9))
 # (SOX 지수는 토스 미제공 → 대표 종목 바스켓 평균으로 근사. 웹검색 불필요·실측.)
 US_SEMI_REFS = [("NVDA", "엔비디아"), ("AMD", "AMD"), ("AVGO", "브로드컴"),
                 ("TSM", "TSMC"), ("MU", "마이크론"), ("INTC", "인텔")]
+# AI 인프라 투자(CAPEX) 프록시 — HBM 최종 수요는 빅테크 데이터센터 투자가 결정.
+# (HBM/DDR 현물가는 무료 공식 소스가 없어 마이크론·빅테크 주가로 프록시.)
+US_AI_REFS = [("MSFT", "마이크로소프트"), ("META", "메타"),
+              ("GOOGL", "알파벳"), ("AMZN", "아마존"), ("ASML", "ASML")]
 
 
 def should_run(now_ts: float, last_ts: float | None, hour_kst: int = 8) -> bool:
@@ -97,12 +101,32 @@ def us_semi_block(rows: list[dict] | None) -> list[str]:
     return lines
 
 
+def us_ai_block(rows: list[dict] | None) -> list[str]:
+    """AI 인프라 투자(CAPEX) 프록시 — 빅테크 간밤 등락(순수 함수).
+
+    HBM 수요의 원천인 데이터센터 투자 주체들. 주가 흐름을 투자 심리 프록시로 제공.
+    """
+    rows = [r for r in (rows or []) if r.get("price") is not None]
+    if not rows:
+        return []
+    parts = []
+    for r in rows:
+        c = r.get("change_pct")
+        txt = f"{r.get('name') or r.get('symbol')}"
+        if c is not None:
+            txt += f" {c:+.2f}%"
+        parts.append(txt)
+    return ["[AI 인프라 투자(CAPEX) 프록시 — 빅테크 간밤(실측)] " + " · ".join(parts)
+            + " (HBM 최종 수요 심리의 간접 지표)"]
+
+
 def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
                        details: dict[str, dict], filings: list[dict],
                        risk: dict, today: str = "",
                        fx_usdkrw: float | None = None,
                        indicators: dict | None = None,
-                       us_semis: list[dict] | None = None) -> str:
+                       us_semis: list[dict] | None = None,
+                       us_ai: list[dict] | None = None) -> str:
     """보유 스냅샷 + 목표 + 종목 정량 + 공시 + 리스크 → 데이터 블록(순수 함수).
 
     details: {종목코드: {"score","verdict","ni_growth_q_pct","ni_growth_q_label",
@@ -118,7 +142,7 @@ def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
         return ev
 
     total = sum(_krw(h) for h in hs)
-    lines = market_block(indicators) + us_semi_block(us_semis)
+    lines = market_block(indicators) + us_semi_block(us_semis) + us_ai_block(us_ai)
     lines.append(f"[내 실계좌 — {today or '오늘'} 기준]" if today else "[내 실계좌]")
     te = snap.get("total_eval") or total
     lines.append(f"- 총 평가액: {te:,.0f}원"
@@ -168,6 +192,9 @@ def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
         g = f"[내 목표] 수익률 {goal['target_pct']:+.0f}%"
         if goal.get("deadline"):
             g += f" (기한: {goal['deadline']})"
+            # 기한이 지난 낡은 목표: '오류'가 아니라 사용자가 홈에서 재설정할 대상
+            if today and goal["deadline"] < today[:10]:
+                g += " ⚠️ 기한 경과 — 사용자 설정값이 낡았음. 재설정을 제안하되 오류로 취급하지 말 것"
         if goal.get("memo"):
             g += f" — 메모: {goal['memo']}"
         lines.append(g)
@@ -242,19 +269,25 @@ async def gather_coach(redis: aioredis.Redis) -> str | None:
             ind = json.loads(ind_raw)
         except (json.JSONDecodeError, TypeError):
             ind = None
-    # 미국 반도체 간밤 실측(토스 미장 유니버스 수집분) — 웹검색 없이 주입
-    us_semis: list[dict] = []
-    for sym, name in US_SEMI_REFS:
-        raw_m = await redis.hget(STOCK_MARKET_KEY, sym)
-        if not raw_m:
-            continue
-        try:
-            rec = json.loads(raw_m)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        us_semis.append({"symbol": sym, "name": rec.get("name") or name,
-                         "price": rec.get("price"),
-                         "change_pct": rec.get("change_pct")})
+    # 미국 반도체·빅테크 간밤 실측(토스 미장 유니버스 수집분) — 웹검색 없이 주입
+    async def _refs(pairs: list[tuple[str, str]]) -> list[dict]:
+        out: list[dict] = []
+        for sym, name in pairs:
+            raw_m = await redis.hget(STOCK_MARKET_KEY, sym)
+            if not raw_m:
+                continue
+            try:
+                rec = json.loads(raw_m)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            out.append({"symbol": sym, "name": rec.get("name") or name,
+                        "price": rec.get("price"),
+                        "change_pct": rec.get("change_pct")})
+        return out
+
+    us_semis = await _refs(US_SEMI_REFS)
+    us_ai = await _refs(US_AI_REFS)
     today = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return build_coach_prompt(snap, cash, goal, details, filings, risk, today,
-                              fx_usdkrw=fx, indicators=ind, us_semis=us_semis)
+                              fx_usdkrw=fx, indicators=ind, us_semis=us_semis,
+                              us_ai=us_ai)

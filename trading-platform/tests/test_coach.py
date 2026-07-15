@@ -121,3 +121,26 @@ def test_us_semi_block_in_prompt():
     # 프롬프트에 미국 블록 포함
     block = build_coach_prompt(_snap(), None, {}, {}, [], {}, us_semis=rows)
     assert "[미국 반도체 — 간밤 종가·등락(실측, 토스)]" in block
+
+
+def test_us_ai_block_and_expired_goal():
+    from research.coach import us_ai_block
+
+    rows = [{"symbol": "MSFT", "name": "마이크로소프트", "price": 512.0,
+             "change_pct": 1.3},
+            {"symbol": "META", "name": "메타", "price": 700.0, "change_pct": -0.8}]
+    lines = us_ai_block(rows)
+    assert lines and "마이크로소프트 +1.30%" in lines[0]
+    assert "CAPEX" in lines[0]
+    assert us_ai_block(None) == []
+    # 기한 지난 목표: '오류'가 아니라 재설정 대상으로 표기
+    goal = {"target_pct": 35, "deadline": "2026-07-10", "memo": "코인 손실 복구"}
+    block = build_coach_prompt(_snap(), None, goal, {}, [], {},
+                               today="2026-07-16 08:00", us_ai=rows)
+    assert "기한 경과" in block and "오류로 취급하지 말 것" in block
+    assert "[AI 인프라 투자(CAPEX) 프록시" in block
+    # 기한이 안 지났으면 경고 없음
+    ok = build_coach_prompt(_snap(), None,
+                            {"target_pct": 35, "deadline": "2026-12-31"},
+                            {}, [], {}, today="2026-07-16 08:00")
+    assert "기한 경과" not in ok
