@@ -149,6 +149,43 @@ def quarter_candidates(today: _dt.date) -> list[tuple[str, int, str]]:
 _FLASH_RE = re.compile(r"잠정.{0,3}실적|실적.{0,3}잠정")
 
 
+def parse_flash_figures(text: str) -> dict | None:
+    """잠정실적 공시 본문 텍스트 → 전년동기 대비 증감율(순수 함수).
+
+    표준 공정공시 표: 각 계정(매출액/영업이익/당기순이익) 행이
+    [당해실적, 전기실적, 전기대비증감율, 전년동기실적, 전년동기대비증감율]
+    순서 — 5번째 수치가 YoY%. 음수 표기 '△'/'-' 처리. 못 찾으면 None.
+    """
+    if not text:
+        return None
+
+    def yoy(keyword: str, stop: tuple[str, ...]) -> float | None:
+        i = text.find(keyword)
+        if i < 0:
+            return None
+        seg = text[i + len(keyword):]
+        ends = [seg.find(s) for s in stop if seg.find(s) > 0]
+        if ends:
+            seg = seg[:min(ends)]
+        toks = re.findall(r"[△\-–－]?\d[\d,]*(?:\.\d+)?", seg)
+        if len(toks) < 5:
+            return None
+        t = toks[4].replace(",", "")
+        neg = t[0] in "△-–－"
+        try:
+            v = float(t.lstrip("△-–－"))
+        except ValueError:
+            return None
+        return round(-v if neg else v, 1)
+
+    out = {
+        "rev_yoy": yoy("매출액", ("영업이익",)),
+        "op_yoy": yoy("영업이익", ("법인세", "당기순이익")),
+        "ni_yoy": yoy("당기순이익", ("지배기업", "※", "정보제공")),
+    }
+    return out if any(v is not None for v in out.values()) else None
+
+
 def find_earnings_flash(disclosures: list[dict], code: str) -> dict | None:
     """최근 공시 목록에서 해당 종목의 최신 '잠정실적' 공시 1건(순수 함수).
 
@@ -212,6 +249,31 @@ class DartClient:
             if g is not None:
                 return {"growth": g, "label": label}
         return None
+
+    async def fetch_flash_figures(self, client: httpx.AsyncClient,
+                                  rcept_no: str) -> dict | None:
+        """잠정실적 공시 원문(document.xml zip)에서 YoY 수치 추출.
+
+        정기보고서(45일 뒤)를 기다리지 않고 발표 당일 실적을 점수·AI에 반영.
+        """
+        r = await client.get("https://opendart.fss.or.kr/api/document.xml",
+                             params={"crtfc_key": settings.dart_api_key,
+                                     "rcept_no": rcept_no}, timeout=15)
+        r.raise_for_status()
+        try:
+            with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+                raw = b"".join(z.read(n) for n in z.namelist())
+        except zipfile.BadZipFile:
+            return None
+        for enc in ("utf-8", "euc-kr", "cp949"):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            text = raw.decode("utf-8", errors="ignore")
+        return parse_flash_figures(re.sub(r"<[^>]+>", " ", text))
 
     async def fetch_recent(self, client: httpx.AsyncClient, page_count: int = 100) -> list[dict]:
         """오늘자 최근 공시(전 종목) 목록. 최신순으로 page_count건."""

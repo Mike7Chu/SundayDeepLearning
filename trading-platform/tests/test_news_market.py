@@ -236,3 +236,42 @@ def test_quarter_candidates_august_halfyear():
     assert quarter_candidates(dt.date(2026, 11, 20))[0][2] == "2026.3Q"
     # 5월: 1Q 마감 달
     assert quarter_candidates(dt.date(2026, 5, 20))[0][2] == "2026.1Q"
+
+
+def test_parse_flash_figures():
+    from collector.news.dart import parse_flash_figures
+
+    # 표준 공정공시 표(태그 제거 후 텍스트): 당해/전기/전기比/전년동기/전년동기比
+    text = ("연결재무제표 기준 영업(잠정)실적 "
+            "매출액 1,540 1,380 11.6 1,020 51.0 "
+            "영업이익 620 550 12.7 310 100.0 "
+            "법인세비용차감전계속사업이익 600 540 11.1 300 100.0 "
+            "당기순이익 480 430 11.6 △120 -  ※ 정보제공")
+    fig = parse_flash_figures(text)
+    assert fig["rev_yoy"] == 51.0
+    assert fig["op_yoy"] == 100.0
+    # 순이익: 전년동기 △120(적자) → 증감율 '-' 표기라 토큰 5개 미달 → None 허용
+    assert fig["ni_yoy"] is None
+    # 음수 증감율(△) 처리
+    down = "매출액 900 1,000 △10.0 1,200 △25.0 영업이익 10 20 △50.0 40 △75.0 당기순이익 5 8 △37.5 20 △75.0 ※"
+    f2 = parse_flash_figures(down)
+    assert f2["rev_yoy"] == -25.0 and f2["op_yoy"] == -75.0 and f2["ni_yoy"] == -75.0
+    assert parse_flash_figures("") is None
+    assert parse_flash_figures("관련 없는 텍스트") is None
+
+
+def test_growth_axis_prefers_flash():
+    from api.services.stock_score import compute_score
+
+    base = {"code": "042700", "price": 216500, "eps": 2233, "bps": 7277,
+            "ni_growth_q_pct": -20.0, "ni_growth_q_label": "2026.1Q"}
+    old = compute_score(base, [])
+    fresh = compute_score({**base, "flash_ni_yoy": 120.0,
+                           "flash_label": "2026.07 잠정"}, [])
+    # 잠정실적(+120%)이 직전 분기(-20%)를 대체 → 성장 축 상승
+    assert fresh["growth"] > old["growth"]
+    assert any("잠정" in r for r in fresh["reasons"])
+    # 순이익 없고 영업이익만 있어도 사용
+    op_only = compute_score({**base, "flash_op_yoy": 80.0,
+                             "flash_label": "잠정"}, [])
+    assert op_only["growth"] > old["growth"]

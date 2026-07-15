@@ -629,10 +629,14 @@ async function openStock(code,name){
       :(D&&(D.yield_pct!=null||hist))?`<div class="cgrid">${kv("배당수익률",D.yield_pct!=null?D.yield_pct+"%":"–",HELP.divy)}${kv("1주당 배당금",numC(D.annual_per_share,0)+"원",HELP.div)}${kv("다음 배당일",D.next_ex_date||"–")}</div>${hist}`:`<div class="empty">배당금 ${collectHint}</div>`;
     const wbtn=d.in_watchlist?'<span class="badge pos">✓ 내 관심종목</span>':`<button class="btn buy" onclick="addWatchModal('${qesc(code)}','${qesc(name)}')">＋ 관심종목에 담기</button>`;
     const EF=d.earnings_flash;
-    const flashH=EF?`<div class="card" style="margin-bottom:10px;border-left:3px solid var(--pos,#2e7d32)">
-      <b>🆕 이번 분기 잠정실적 발표됨</b> <span class="num">(${(EF.date||'').replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3')})</span>
-      <div class="num" style="margin-top:4px"><a class="clk" href="${EF.url}" target="_blank">${escH(EF.title)}</a></div>
-      <div class="num" style="opacity:.7;margin-top:2px">아래 '분기 성장' 수치는 직전 정기보고서 기준 — 이 공시가 가장 최신 실적이에요. 공식 반영은 분기보고서 공시(마감 후 45일) 때 자동으로 갱신됩니다.</div></div>`:'';
+    const hasFig=Q.flash_rev_yoy!=null||Q.flash_op_yoy!=null||Q.flash_ni_yoy!=null;
+    const pctS=v=>v==null?"–":`<b class="${v>=0?'pos':'neg'}">${v>=0?'+':''}${numC(v,1)}%</b>`;
+    const figH=hasFig?`<div style="margin-top:6px">전년 동기 대비 — 매출 ${pctS(Q.flash_rev_yoy)} · 영업이익 ${pctS(Q.flash_op_yoy)} · 순이익 ${pctS(Q.flash_ni_yoy)} <span class="num">(${Q.flash_label||'잠정'}) → 위 점수의 '성장' 축에 반영됨</span></div>`:'';
+    const flashH=(EF||hasFig)?`<div class="card" style="margin-bottom:10px;border-left:3px solid var(--pos,#2e7d32)">
+      <b>🆕 이번 분기 잠정실적 발표됨</b> <span class="num">(${((EF&&EF.date)||Q.flash_date||'').replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3')})</span>
+      ${EF?`<div class="num" style="margin-top:4px"><a class="clk" href="${EF.url}" target="_blank">${escH(EF.title)}</a></div>`:''}
+      ${figH}
+      ${hasFig?'':'<div class="num" style="opacity:.7;margin-top:2px">아래 분기 성장 수치는 직전 정기보고서 기준 — 이 공시가 가장 최신 실적이에요. 수치 자동 추출은 발표 직후 몇 분 내 반영됩니다.</div>'}</div>`:'';
     $("mBody").innerHTML=`<div class="arow" style="margin-bottom:8px">${wbtn}</div>
       <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}
       <div class="modal-sec">회사 가치·실적</div>${flashH}${fund}

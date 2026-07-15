@@ -77,10 +77,18 @@ def _growth_axis(q: dict) -> tuple[float, list[str]]:
 
     이익이 급증하는 변곡점(예: AI·HBM 사이클)에서는 트레일링 PER이 높아도
     시장이 미래 이익을 반영 중일 수 있다. 데이터 없으면 중립(5점).
+    우선순위: 잠정실적(발표 당일 공시 원문에서 추출, 가장 최신) → 분기보고서 → 연간.
     """
-    gq = q.get("ni_growth_q_pct")               # 최근 분기(전년 동기 대비) 우선
-    g = gq if gq is not None else q.get("ni_growth_pct")
-    label = q.get("ni_growth_q_label") if gq is not None else "연간"
+    gf = q.get("flash_ni_yoy")
+    if gf is None:
+        gf = q.get("flash_op_yoy")              # 순이익 없으면 영업이익 YoY로
+    gq = q.get("ni_growth_q_pct")               # 최근 분기(전년 동기 대비)
+    if gf is not None:
+        g, label = gf, q.get("flash_label") or "잠정"
+    elif gq is not None:
+        g, label = gq, q.get("ni_growth_q_label")
+    else:
+        g, label = q.get("ni_growth_pct"), "연간"
     if g is None:
         return 5.0, []                          # 미수집 → 중립(가점·감점 없음)
     s = _clamp((g + 10) / 60)                    # -10%↓=0점, +50%↑=만점
@@ -171,6 +179,9 @@ def compute_score(quote: dict, closes: list[float] | None = None) -> dict:
         "ni_growth_pct": quote.get("ni_growth_pct"),
         "ni_growth_q_pct": quote.get("ni_growth_q_pct"),
         "ni_growth_q_label": quote.get("ni_growth_q_label"),
+        "flash_ni_yoy": quote.get("flash_ni_yoy"),
+        "flash_op_yoy": quote.get("flash_op_yoy"),
+        "flash_label": quote.get("flash_label"),
         "has_chart": bool(closes),
         "reasons": reasons,
     }

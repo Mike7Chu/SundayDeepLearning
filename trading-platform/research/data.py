@@ -105,7 +105,18 @@ async def gather(redis: aioredis.Redis, code: str) -> StockData | None:
                 filings.append(json.loads(item))
             except (json.JSONDecodeError, TypeError):
                 continue
-        sd.earnings_flash = find_earnings_flash(filings, code)
+        flash = find_earnings_flash(filings, code)
+        if not flash and quote.get("flash_label"):   # 공시 목록에서 밀려도 수치는 보존
+            flash = {"title": "영업(잠정)실적(공정공시)",
+                     "date": quote.get("flash_date", ""),
+                     "url": quote.get("flash_url", "")}
+        if flash:   # 추출된 발표 수치(YoY) 동봉 — 프롬프트에서 최신 실적으로 사용
+            for k in ("rev", "op", "ni"):
+                v = quote.get(f"flash_{k}_yoy")
+                if v is not None:
+                    flash[f"{k}_yoy"] = v
+            flash.setdefault("label", quote.get("flash_label"))
+        sd.earnings_flash = flash
     else:
         sd.earnings_flash = quote.get("earnings_flash")
     return sd
@@ -139,9 +150,14 @@ def format_for_prompt(d: StockData) -> str:
         f = d.earnings_flash
         lines.append(
             f"🆕 최신 실적 공시(잠정): {f.get('title', '')} — {f.get('date', '')} 발표. "
-            "정기보고서보다 최신인 '이번 분기 잠정실적'이 이미 나왔다. 위 분기 YoY는 "
-            "직전 정기보고서 기준이므로, 이 잠정실적 발표를 최우선 최신 정보로 감안해 "
-            "분석하라(웹 검색이 가능하면 발표 수치를 확인).")
+            "정기보고서보다 최신인 '이번 분기 잠정실적'이다. 위 분기 YoY보다 이 발표를 "
+            "최우선 최신 정보로 감안해 분석하라.")
+        figs = [(lab, f.get(k)) for lab, k in
+                (("매출", "rev_yoy"), ("영업이익", "op_yoy"), ("순이익", "ni_yoy"))
+                if f.get(k) is not None]
+        if figs:
+            lines.append("  발표 수치(전년 동기 대비, 공시 원문 추출): "
+                         + " · ".join(f"{lab} {v:+.1f}%" for lab, v in figs))
     if d.price and d.low_52w:
         up = (d.price / d.low_52w - 1) * 100
         lines.append(f"- 최근 1년 저점 대비 등락: {up:+.0f}% (실측 — 시장 대세를 반영한 실제 수치)")
