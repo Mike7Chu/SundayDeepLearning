@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from api.redis_client import get_redis
+from api.services.cache import get_or_compute
 from collector.stock.toss import TossClient, TossError
 from engine.risk import order_allowed
 from shared.redis_keys import (
@@ -180,18 +181,24 @@ async def place_oco(req: OcoRequest) -> dict:
 
 @router.get("/portfolio/oco")
 async def list_oco(status: str = "OPEN") -> dict:
-    """등록된 조건주문 조회(읽기 — 앱에서 등록한 것도 포함)."""
+    """등록된 조건주문 조회(읽기 — 앱에서 등록한 것도 포함).
+
+    대시보드 12초 자동갱신마다 토스를 때리지 않게 30초 캐시(외부 호출 절약).
+    """
     if not _toss.enabled:
         return {"rows": [], "enabled": False}
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            account = await _toss.resolve_account_seq(client)
-            if not account:
-                return {"rows": [], "enabled": True}
-            rows = await _toss.fetch_conditional_orders(client, account, status)
-        return {"rows": rows, "enabled": True}
-    except TossError as exc:
-        raise HTTPException(502, f"토스 오류: {exc.message}")
+
+    async def _build() -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                account = await _toss.resolve_account_seq(client)
+                if not account:
+                    return {"rows": [], "enabled": True}
+                rows = await _toss.fetch_conditional_orders(client, account, status)
+            return {"rows": rows, "enabled": True}
+        except TossError as exc:
+            return {"rows": [], "enabled": True, "error": exc.message}
+    return await get_or_compute(f"oco:{status}", 30, _build)
 
 
 @router.post("/portfolio/oco/{cond_id}/cancel")

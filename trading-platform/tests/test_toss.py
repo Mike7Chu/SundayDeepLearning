@@ -215,3 +215,30 @@ def test_parse_conditional_orders():
     assert rows[0]["first"]["trigger"] == 305.0
     assert rows[0]["second"]["price"] == 294.5
 
+
+
+def test_ttl_cache_get_or_compute():
+    import asyncio
+
+    from api.services.cache import get_or_compute
+
+    async def run():
+        calls = {"n": 0}
+
+        async def factory():
+            calls["n"] += 1
+            return {"v": calls["n"]}
+
+        # TTL 내 반복 호출은 1회만 계산
+        a = await get_or_compute("t:key", 5, factory)
+        b = await get_or_compute("t:key", 5, factory)
+        assert a == b == {"v": 1} and calls["n"] == 1
+        # 동시 요청도 1회만 계산(락)
+        rs = await asyncio.gather(*(get_or_compute("t:key2", 5, factory)
+                                    for _ in range(5)))
+        assert all(r == rs[0] for r in rs) and calls["n"] == 2
+        # TTL 0이면 매번 재계산
+        await get_or_compute("t:key3", 0, factory)
+        await get_or_compute("t:key3", 0, factory)
+        assert calls["n"] == 4
+    asyncio.run(run())

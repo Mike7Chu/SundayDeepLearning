@@ -20,6 +20,7 @@ from api.services.stock_signal import (
     signals_for,
     trade_levels,
 )
+from api.services.cache import get_or_compute
 from api.services.stock_score import compute_score
 from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
@@ -47,21 +48,36 @@ async def stocks() -> dict:
 
 @router.get("/stocks/all")
 async def stocks_all() -> dict:
-    """전체 시장 시세(수집된 유니버스 stock:market ∪ 관심종목 stock:quote). 등락률 정렬."""
-    rows = [r for r in await load_quotes(get_redis()) if r.get("price")]
-    rows.sort(key=lambda r: r.get("change_pct") or 0, reverse=True)
-    return {"rows": rows, "total": len(rows)}
+    """전체 시장 시세(수집된 유니버스 stock:market ∪ 관심종목 stock:quote). 등락률 정렬.
+
+    전체 시장 파싱은 무겁고 원본은 5분 주기 갱신 → 20초 캐시(대시보드 12초 자동갱신 대응).
+    """
+    async def _build() -> dict:
+        rows = [r for r in await load_quotes(get_redis()) if r.get("price")]
+        rows.sort(key=lambda r: r.get("change_pct") or 0, reverse=True)
+        return {"rows": rows, "total": len(rows)}
+    return await get_or_compute("stocks_all", 20, _build)
 
 
 @router.get("/stocks/value")
 async def stocks_value(limit: int = 200) -> dict:
     """가치투자 스크리너(마법공식 랭킹). 전체 시장 수집분(stock:market) 기준, 상위 limit."""
-    return await value_screener(get_redis(), limit=limit)
+    return await get_or_compute(
+        f"stocks_value:{limit}", 30,
+        lambda: value_screener(get_redis(), limit=limit))
 
 
 @router.get("/stocks/score")
 async def stocks_score(limit: int = 200) -> dict:
-    """투자 매력도 랭킹 — 가치·품질·모멘텀·타이밍 통합 0~100 + 판정. 전체시장∪관심."""
+    """투자 매력도 랭킹 — 가치·품질·모멘텀·타이밍 통합 0~100 + 판정. 전체시장∪관심.
+
+    전체 시장 스코어링(3,600+종목)은 Pi에서 수 초 — 30초 캐시로 화면 지연 방지.
+    """
+    return await get_or_compute(f"stocks_score:{limit}", 30,
+                                lambda: _score_build(limit))
+
+
+async def _score_build(limit: int) -> dict:
     redis = get_redis()
     quotes = [q for q in await load_quotes(redis) if q.get("price") and q.get("code")]
     # 미국(재무 미확보): 가치·품질·성장 축이 0이라 점수가 '회피'로 왜곡 → 랭킹 제외.
@@ -105,8 +121,10 @@ async def stocks_signals() -> dict:
 
 @router.get("/stocks/dividend")
 async def stocks_dividend(monthly_budget: float = 0.0) -> dict:
-    """배당수익률 랭킹 + (예산 지정 시) 정기 적립(DRIP) 제안."""
-    return await dividend_view(get_redis(), monthly_budget)
+    """배당수익률 랭킹 + (예산 지정 시) 정기 적립(DRIP) 제안. (전체 스캔 → 30초 캐시)"""
+    return await get_or_compute(
+        f"stocks_dividend:{monthly_budget}", 30,
+        lambda: dividend_view(get_redis(), monthly_budget))
 
 
 @router.get("/stocks/backtest/{code}")
