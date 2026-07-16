@@ -11,6 +11,8 @@ STOCK_DIVIDEND_KEY = "stock:dividend"
 RESEARCH_KEY = "research:reports"
 # 온디맨드 분석 요청 큐(set of 종목코드). 컨테이너 API가 넣고 호스트 research가 처리.
 RESEARCH_REQ_KEY = "research:requests"
+# 호스트 research 생존 신호(str epoch, TTL 180s) — 점검 요청 시 구동 여부 즉시 판별
+RESEARCH_HB_KEY = "research:heartbeat"
 
 # 관심종목 오버라이드(대시보드 편집). value=json[{code,name}]. 없으면 config/stocks.yaml.
 WATCHLIST_KEY = "stock:watchlist"

@@ -29,6 +29,7 @@ from shared.redis_keys import (
     ENGINE_BUYLIST_KEY,
     ENGINE_PLAN_KEY,
     ENGINE_RISK_KEY,
+    RESEARCH_HB_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
     TG_OFFSET_KEY,
@@ -135,10 +136,20 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
         lines.append("※ 판단 보조 — 최종 결정과 주문은 직접(매수 예: 토스매수 코드 수량 가격)")
         await sender.send("\n".join(lines))
     elif cmd == "점검":
-        # 호스트 research 프로세스가 큐를 소비(15초 폴링) → 완료 시 리포트 발송
+        # 호스트 research 생존 확인 후 접수 — 죽어 있으면 즉시 알려 헛기다림 방지
+        hb = await redis.get(RESEARCH_HB_KEY)
+        if not hb:
+            await sender.send(
+                "🚫 점검을 처리할 호스트 research가 응답하지 않아요(생존 신호 없음).\n"
+                "Pi에서 재시작해 주세요:\n"
+                "pkill -f research.main\n"
+                "cd ~/SundayDeepLearning/trading-platform && "
+                "nohup bash deploy/run-research-host.sh >/tmp/research.log 2>&1 &\n"
+                "재시작 후 '점검'을 다시 보내면 됩니다.")
+            return
         await redis.sadd(COACH_REQ_KEY, "now")
         await sender.send("🧭 아침 점검 요청됨 — 보유 종목 판정 + 미국 시황 확인 중. "
-                          "몇 분 내 리포트가 도착해요. (호스트 research 구동 필요)")
+                          "몇 분 내 리포트가 도착해요(실패해도 사유를 보내드려요).")
     elif cmd == "잔고":
         h = await _jget(redis, TOSS_HOLDINGS_KEY)
         a = await _jget(redis, TOSS_ACCOUNT_KEY)
@@ -150,11 +161,13 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
             f"매수여력 {a.get('buying_power') or 0:,.0f}원\n" + "\n".join(lines))
     elif cmd == "상태":
         r = await _jget(redis, ENGINE_RISK_KEY)
+        hb = await redis.get(RESEARCH_HB_KEY)
         await sender.send(
             f"🛡️ 리스크 실드 {'🔒매수잠금' if r.get('buy_lock') else '✅정상'}\n"
             f"MDD {r.get('mdd_pct')}% · 현금 {r.get('cash_pct')}% · "
             f"종목한도 {r.get('per_stock_cap') or 0:,.0f}원\n"
-            + " / ".join(r.get("reasons", [])))
+            + " / ".join(r.get("reasons", []))
+            + f"\nAI 리서치(호스트): {'✅ 구동 중' if hb else '🚫 응답 없음 — 재시작 필요'}")
     elif cmd == "후보":
         b = await _jget(redis, ENGINE_BUYLIST_KEY)
         rows = b.get("rows", [])[:5]
