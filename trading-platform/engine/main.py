@@ -19,7 +19,7 @@ import httpx
 import redis.asyncio as aioredis
 
 from api.services.stock_score import compute_score
-from api.services.stock_signal import light_pillar, trade_levels
+from api.services.stock_signal import light_pillar, pillar_guide, trade_levels
 from api.services.stock_value import load_quotes
 from collector.stock.kis import effective_watchlist
 from collector.stock.toss import TossClient
@@ -398,11 +398,13 @@ async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
         if await redis.hget(ENGINE_PILLAR_KEY, code) == today:
             continue                                    # 하루 1회
         await redis.hset(ENGINE_PILLAR_KEY, code, today)
+        guide = pillar_guide(candles, kr=code.isdigit())
         await sender.send(
             f"💡 빛의기둥(수급 포착) — {name or code}({code})\n"
             f"거래대금 {lp['value_eok']:,.0f}억 · 평소의 {lp['surge_x']:.1f}배 · "
             "고가 마감 장대양봉\n"
-            "체크: 볼밴 하단권? 이평 위? 테마 동반? — 추격 매수 주의, 판단 보조")
+            + (guide + "\n" if guide else "")
+            + "※ 테마 동반 여부 확인 · 판단 보조")
         logger.info("[pillar] %s %.0f억 x%.1f", code, lp["value_eok"], lp["surge_x"])
 
 

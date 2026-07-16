@@ -13,7 +13,7 @@ import time
 import httpx
 import redis.asyncio as aioredis
 
-from api.services.stock_signal import candle_trading_value, pillar_precheck
+from api.services.stock_signal import candle_trading_value, pillar_guide, pillar_precheck
 from collector.news.dart import DartClient
 from collector.news.sec import SecClient
 from collector.stock.kis import KISClient, effective_watchlist, is_kr_code, load_watchlist
@@ -611,11 +611,15 @@ async def _pillar_confirm_alert(redis: aioredis.Redis, toss: TossClient,
         if avg2 <= 0 or value_eok < avg2 * 3:
             return
         await redis.hset(ENGINE_PILLAR_KEY, code, today)
+        # 장중 실시간 가격(오늘 미완성 봉의 종가)을 기준으로 매매 가이드 산출
+        live = candles[-1].get("close") if candles else None
+        guide = pillar_guide(done, live_price=live, kr=code.isdigit())
         await sender.send(
             f"💡 빛의기둥(수급 포착) — {name or code}({code})\n"
             f"오늘 거래대금 {value_eok:,.0f}억 · 평소의 {value_eok / avg2:.1f}배 · "
             "고가 마감형 장대양봉\n"
-            "체크: 볼밴 하단권? 이평 위? 테마 동반? — 추격 매수 주의, 판단 보조")
+            + (guide + "\n" if guide else "")
+            + "※ 테마 동반 여부 확인 · 판단 보조")
         logger.info("[pillar/market] %s %.0f억 x%.1f", code, value_eok, value_eok / avg2)
     except Exception as exc:
         logger.debug("[pillar %s] 확정 실패: %s", code, exc)

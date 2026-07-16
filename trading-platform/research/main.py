@@ -73,6 +73,13 @@ async def run() -> None:
         finally:
             await redis.aclose()
         return
+    # 중복 실행 감지: 다른 research가 이미 생존 신호를 남기고 있으면 경고.
+    # (sudo로 띄운 root 프로세스가 남아 있으면 — root엔 claude 로그인이 없어 —
+    #  큐를 가로채 rc=129로 실패시킨다. `sudo pkill -f research.main`으로 정리)
+    if await redis.get(RESEARCH_HB_KEY):
+        logger.warning("⚠️ 다른 research 프로세스가 이미 구동 중인 듯 — 중복 실행은 "
+                       "큐 경쟁·CLI 실패(rc=129)를 유발. "
+                       "`pgrep -f research.main` 확인 후 하나만 남기세요(sudo 포함).")
     logger.info("research start (model=%s, interval=%ss)",
                 analyst.model, settings.research_interval_sec)
 

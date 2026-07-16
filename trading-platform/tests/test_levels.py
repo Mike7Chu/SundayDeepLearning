@@ -97,3 +97,23 @@ def test_macd_and_adx():
     at, ac = adx(trend), adx(chop)
     assert at is not None and ac is not None and at > 25 and at > ac
     assert adx([{"close": 1}] * 60) is None            # 고가/저가 없음
+
+
+def test_pillar_guide():
+    from api.services.stock_signal import pillar_guide
+
+    def bar(c):
+        return {"open": c - 50, "high": c + 60, "low": c - 60, "close": c,
+                "volume": 100_000}
+
+    up = [bar(10000 + i * 60) for i in range(80)]        # 상승 추세
+    g = pillar_guide(up)
+    assert g and "언제 사고 팔까" in g
+    assert "매수:" in g and "손절:" in g and "목표:" in g
+    assert "상승 추세 ✓" in g and "손익비 1:2" in g
+    # 하락 추세면 '진입 금지' 경고
+    down = [bar(20000 - i * 80) for i in range(80)]
+    g2 = pillar_guide(down)
+    assert g2 and "진입 금지" in g2
+    # 봉 부족이면 None(가이드 없이 기존 알림만)
+    assert pillar_guide(up[:5]) is None

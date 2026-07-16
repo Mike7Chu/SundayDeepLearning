@@ -283,6 +283,28 @@ def trade_levels(closes: list[float], live_price: float | None = None,
     }
 
 
+def pillar_guide(candles: list[dict], live_price: float | None = None,
+                 kr: bool = True) -> str | None:
+    """빛의기둥 알림용 '언제 사고 팔까' 문구(순수 함수).
+
+    수급 포착만 알려주면 행동을 못 정한다 → 매매 가격 가이드(trade_levels)로
+    매수·손절·목표 + 추세 필터를 알림에 바로 붙인다.
+    """
+    closes = [c["close"] for c in (candles or [])
+              if isinstance(c, dict) and c.get("close")]
+    lv = trade_levels(closes, live_price, kr=kr)
+    if not lv:
+        return None
+    f = (lambda v: f"{v:,.0f}원") if kr else (lambda v: f"${v:,.2f}")
+    trend = ("상승 추세 ✓ — 눌림 진입 유효" if lv["trend_ok"]
+             else "⚠️ 하락 추세 — 수급만 보고 진입 금지, 반등 확인 전 관망")
+    return ("── 언제 사고 팔까 ──\n"
+            f"· 매수: {f(lv['entry'])} ({lv['entry_basis']} — 추격 대신 눌림 대기)\n"
+            f"· 손절: {f(lv['stop'])} ({lv['stop_pct']:+.1f}%) — 이탈 시 기계적 탈출\n"
+            f"· 목표: {f(lv['target'])} ({lv['target_pct']:+.1f}%, 손익비 1:2)\n"
+            f"· 추세 필터: {trend}")
+
+
 async def signals_for(redis: aioredis.Redis, code: str, name: str = "") -> dict | None:
     raw = await redis.get(stock_ohlcv_key(code))
     if not raw:
