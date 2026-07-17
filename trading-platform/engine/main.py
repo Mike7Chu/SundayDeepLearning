@@ -37,11 +37,13 @@ from shared.redis_keys import (
     ENGINE_PEAK_KEY,
     ENGINE_PLAN_KEY,
     ENGINE_RISK_KEY,
+    FWD_DONE_KEY,
     FX_USDKRW_KEY,
     RESEARCH_INV_KEY,
     RESEARCH_INV_REQ_KEY,
     TOSS_ACCOUNT_KEY,
     TOSS_HOLDINGS_KEY,
+    fwd_scores_key,
     stock_ohlcv_key,
 )
 from shared.settings import settings
@@ -280,10 +282,37 @@ async def _cycle_loop(redis: aioredis.Redis, sender: TelegramSender,
             await _pillar_scan(redis, sender)
             await _pipeline(redis, sender, risk, toss, kis)
             await _swing_plan(redis, toss, risk)
+            await _forward_log(redis)
         except Exception as exc:
             # 어떤 오류도 엔진을 죽이지 않는다 — 기록 후 다음 주기.
             logger.warning("[DATA_ERROR] engine 사이클 실패: %s", exc)
         await asyncio.sleep(settings.engine_interval_sec)
+
+
+async def _forward_log(redis: aioredis.Redis) -> None:
+    """포워드 로깅(Validation First) — 매일 1회 전 종목 점수·가격 스냅샷.
+
+    T+5/20/60 시점에 현재가와 비교해 '점수가 실제로 수익률을 예측하는가'
+    (캘리브레이션·축 IC·중복 반영)를 측정하는 원료. 120일 보존.
+    """
+    today = time.strftime("%Y-%m-%d")
+    if await redis.get(FWD_DONE_KEY) == today:
+        return
+    quotes = [q for q in await load_quotes(redis)
+              if q.get("price") and q.get("code")]
+    key = fwd_scores_key(today)
+    n = 0
+    for q in quotes:
+        closes = await _closes(redis, q["code"])
+        sc = compute_score(q, closes)
+        await redis.hset(key, q["code"], json.dumps({
+            "s": sc["score"], "p": q["price"], "c": sc.get("confidence"),
+            "v": sc.get("value"), "q": sc.get("quality"), "g": sc.get("growth"),
+            "m": sc.get("momentum"), "t": sc.get("timing")}))
+        n += 1
+    await redis.expire(key, 120 * 86400)
+    await redis.set(FWD_DONE_KEY, today)
+    logger.info("[fwd] 점수 스냅샷 %d종목 저장(%s)", n, today)
 
 
 async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict) -> None:
@@ -328,7 +357,7 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict) -> No
                     continue
             closes = [c["close"] for c in candles
                       if isinstance(c, dict) and c.get("close")]
-            m = swing_metrics(q, candles)
+            m = swing_metrics(q, candles, today=time.strftime("%Y%m%d"))
             if not m:
                 continue
             kr = code.isdigit()

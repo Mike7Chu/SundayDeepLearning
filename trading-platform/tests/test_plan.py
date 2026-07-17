@@ -104,3 +104,44 @@ def test_sell_checks_fundamental_offset():
     chk3 = sell_checks(h3, down)
     assert chk3["severity"] >= 3
     assert chk3["action"] in ("손절 검토", "정리 검토")
+
+
+def test_sell_checks_hard_exit_no_offset():
+    """v2 Hard Exit: 딥로스(-20%↓)는 실적·급등으로도 상쇄 불가(자본 보존)."""
+    down = [280000 - i * 800 for i in range(80)]
+    # 한미와 같은 최상의 상쇄 조건(실적 +117%·급등 +29.9%)이어도 딥로스면 하드
+    h = {"symbol": "042700", "cur_price": down[-1] * 1.1, "pnl_pct": -25.0,
+         "_growth": 117.0, "_chg": 29.9}
+    chk = sell_checks(h, down)
+    assert chk["hard"] >= 3
+    assert chk["severity"] >= 3                        # 플랜 표시 문턱 유지
+    assert chk["action"] == "손절 검토"                # 관찰로 완화되지 않음
+    assert any("상쇄 불가" in r for r in chk["reasons"])
+    # 경계 확인: -18%는 소프트(한미 사례 보존) → 상쇄로 3 미만
+    soft_case = {**h, "pnl_pct": -18.0}
+    chk2 = sell_checks(soft_case, down)
+    assert chk2["hard"] == 0 and chk2["severity"] < 3
+
+
+def test_swing_metrics_pead_cooling():
+    """잠정실적 발표 2일 내 + 당일 +8%↑ 갭 → 성장 가점 절반 캡(PEAD 쿨링)."""
+    up = []
+    v = 1000.0
+    for i in range(90):
+        v += 15 if i % 2 == 0 else -10
+        up.append(v)
+    base = _q("A", up[-1], g=None, flash_ni_yoy=120.0, flash_label="잠정",
+              flash_date="20260716")
+    hot = {**base, "change_pct": 12.0}                 # 발표 다음날 +12% 갭
+    cooled = swing_metrics(hot, up, today="20260717")
+    normal = swing_metrics({**base, "change_pct": 2.0}, up, today="20260717")
+    assert cooled and normal
+    assert cooled["swing"] < normal["swing"]           # 성장 가점 캡 확인
+    assert any("PEAD" in r for r in cooled["reasons"])
+    # 발표 5일 지나면 갭이 커도 쿨링 없음
+    later = swing_metrics(hot, up, today="20260722")
+    assert later and later["swing"] == normal["swing"]
+    assert not any("PEAD" in r for r in later["reasons"])
+    # today 미제공(과거 데이터 백필 등)이면 판정 생략 — 기존 동작 보존
+    no_today = swing_metrics(hot, up)
+    assert no_today and no_today["swing"] == normal["swing"]

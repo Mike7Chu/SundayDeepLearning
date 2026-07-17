@@ -174,9 +174,18 @@ def compute_score(quote: dict, closes: list[float] | None = None) -> dict:
     tm, tr = _timing_axis(quote, closes, sig)
     total = round(v + ql + gr + mo + tm, 1)
     reasons = vr + qr + grr + mr + tr
+    # 신뢰도(Confidence): 점수를 구성한 데이터가 얼마나 채워졌나(0~100).
+    # 낮으면 '점수가 낮다'가 아니라 '판단 근거가 부족하다'는 뜻 — 별도 축으로 노출.
+    has_fund = quote.get("eps") is not None and quote.get("bps") is not None
+    has_growth = any(quote.get(k) is not None for k in
+                     ("flash_ni_yoy", "flash_op_yoy", "ni_growth_q_pct",
+                      "ni_growth_pct"))
+    checks = [has_fund, has_fund, has_growth,          # 가치·품질(재무)·성장
+              len(closes) >= 60, len(closes) >= 20]    # 추세·타이밍(차트)
+    confidence = round(100 * sum(checks) / len(checks))
     return {
         "code": quote.get("code"), "name": quote.get("name"), "price": quote.get("price"),
-        "score": total, "verdict": _verdict(total),
+        "score": total, "verdict": _verdict(total), "confidence": confidence,
         "value": v, "quality": ql, "growth": gr, "momentum": mo, "timing": tm,
         "margin_pct": margin_of_safety(quote.get("price"), quote.get("eps"), quote.get("bps")),
         "graham": graham_number(quote.get("eps"), quote.get("bps")),

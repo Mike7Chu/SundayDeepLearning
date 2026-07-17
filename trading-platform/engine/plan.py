@@ -7,7 +7,28 @@
 """
 from __future__ import annotations
 
+import datetime
+
 from api.services.stock_signal import adx, evaluate_signals, macd, trade_levels
+
+
+def _parse_ymd(s: str | None) -> datetime.date | None:
+    """YYYYMMDD 또는 YYYY-MM-DD → date. 파싱 실패 시 None."""
+    if not s:
+        return None
+    digits = s.replace("-", "")[:8]
+    try:
+        return datetime.date(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))
+    except (ValueError, IndexError):
+        return None
+
+
+def _days_since(date_str: str | None, today: str | None) -> int | None:
+    """두 날짜(YYYYMMDD/YYYY-MM-DD)의 달력일 차이(today − date). 실패 시 None."""
+    d1, d2 = _parse_ymd(date_str), _parse_ymd(today)
+    if d1 is None or d2 is None:
+        return None
+    return (d2 - d1).days
 
 
 def _growth_of(q: dict) -> tuple[float | None, str]:
@@ -49,13 +70,16 @@ def stage1_rank(quotes: list[dict], held: set[str], top: int = 40) -> list[dict]
     return [q for _, q in rows[:top]]
 
 
-def swing_metrics(q: dict, candles: list) -> dict | None:
+def swing_metrics(q: dict, candles: list, today: str | None = None) -> dict | None:
     """2차 스윙 점수(0~100, 순수 함수): 실적 40 + 추세 40 + 타이밍 20.
 
     지표는 RSI 대신 스윙 검증력이 높은 조합:
     - MACD(12·26·9): 추세 방향·전환 — 강한 추세에서 RSI처럼 조기 과열 오판 없음
     - ADX(14): 추세 '강도' — 진짜 추세와 횡보를 구분(25↑ 강추세)
     - 이격 과열: SMA20 대비 +15% 초과 확장만 추격 금지(실적 랠리 주도주는 통과)
+    - PEAD 쿨링(v2): 잠정실적 발표 2일 이내 + 당일 +8% 이상 갭이면 성장 가점을
+      절반으로 캡 — 서프라이즈 갭 직후 추격 매수(이미 가격에 반영)를 억제.
+      today(YYYYMMDD)가 주어질 때만 판정.
     입력은 캔들 dict 리스트(고가·저가로 ADX 계산) 또는 종가 리스트(ADX 생략).
     탈락 조건: 하락추세(SMA60 아래·역배열) 또는 이격 과열.
     """
@@ -76,6 +100,17 @@ def swing_metrics(q: dict, candles: list) -> dict | None:
         return None                                    # 단기 이격 +15%↑ = 추격 금지
     g, g_label = _growth_of(q)
     g_pts = 15.0 if g is None else max(0.0, min(1.0, (g + 10) / 60)) * 40
+    # PEAD 쿨링: 잠정실적 발표 직후(2일 내) 당일 +8%↑ 갭이면 성장 가점 절반 캡.
+    # 서프라이즈는 이미 갭에 반영 — 갭 위 추격은 실적이 아니라 흥분을 사는 것.
+    pead = False
+    flash_used = (q.get("flash_ni_yoy") is not None
+                  or q.get("flash_op_yoy") is not None)
+    if flash_used and g_pts > 20.0:
+        days = _days_since(q.get("flash_date"), today)
+        chg = q.get("change_pct")
+        if days is not None and 0 <= days <= 2 and chg is not None and chg >= 8:
+            g_pts = min(g_pts, 20.0)
+            pead = True
     m = macd(closes)
     t_pts = 10.0                                       # 정배열·SMA60 위(게이트 통과)
     if a is not None:
@@ -100,6 +135,8 @@ def swing_metrics(q: dict, candles: list) -> dict | None:
     reasons = []
     if g is not None:
         reasons.append(f"실적 {g:+.0f}%({g_label})")
+    if pead:
+        reasons.append("실적 갭 반영 중 — PEAD 쿨링(가점 절반, 2일)")
     reasons.append("정배열·SMA60↑")
     if m:
         reasons.append("MACD " + ("골든(상승 전환)" if m["recent_golden"]
@@ -115,12 +152,19 @@ def swing_metrics(q: dict, candles: list) -> dict | None:
 
 
 def sell_checks(h: dict, closes: list[float]) -> dict:
-    """보유 종목 매도 신호(순수 함수) — 심각도와 근거. 중립 리스크 기준.
+    """보유 종목 매도 신호(순수 함수) — Hard/Soft 분리(v2). 중립 리스크 기준.
 
-    반환 {"severity"(0=이상무), "action", "reasons"}.
+    - Hard(상쇄 절대 불가 — 자본 보존): 손절선 이탈, 딥로스(-20% 이하 — 원금
+      회복에 +25%가 필요한 구간). 어떤 실적·급등도 이 심각도를 깎지 못한다.
+    - Soft(맥락 상쇄 가능 — 기술 신호): SMA60 이탈, MACD 하락, 목표가 도달,
+      완만한 손실(-8%), 실적 감소. 실적 서프라이즈(+20%↑)·당일 급등(+5%↑)이
+      soft만 감점한다(예: 상한가 날 'SMA60 아래'는 사실이어도 맥락이 다름 —
+      SMA는 하락기 과거 60일 평균이라 급반등 초기를 항상 '이탈'로 읽는다).
+    반환 {"severity"(hard+soft), "hard", "soft", "action", "reasons"}.
     """
     reasons: list[str] = []
-    sev = 0
+    hard = 0
+    soft = 0
     cur = h.get("cur_price")
     kr = (h.get("symbol") or "").isdigit()
     action = "보유"
@@ -128,47 +172,54 @@ def sell_checks(h: dict, closes: list[float]) -> dict:
         lv = trade_levels(closes, cur, kr=kr)
         if lv:
             if cur <= lv["stop"]:
-                sev += 3
-                reasons.append(f"손절선({lv['stop']:,.0f}) 이탈")
+                hard += 3
+                reasons.append(f"손절선({lv['stop']:,.0f}) 이탈 — 하드(상쇄 불가)")
                 action = "손절 검토"
             elif cur >= lv["target"]:
-                sev += 2
+                soft += 2
                 reasons.append(f"목표가({lv['target']:,.0f}) 도달")
                 action = "익절 검토"
         sig = evaluate_signals(closes)
         s60 = sig.get("sma60")
         if s60 and cur < s60:
-            sev += 2
+            soft += 2
             reasons.append("추세 이탈(SMA60 아래)")
             if action == "보유":
                 action = "정리 검토"
         m = macd(closes)
         if m and m["hist"] < 0 and not m["rising"]:
-            sev += 1
+            soft += 1
             reasons.append("MACD 하락(추세 힘 약화)")
     pnl = h.get("pnl_pct")
-    if pnl is not None and pnl <= -8:                  # 중립 성향 손절폭
-        sev += 2
+    if pnl is not None and pnl <= -20:                 # 딥로스 = 하드 손절선
+        hard += 3
+        reasons.append(f"손실 {pnl:.1f}% — 딥로스 하드 손절선(-20%) 이탈(상쇄 불가)")
+        if action in ("보유", "정리 검토"):
+            action = "손절 검토"
+    elif pnl is not None and pnl <= -8:                # 중립 성향 손절폭
+        soft += 2
         reasons.append(f"손실 {pnl:.1f}% (중립 손절폭 -8% 초과)")
         if action == "보유":
             action = "손절 검토"
     g = h.get("_growth")
     if g is not None and g < 0:
-        sev += 1
+        soft += 1
         reasons.append(f"실적 감소 {g:.0f}%")
-    # ---- 펀더멘털·당일 흐름 상쇄: 기술 신호만으로 '정리'를 재촉하지 않는다 ----
-    # (예: 실적 서프라이즈로 상한가 치는 날 'SMA60 아래'는 사실이어도 맥락이 다름.
-    #  SMA는 하락기 과거 60일 평균이라 급반등 초기를 항상 '이탈'로 읽는다.)
+    # ---- 상쇄는 soft에만: 기술 신호만으로 '정리'를 재촉하지 않는다 ----
     chg = h.get("_chg")
-    if chg is not None and chg >= 5 and sev > 0:
-        sev = max(0, sev - 1)
+    if chg is not None and chg >= 5 and soft > 0:
+        soft = max(0, soft - 1)
         reasons.append(f"오늘 {chg:+.1f}% 급등 중")
-    if g is not None and g >= 20 and sev > 0:
-        sev = max(0, sev - 2)
+    if g is not None and g >= 20 and soft > 0:
+        soft = max(0, soft - 2)
         reasons.append(f"단, 실적 {g:+.0f}% 개선 — 기술 신호와 상충(펀더멘털 우위)")
-        if action in ("정리 검토", "손절 검토") and sev < 3:
-            action = "관찰(실적 우위)"
-    return {"severity": sev, "action": action, "reasons": reasons}
+    sev = hard + soft
+    # 액션 완화도 hard가 0일 때만 — 하드 신호가 있으면 '손절 검토' 유지.
+    if (hard == 0 and g is not None and g >= 20 and sev < 3
+            and action in ("정리 검토", "손절 검토")):
+        action = "관찰(실적 우위)"
+    return {"severity": sev, "hard": hard, "soft": soft,
+            "action": action, "reasons": reasons}
 
 
 def suggest_qty(entry: float, asset: float | None, cap: float | None,

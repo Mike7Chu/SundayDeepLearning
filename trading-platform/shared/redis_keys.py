@@ -79,6 +79,19 @@ COACH_REQ_KEY = "coach:requests"
 COACH_NOTE_KEY = "coach:note"
 
 
+# 포워드 로그 마지막 실행일(str YYYY-MM-DD) — 하루 1회 스냅샷 dedup
+FWD_DONE_KEY = "fwd:done"
+
+
+def fwd_scores_key(date: str) -> str:
+    """일별 점수 스냅샷(hash{code: json{s,p,v,q,g,m,t,c}}, 120일 보존).
+
+    Validation First의 원료 — T+N 시점에 현재가와 비교해 점수의 실제
+    예측력(캘리브레이션·축 IC)을 측정한다.
+    """
+    return f"fwd:scores:{date}"
+
+
 def stock_ohlcv_key(code: str) -> str:
     """종목 일봉 시계열. value=json[{date, close, high, low, volume}] (오래된→최신)."""
     return f"stock:ohlcv:{code}"

@@ -228,7 +228,7 @@ async function render(){
 }
 
 async function renderHome(){
-  const [q,v,sc,d,n,pf,eng,co,mk,pl]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine"),jget("/coach"),jget("/market"),jget("/plan")]);
+  const [q,v,sc,d,n,pf,eng,co,mk,pl,cal]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine"),jget("/coach"),jget("/market"),jget("/plan"),jget("/calibration").catch(()=>({}))]);
   const quotes=q.rows||[], scores=sc.rows||[];
   const buys=scores.filter(r=>r.score>=60), sells=scores.filter(r=>r.score<45);
   const up=quotes.filter(r=>(r.change_pct||0)>0).length, dn=quotes.filter(r=>(r.change_pct||0)<0).length;
@@ -258,6 +258,7 @@ async function renderHome(){
     </div>
     ${coachCardHTML(co)}
     ${planCardHTML(pl)}
+    ${calCardHTML(cal)}
     <div class="card"><h3>시장 온도</h3>
       ${idxRow("코스피",IND.kospi)}${idxRow("코스닥",IND.kosdaq)}
       ${INVK&&INVK.foreigner!=null?`<div class="row"><span>외국인 순매수(코스피·${(INVK.date||'').slice(5)})</span><b class="${INVK.foreigner>=0?'pos':'neg'}">${INVK.foreigner>=0?'+':''}${numC(INVK.foreigner,0)}억</b></div>`:''}
@@ -285,6 +286,26 @@ async function renderHome(){
   $("metaInfo").textContent=`관심종목 ${quotes.length} · 매수후보 ${buys.length}`;
 }
 function saveAsset(){ localStorage.setItem("curAsset", $("curAsset").value||0); renderHome(); }
+
+function calCardHTML(cal){
+  // 점수 검증(Validation First): 포워드 로그 T+N 실현 수익률 — 데이터가 쌓여야 표시
+  cal=cal||{};
+  const hz=cal.horizons||{}, keys=Object.keys(hz);
+  const AXN={value:"가치",quality:"품질",growth:"성장",momentum:"추세",timing:"타이밍"};
+  if(!keys.length){
+    return cal.latest?`<div class="card"><h3>🧪 점수 검증 (캘리브레이션)</h3>
+      <div class="empty">포워드 로그 수집 중 — ${cal.latest.date}부터 매일 ${numC(cal.latest.n,0)}종목 기록.<br>점수의 실제 예측력 검증은 약 1주(T+5) 뒤부터 표시돼요.</div></div>`:'';
+  }
+  const secs=keys.map(k=>{const h=hz[k];
+    const rows=(h.buckets||[]).map(b=>`<div class="row"><span>${b.bucket}점 <span class="num">(${b.n})</span></span><b class="${(b.avg_ret||0)>=0?'pos':'neg'}">${(b.avg_ret||0)>=0?'+':''}${numC(b.avg_ret,1)}% · 승률 ${numC(b.win_rate,0)}%</b></div>`).join("");
+    const ic=Object.entries(h.axis_ic||{}).filter(([,v])=>v!=null).map(([a,v])=>`${AXN[a]||a} ${v>=0?'+':''}${v}`).join(" · ");
+    return `<div style="margin-top:8px"><b>${k}</b> <span class="num">(${h.date} 스냅샷 · ${numC(h.n,0)}종목)</span>${rows}${ic?`<div class="num" style="margin-top:4px">축 예측력(IC): ${ic}</div>`:''}</div>`;}).join("");
+  const dup=Object.entries(cal.axis_correlation||{}).filter(([,v])=>v!=null&&Math.abs(v)>0.7)
+    .map(([k,v])=>`${k.split("×").map(a=>AXN[a]||a).join("×")} r=${v}`).join(" · ");
+  return `<div class="card"><h3>🧪 점수 검증 (캘리브레이션)</h3>
+    <div class="num">점수 구간별 그 후 실제 수익률 — 높은 구간이 계단식으로 좋아야 점수가 '작동'하는 거예요</div>
+    ${secs}${dup?`<div class="num" style="margin-top:6px">⚠️ 중복 반영 의심: ${dup} (|r|&gt;0.7 = 두 축이 같은 정보)</div>`:''}</div>`;
+}
 
 function planCardHTML(pl){
   pl=pl||{};
@@ -626,7 +647,9 @@ async function openStock(code,name){
     const marginTxt=SC.margin_pct==null?"":(SC.margin_pct>0?`<b class="pos">적정가보다 ${numC(SC.margin_pct,0)}% 싸요</b>`:`<b class="neg">그레이엄 가치 기준 ${numC(-SC.margin_pct,0)}% 비싸요</b>${growCaveat}`);
     const usScoreNote=US?`<div class="num" style="margin-top:6px">🇺🇸 미국 종목은 가치·품질(EPS/BPS) 데이터가 없어 점수는 <b>성장(SEC 분기실적)·추세·타이밍만</b> 반영돼요 — 낮게 나와도 회사가 나쁘다는 뜻이 아니에요. 참고용으로만 보세요.</div>`:"";
     const scoreH=SC.score!=null?`<div class="card" style="margin-bottom:10px">
-      <div class="kpi ${VC(SC.score)}">${numC(SC.score,0)}<span class="u">점 / 100 · ${SC.verdict||''}</span></div>
+      <div class="kpi ${VC(SC.score)}">${numC(SC.score,0)}<span class="u">점 / 100 · ${SC.verdict||''}</span>
+        ${SC.confidence!=null?`<span class="badge ${SC.confidence>=80?'pos':SC.confidence>=50?'':'sell'}" style="margin-left:8px">신뢰도 ${numC(SC.confidence,0)}%</span>`:''}</div>
+      ${SC.confidence!=null&&SC.confidence<80?`<div class="num" style="margin:2px 0">신뢰도 = 판단에 쓰인 데이터 완전성(재무·실적·차트). 낮으면 점수가 나쁜 게 아니라 <b>근거가 부족</b>하다는 뜻이에요.</div>`:''}
       <div class="num" style="margin:2px 0 8px">${HELP.score}. ${marginTxt}</div>
       ${bar("가치",SC.value,30)}${bar("품질",SC.quality,20)}${bar("성장",SC.growth,15)}${bar("추세",SC.momentum,25)}${bar("타이밍",SC.timing,10)}
       <div class="num" style="margin-top:6px">싼가·튼튼한가·크는가·오르는가·살 때인가를 종합. ${(SC.reasons||[]).join(" · ")}</div>
