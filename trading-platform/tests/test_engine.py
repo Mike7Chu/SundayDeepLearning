@@ -133,3 +133,14 @@ def test_parse_command_coach_check():
     assert parse_command("점검") == {"cmd": "점검"}
     assert parse_command("지금 점검") == {"cmd": "점검"}
     assert parse_command("아침점검") == {"cmd": "점검"}
+
+
+def test_parse_command_research_note():
+    # '리포트 <본문>' 저장 / '리포트' 확인 / '리포트삭제' 초기화
+    add = parse_command("리포트 SK증권 반도체 데일리: HBM4 수주 확대...")
+    assert add["cmd"] == "note_add" and add["text"].startswith("SK증권")
+    ml = parse_command("리포트\n1) TSMC CAPEX 상향\n2) CoWoS 증설")
+    assert ml["cmd"] == "note_add" and "TSMC" in ml["text"]
+    assert parse_command("리포트") == {"cmd": "note_show"}
+    assert parse_command("리포트삭제") == {"cmd": "note_clear"}
+    assert parse_command("리포트 ") == {"cmd": "note_show"}   # 빈 본문 → 확인으로 처리

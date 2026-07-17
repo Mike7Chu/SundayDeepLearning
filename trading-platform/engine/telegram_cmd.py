@@ -25,6 +25,7 @@ from collector.stock.toss import TossClient
 from engine.orders import cancel_gated_order, place_gated_order
 from notifier.telegram import TelegramSender
 from shared.redis_keys import (
+    COACH_NOTE_KEY,
     COACH_REQ_KEY,
     ENGINE_BUYLIST_KEY,
     ENGINE_PLAN_KEY,
@@ -42,9 +43,11 @@ from shared.settings import settings
 logger = logging.getLogger(__name__)
 
 _PENDING_TTL = 120.0   # '확인' 유효시간(초)
-_HELP = ("명령: 잔고 · 상태 · 후보 · 플랜 · 점검 · 도움말\n"
+_HELP = ("명령: 잔고 · 상태 · 후보 · 플랜 · 점검 · 리포트 · 도움말\n"
          "플랜  ← 오늘의 매매 플랜(매수 후보 3 + 매도 점검 3, 스윙 맞춤)\n"
          "점검  ← AI 아침 점검(보유 종목 판정)을 지금 바로 요청\n"
+         "리포트 <본문 붙여넣기>  ← 증권사 데일리(SK증권 등)를 저장 — 다음 점검에\n"
+         "  최우선 반영(여러 번 보내면 이어짐 · '리포트'=확인 · '리포트삭제'=초기화)\n"
          "매수 코드 수량 [가격] / 매도 코드 수량 [가격]  ← 기본 브로커(한투)\n"
          "토스매수 코드 수량 [가격] / 토스매도 …  ← 토스 계좌로 주문\n"
          "한투매수 / 한투매도 …  ← 한투 명시\n"
@@ -60,6 +63,15 @@ def parse_command(text: str) -> dict | None:
                         "매매플랜": "플랜"}.get(t, t)}
     if t.replace(" ", "") in ("점검", "지금점검", "아침점검", "오늘점검"):
         return {"cmd": "점검"}
+    # 리서치 노트: '리포트 <본문>'=추가, '리포트'=확인, '리포트삭제'=초기화
+    if t == "리포트":
+        return {"cmd": "note_show"}
+    if t.replace(" ", "") == "리포트삭제":
+        return {"cmd": "note_clear"}
+    if t.startswith("리포트 ") or t.startswith("리포트\n"):
+        body = t[len("리포트"):].strip()
+        if body:
+            return {"cmd": "note_add", "text": body}
     # 코드: 국내 6자리 또는 미국 티커(NVDA, BRK.B). 가격: 미국은 소수점(달러) 허용.
     m = re.fullmatch(r"(한투|토스)?(매수|매도)\s+(\d{6}|[A-Za-z]{1,6}(?:\.[A-Za-z]{1,2})?)"
                      r"\s+(\d+(?:\.\d+)?)(?:\s+(\d+(?:\.\d+)?))?", t)
@@ -135,6 +147,23 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
                              f"{' · '.join(s.get('reasons', []))}")
         lines.append("※ 판단 보조 — 최종 결정과 주문은 직접(매수 예: 토스매수 코드 수량 가격)")
         await sender.send("\n".join(lines))
+    elif cmd == "note_add":
+        old = await redis.get(COACH_NOTE_KEY)
+        merged = (old + "\n\n" if old else "") + p["text"]
+        await redis.set(COACH_NOTE_KEY, merged[-20000:], ex=36 * 3600)
+        await sender.send(
+            f"📎 리서치 노트 저장됨(총 {len(merged):,}자) — 다음 아침 점검부터 "
+            "최우선 신뢰 입력으로 반영돼요. 이어서 붙여넣으면 뒤에 추가됩니다. "
+            "바로 반영하려면 '점검'을 보내세요.")
+    elif cmd == "note_show":
+        note = await redis.get(COACH_NOTE_KEY)
+        if note:
+            await sender.send_long(f"📎 저장된 리서치 노트({len(note):,}자):\n{note}")
+        else:
+            await sender.send("저장된 리서치 노트가 없어요 — '리포트 <본문>'으로 보내주세요.")
+    elif cmd == "note_clear":
+        await redis.delete(COACH_NOTE_KEY)
+        await sender.send("📎 리서치 노트를 비웠어요.")
     elif cmd == "점검":
         # 호스트 research 생존 확인 후 접수 — 죽어 있으면 즉시 알려 헛기다림 방지
         hb = await redis.get(RESEARCH_HB_KEY)

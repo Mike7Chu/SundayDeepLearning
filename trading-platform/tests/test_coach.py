@@ -167,3 +167,12 @@ def test_parse_adr_map():
     assert m[0] == {"code": "000660", "cands": ["SKH", "HXSCL"], "ratio": 1.0}
     assert m[1]["cands"] == ["SSNLF"] and m[1]["ratio"] == 2.0
     assert parse_adr_map("") == [] and parse_adr_map("broken") == []
+
+
+def test_note_block_in_prompt():
+    note = "SK증권 반도체 데일리 — HBM4 계약가 상향, TSMC CAPEX 가이던스 +20%"
+    block = build_coach_prompt(_snap(), None, {}, {}, [], {}, note=note)
+    assert "[사용자 제공 리서치 노트" in block and "HBM4 계약가 상향" in block
+    # 노트 없으면 블록 자체가 없음
+    assert "[사용자 제공 리서치 노트" not in build_coach_prompt(
+        _snap(), None, {}, {}, [], {})

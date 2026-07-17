@@ -74,6 +74,9 @@ MARKET_RANKINGS_KEY = "market:rankings"
 COACH_KEY = "coach:report"
 COACH_GOAL_KEY = "coach:goal"
 COACH_REQ_KEY = "coach:requests"
+# 사용자 제공 리서치 노트(예: SK증권 반도체 데일리) — 텔레그램 '리포트 …'로 저장,
+# 코치가 최우선 신뢰 입력으로 반영. TTL 36h(다음 날 아침 점검까지 유효)
+COACH_NOTE_KEY = "coach:note"
 
 
 def stock_ohlcv_key(code: str) -> str:

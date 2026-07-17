@@ -16,6 +16,7 @@ from research.data import gather
 from shared.redis_keys import (
     ADR_KEY,
     COACH_GOAL_KEY,
+    COACH_NOTE_KEY,
     DART_RECENT_KEY,
     ENGINE_RISK_KEY,
     FX_USDKRW_KEY,
@@ -151,7 +152,8 @@ def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
                        indicators: dict | None = None,
                        us_semis: list[dict] | None = None,
                        us_ai: list[dict] | None = None,
-                       adrs: list[dict] | None = None) -> str:
+                       adrs: list[dict] | None = None,
+                       note: str | None = None) -> str:
     """보유 스냅샷 + 목표 + 종목 정량 + 공시 + 리스크 → 데이터 블록(순수 함수).
 
     details: {종목코드: {"score","verdict","ni_growth_q_pct","ni_growth_q_label",
@@ -171,6 +173,11 @@ def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
              + us_ai_block(us_ai) + adr_block(adrs))
     if today and (us_semis or us_ai):
         lines.append(f"(위 미국 시세 기준: {today} KST 수집분 — 직전 거래일 종가)")
+    if note:
+        lines.append("[사용자 제공 리서치 노트 — 신뢰도 최상(증권사 데일리 등). "
+                     "그대로 복붙하지 말고 '확인된 사실'과 '애널리스트 의견'을 구분해 "
+                     "최우선 반영하라]")
+        lines.append(note[:6000])
     lines.append(f"[내 실계좌 — {today or '오늘'} 기준]" if today else "[내 실계좌]")
     te = snap.get("total_eval") or total
     lines.append(f"- 총 평가액: {te:,.0f}원"
@@ -334,7 +341,8 @@ async def gather_coach(redis: aioredis.Redis) -> str | None:
         adrs.append({"code": code, "name": kr_name, "us_symbol": a.get("us_symbol"),
                      "usd": a.get("usd"), "ratio": a.get("ratio"),
                      "kr_price": kr_price, "fx": fx})
+    note = await redis.get(COACH_NOTE_KEY)   # 텔레그램 '리포트 …'로 저장된 노트
     today = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return build_coach_prompt(snap, cash, goal, details, filings, risk, today,
                               fx_usdkrw=fx, indicators=ind, us_semis=us_semis,
-                              us_ai=us_ai, adrs=adrs)
+                              us_ai=us_ai, adrs=adrs, note=note)
