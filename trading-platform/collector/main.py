@@ -17,6 +17,7 @@ from api.services.stock_signal import candle_trading_value, pillar_guide, pillar
 from collector.news.dart import DartClient
 from collector.news.sec import SecClient
 from collector.stock.kis import KISClient, effective_watchlist, is_kr_code, load_watchlist
+from collector.stock.kis_ws import pick_subs, realtime_loop
 from notifier.telegram import TelegramSender
 from collector.stock.kis_master import fetch_universe
 from collector.stock.toss import TossClient, candle_metrics
@@ -867,6 +868,20 @@ async def toss_price_loop(redis: aioredis.Redis, toss: TossClient) -> None:
         await asyncio.sleep(settings.stock_interval_sec)
 
 
+async def _realtime_targets(redis: aioredis.Redis) -> list[str]:
+    """웹소켓 등록 대상: 보유 우선 + 관심종목(국내 6자리, 상한 41)."""
+    watch = [w["code"] for w in await effective_watchlist(redis)]
+    held: list[str] = []
+    try:
+        raw = await redis.get(TOSS_HOLDINGS_KEY)
+        if raw:
+            held = [h["symbol"] for h in json.loads(raw).get("holdings", [])
+                    if h.get("symbol")]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return pick_subs(watch, held)
+
+
 async def main() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     logger.info("collector start (stock-only)")
@@ -876,6 +891,8 @@ async def main() -> None:
     try:
         await asyncio.gather(
             stock_loop(redis, kis),
+            realtime_loop(redis, kis, merge_quote,
+                          lambda: _realtime_targets(redis)),
             stock_history_loop(redis, dart),
             universe_loop(redis, kis),
             market_loop(redis, kis, toss),

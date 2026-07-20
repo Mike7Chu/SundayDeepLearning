@@ -44,6 +44,12 @@
   `rankings_loop`(10분) → 홈 급등 TOP 카드(이름 매핑) ③**OCO 조건주문**(목표가 익절+손절가 손절
   서버 감시, 매도 전용) `POST/GET /portfolio/oco`, 취소 지원 — 게이트(키+TOSS_TRADING_ENABLED),
   매도라 금액 한도 미적용. `GET /market` 신설. 재무·배당은 v1.2.2에도 없음(국내 KIS/DART 전용 유지).
+- ✅ **실시간 시세 파이프라인**: ①KIS 웹소켓(`collector/stock/kis_ws.py`, H0STCNT0 체결가) — 장중(평일 08:50~15:40)
+  관심∪보유 국내 41종목 등록, 체결 즉시 `stock:quote` 반영(종목당 1초 스로틀, PINGPONG 유지, 재접속)
+  ②API SSE `GET /stream`(`api/routers/stream.py`) — 변경된 종목만 2초 주기 push ③대시보드 EventSource가
+  가격·등락률·평가손익 셀만 덧칠(`data-lp/lc/lpnl`, 틱 플래시, 렌더 직후 LIVE 재적용) — 전체 폴링(12s)은 정합용
+  ④엔진 `_guard_loop`(20s) — 목표가/손절 감시를 실시간가(`_live_price` 2분 신선도) 기준으로 고속 순회.
+  끄기: `KIS_WS_ENABLED=false`. 미국 종목은 토스 REST(15s 스윕) 유지.
 - ⏭️ **다음(로드맵)**: 자동매매 규칙화(시그널·가치·배당 DRIP → 게이트 주문), KIS 해외 재무(미국 살까말까/저평가).
 
 전체 계획은 승인된 플랜(`~/.claude/plans/toasty-wobbling-truffle.md`), 진행 기록은 `docs/PROGRESS.md`.

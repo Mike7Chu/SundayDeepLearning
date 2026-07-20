@@ -41,6 +41,7 @@ from shared.redis_keys import (
     FX_USDKRW_KEY,
     RESEARCH_INV_KEY,
     RESEARCH_INV_REQ_KEY,
+    STOCK_QUOTE_KEY,
     TOSS_ACCOUNT_KEY,
     TOSS_HOLDINGS_KEY,
     fwd_scores_key,
@@ -231,10 +232,26 @@ async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
         await _auto_buy(redis, toss, kis, sender, risk, new)
 
 
+async def _live_price(redis: aioredis.Redis, code: str) -> float | None:
+    """stock:quote의 실시간가(웹소켓/토스) — 2분 내 신선한 것만."""
+    raw = await redis.hget(STOCK_QUOTE_KEY, code)
+    if not raw:
+        return None
+    try:
+        rec = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    p, ts = rec.get("price"), rec.get("ts")
+    if p and ts and time.time() - ts < 120:
+        return float(p)
+    return None
+
+
 async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> None:
     """보유 종목이 추천 목표가/손절선에 닿으면 알림(종목·종류당 24h 1회).
 
     가격 가이드(trade_levels)와 같은 기준. 구간을 벗어나면 상태 해제 → 재진입 시 재알림.
+    가격은 잔고 스냅샷(30초)보다 신선한 실시간 시세(웹소켓)가 있으면 그걸 쓴다.
     """
     hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
     prev = await redis.hgetall(ENGINE_ALERTS_KEY)
@@ -242,6 +259,7 @@ async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> Non
         code = h.get("symbol")
         name = h.get("name") or code
         cur, avg = h.get("cur_price"), h.get("avg_price")
+        cur = await _live_price(redis, code) or cur
         if not code or not cur:
             continue
         kr = code.isdigit()
@@ -271,6 +289,22 @@ async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> Non
         await redis.hset(ENGINE_ALERTS_KEY, code,
                          json.dumps({"kind": kind, "ts": time.time()}))
         logger.info("[alert] %s %s (cur %.0f)", code, kind, cur)
+
+
+async def _guard_loop(redis: aioredis.Redis, sender: TelegramSender) -> None:
+    """고속 가드 — 목표가/손절선 감시만 20초 주기(실시간 시세 대응).
+
+    무거운 파이프라인(플랜·필터·리스크)은 _cycle_loop(10분)에 남기고,
+    '지금 팔아야 하는 순간'의 감지만 빠르게 돈다. 알림 dedup은
+    ENGINE_ALERTS_KEY가 담당하므로 사이클 루프와 중복 실행해도 안전.
+    """
+    await asyncio.sleep(15)                    # 기동 직후 잔고 적재 여유
+    while True:
+        try:
+            await _holdings_alerts(redis, sender)
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] guard 실패: %s", exc)
+        await asyncio.sleep(settings.guard_interval_sec)
 
 
 async def _cycle_loop(redis: aioredis.Redis, sender: TelegramSender,
@@ -453,6 +487,7 @@ async def run() -> None:
     try:
         await asyncio.gather(
             _cycle_loop(redis, sender, toss, kis),
+            _guard_loop(redis, sender),       # 목표/손절 실시간 감시(20초)
             command_loop(redis, toss, kis),   # 텔레그램 주문지시(확인 회신 필수)
         )
     finally:

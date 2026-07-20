@@ -200,6 +200,12 @@
   details summary{ cursor:pointer; font-weight:600; padding:4px 0; }
   details summary:hover{ color:var(--green); }
 
+  /* ---------- 실시간 틱 플래시 ---------- */
+  @keyframes tickUp{ from{ background:rgba(255,77,94,.30);} to{ background:transparent;} }
+  @keyframes tickDn{ from{ background:rgba(76,141,255,.30);} to{ background:transparent;} }
+  .tick-up{ animation:tickUp .8s ease-out; border-radius:6px; }
+  .tick-dn{ animation:tickDn .8s ease-out; border-radius:6px; }
+
   /* ---------- 스켈레톤 로딩 ---------- */
   .skel{ border-radius:10px; background:linear-gradient(90deg,rgba(148,168,205,.07) 25%,rgba(148,168,205,.16) 40%,rgba(148,168,205,.07) 60%);
     background-size:300% 100%; animation:skel 1.3s infinite linear; height:14px; margin:10px 16px; }
@@ -407,6 +413,42 @@ function sortBy(id,i){ const s=_dt[id]; const key=s.cols[i].key; if(!key) return
   const dir=(s.sort&&s.sort.key===key&&s.sort.dir===-1)?1:-1; s.sort={key,dir}; drawTable(id); }
 const jget=(u)=>fetch(u).then(r=>r.json()).catch(()=>({}));
 
+// ===== 실시간 시세 스트림(SSE) — 서버가 '변한 종목만' push, 셀 단위 덧칠 =====
+let LIVE={}, es=null;
+function startStream(){
+  if(es||!window.EventSource) return;
+  try{ es=new EventSource("/stream"); }catch(e){ return; }
+  es.onopen=()=>setStatus("live","실시간");
+  es.onerror=()=>setStatus("stale","자동갱신");   // EventSource가 자동 재접속
+  es.onmessage=(ev)=>{ try{
+    const d=JSON.parse(ev.data);
+    for(const [code,q] of Object.entries(d)){ LIVE[code]=q; patchLive(code,q); }
+  }catch(e){} };
+}
+function flashEl(el,up){ el.classList.remove("tick-up","tick-dn"); void el.offsetWidth; el.classList.add(up?"tick-up":"tick-dn"); }
+function patchLive(code,q){
+  const esc=(window.CSS&&CSS.escape)?CSS.escape(code):code;
+  document.querySelectorAll(`[data-lp="${esc}"]`).forEach(el=>{      // 가격
+    const us=(q.cur||el.dataset.cur)==="USD";
+    const txt=us?money(q.p,"USD"):(el.dataset.won?won(q.p):fmt(q.p));
+    if(el.textContent!==txt){ flashEl(el,q.p>=(el._p??q.p)); el._p=q.p; el.textContent=txt; }
+  });
+  document.querySelectorAll(`[data-lc="${esc}"]`).forEach(el=>{      // 등락률
+    if(q.c==null) return;
+    const txt=`${q.c>=0?"+":""}${numC(q.c)}%`;
+    if(el.textContent!==txt){ el.textContent=txt;
+      const td=el.closest("td"); if(td) td.className="num strong "+(q.c>=0?"pos":"neg"); }
+  });
+  document.querySelectorAll(`[data-lpnl="${esc}"]`).forEach(el=>{    // 평가손익 재계산
+    const qty=Number(el.dataset.qty), avg=Number(el.dataset.avg);
+    if(!(qty>0&&avg>0)||q.p==null) return;
+    const us=el.dataset.cur==="USD";
+    const pnl=(q.p-avg)*qty, pct=(q.p/avg-1)*100;
+    el.textContent=`${pnl>=0?"+":""}${money(pnl,us?"USD":"KRW")} (${pct>=0?"+":""}${numC(pct)}%)`;
+    const td=el.closest("td"); if(td) td.className="num "+(pnl>=0?"pos":"neg");
+  });
+}
+
 const TABNAME={home:"홈",portfolio:"내 주식",signal:"살까 말까",stocks:"전체 종목",value:"저평가",dividend:"배당금",news:"공시",research:"AI 분석",settings:"설정"};
 const MORE_TABS=["value","dividend","news","research","settings"];   // 모바일 '더보기' 시트 소속
 function switchTab(t){
@@ -433,7 +475,8 @@ async function render(){
     else if(activeTab==="news") await renderNews();
     else if(activeTab==="research") await renderResearch();
     else if(activeTab==="settings") await renderSettings();
-    setStatus("live","실시간");
+    for(const c in LIVE) patchLive(c,LIVE[c]);   // 방금 그린 셀에 최신 실시간가 덧칠
+    setStatus("live",(es&&es.readyState===1)?"실시간":"자동갱신");
   }catch(e){ setStatus("err","오류: "+e.message); }
   finally{ busy=false; }
 }
@@ -607,10 +650,11 @@ async function renderPortfolio(){
     {label:"종목", key:"name", num:false, fmt:r=>`${r.name||r.symbol}<span class="num" style="opacity:.6"> ${r.symbol}</span>`},
     {label:"수량", key:"qty", fmt:r=>fmt(r.qty)},
     {label:"평단", key:"avg_price", fmt:r=>money(r.avg_price,r.currency)},
-    {label:"현재가", key:"cur_price", fmt:r=>money(r.cur_price,r.currency)},
+    {label:"현재가", key:"cur_price",
+     fmt:r=>`<span data-lp="${qesc(r.symbol)}" data-cur="${r.currency||'KRW'}" data-won="1">${money(r.cur_price,r.currency)}</span>`},
     {label:"평가액", key:"eval_amount", fmt:r=>money(r.eval_amount,r.currency)},
     {label:"평가손익", key:"pnl_pct", cls:r=>"num "+((r.pnl_pct||0)>=0?"pos":"neg"),
-     fmt:r=>`${(r.pnl||0)>=0?"+":""}${money(r.pnl,r.currency)} (${(r.pnl_pct||0)>=0?"+":""}${numC(r.pnl_pct)}%)`},
+     fmt:r=>`<span data-lpnl="${qesc(r.symbol)}" data-qty="${r.qty||0}" data-avg="${r.avg_price||0}" data-cur="${r.currency||'KRW'}">${(r.pnl||0)>=0?"+":""}${money(r.pnl,r.currency)} (${(r.pnl_pct||0)>=0?"+":""}${numC(r.pnl_pct)}%)</span>`},
   ], hs, {rowClick:r=>`openStock('${qesc(r.symbol)}','${qesc(r.name)}')`,
           sort:{key:"eval_amount",dir:-1}, empty:"보유 종목 없음"});
   $("metaInfo").textContent=`보유 ${hs.length}종목 · 평가 ${eok(pf.total_eval)}`;
@@ -703,8 +747,10 @@ async function renderStocks(){
   $("stocksBox").innerHTML=usBtn+'<div id="stocksTbl"></div>';
   dataTable("stocksTbl", [
     {label:"종목", key:"name", num:false, fmt:nameCell},
-    {label:"현재가", key:"price", hint:HELP.price, fmt:r=>r.currency==="USD"?money(r.price,"USD"):fmt(r.price), cls:()=>"num strong"},
-    {label:"등락률", key:"change_pct", hint:HELP.change, fmt:pctFmt("change_pct"), cls:pctCls("change_pct")},
+    {label:"현재가", key:"price", hint:HELP.price, cls:()=>"num strong",
+     fmt:r=>`<span data-lp="${qesc(r.code)}" data-cur="${r.currency||'KRW'}">${r.currency==="USD"?money(r.price,"USD"):fmt(r.price)}</span>`},
+    {label:"등락률", key:"change_pct", hint:HELP.change, cls:pctCls("change_pct"),
+     fmt:r=>`<span data-lc="${qesc(r.code)}">${r.change_pct==null?"–":`${r.change_pct>=0?"+":""}${numC(r.change_pct)}%`}</span>`},
     {label:"PER", key:"per", hint:HELP.per, fmt:r=>numC(r.per)},
     {label:"PBR", key:"pbr", hint:HELP.pbr, fmt:r=>numC(r.pbr)},
     {label:"ROE%", key:"roe", hint:"자본으로 얼마 버는지", fmt:r=>numC(r.roe)},
@@ -847,7 +893,7 @@ async function openStock(code,name){
     const Q=d.quote||{}, S=d.signal, D=d.dividend;
     if(!name&&Q.name) $("mTitle").textContent=`${Q.name} (${code})`;   // 온디맨드 조회 시 이름 보강
     const US=Q.currency==="USD", MN=(v)=>US?money(v,"USD"):fmt(v)+"원";
-    const fund=`<div class="cgrid">${kv("현재가",MN(Q.price),HELP.price)}${kv("등락률",Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–",HELP.change)}
+    const fund=`<div class="cgrid">${kv("현재가",`<span data-lp="${qesc(code)}" data-cur="${US?'USD':'KRW'}" data-won="1">${MN(Q.price)}</span>`,HELP.price)}${kv("등락률",`<span data-lc="${qesc(code)}">${Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–"}</span>`,HELP.change)}
       ${kv("PER",numC(Q.per),HELP.per)}${kv("PBR",numC(Q.pbr),HELP.pbr)}${kv("EPS",numC(Q.eps,0),HELP.eps)}${kv("BPS",numC(Q.bps,0),HELP.bps)}
       ${kv("시가총액",US?(Q.market_cap==null?"–":numC(Q.market_cap,0)+"억$"):capF(Q.market_cap),HELP.cap)}${kv("1년 최저~최고",US?(money(Q.low_52w,"USD")+"~"+money(Q.high_52w,"USD")):(numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0)+"원"),HELP.w52)}
       ${Q.ni_growth_q_pct!=null?kv("순이익 성장("+(Q.ni_growth_q_label||"최근 분기")+")",(Q.ni_growth_q_pct>=0?"+":"")+numC(Q.ni_growth_q_pct,0)+"%","전년 동기 대비 · 공식 분기보고서"):""}
@@ -959,7 +1005,8 @@ function init(){
     if(s&&s.classList.contains("open")&&!s.contains(e.target)&&e.target.id!=="moreBtn"&&!$("moreBtn").contains(e.target)) closeMore();
   });
   switchTab("home");
-  // 실시간 갱신: 활성 탭을 12초마다 자동 새로고침(설정 탭·입력 중은 건너뜀)
+  startStream();   // SSE 실시간 시세(관심∪보유) — 셀 단위 즉시 반영
+  // 전체 데이터 정합: 활성 탭을 12초마다 자동 새로고침(설정 탭·입력 중은 건너뜀)
   setInterval(()=>{
     if(busy || activeTab==="settings") return;
     const a=document.activeElement;

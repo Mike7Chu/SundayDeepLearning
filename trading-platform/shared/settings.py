@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     kis_quote_real: bool = True
     kis_rate_per_sec: float = 5.0        # KIS 조회 초당 요청 상한(버스트 500/연결차단 방지, 전 루프 공유)
     stock_interval_sec: float = 15.0
+    # 실시간(웹소켓): 장중 체결가 즉시 반영(관심∪보유, 연결당 41종목). 끄면 REST 폴링만.
+    kis_ws_enabled: bool = True
+    stream_interval_sec: float = 2.0     # 대시보드 SSE 푸시 주기(변경분만 전송)
+    guard_interval_sec: float = 20.0     # 엔진 고속 가드(목표가/손절 감시) 주기
     stock_history_interval_sec: float = 21600.0   # 일봉/배당 수집 주기(기본 6시간)
 
     # 토스증권 Open API — 실보유(잔고)·매수여력·실주문. 키 없으면 포트폴리오 비활성

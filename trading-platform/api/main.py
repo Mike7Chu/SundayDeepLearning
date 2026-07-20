@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 
 from api.redis_client import close_redis
 from api.routers import (coach, engine, market, news, portfolio, research,
-                         stocks, validation, watchlist)
+                         stocks, stream, validation, watchlist)
 
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
@@ -42,6 +42,7 @@ app.include_router(engine.router)
 app.include_router(coach.router)
 app.include_router(market.router)
 app.include_router(validation.router)
+app.include_router(stream.router)
 
 
 @app.get("/health")
