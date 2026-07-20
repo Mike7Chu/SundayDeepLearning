@@ -77,6 +77,8 @@ COACH_REQ_KEY = "coach:requests"
 # 사용자 제공 리서치 노트(예: SK증권 반도체 데일리) — 텔레그램 '리포트 …'로 저장,
 # 코치가 최우선 신뢰 입력으로 반영. TTL 36h(다음 날 아침 점검까지 유효)
 COACH_NOTE_KEY = "coach:note"
+# 아침 점검 미발송 감시견 — 오늘 경고를 보냈는지(str YYYY-MM-DD, 하루 1회 dedup)
+COACH_WD_KEY = "coach:watchdog"
 
 
 # 포워드 로그 마지막 실행일(str YYYY-MM-DD) — 하루 1회 스냅샷 dedup

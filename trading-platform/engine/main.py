@@ -39,6 +39,9 @@ from shared.redis_keys import (
     ENGINE_RISK_KEY,
     FWD_DONE_KEY,
     FX_USDKRW_KEY,
+    COACH_KEY,
+    COACH_WD_KEY,
+    RESEARCH_HB_KEY,
     RESEARCH_INV_KEY,
     RESEARCH_INV_REQ_KEY,
     STOCK_QUOTE_KEY,
@@ -291,6 +294,42 @@ async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> Non
         logger.info("[alert] %s %s (cur %.0f)", code, kind, cur)
 
 
+async def _coach_watchdog(redis: aioredis.Redis, sender: TelegramSender) -> None:
+    """아침 점검 미발송 감시견(엔진은 도커라 확실히 24h 생존).
+
+    코치 시각+20분이 지나도 오늘 리포트가 없으면 — 호스트 research가 죽었거나
+    멈춘 것 — 원인 진단(하트비트 유무)과 복구 명령을 텔레그램으로 하루 1회 통보.
+    """
+    from research.coach import overdue
+    if not settings.coach_enabled:
+        return
+    raw = await redis.get(COACH_KEY)
+    last_ts = 0.0
+    if raw:
+        try:
+            last_ts = float(json.loads(raw).get("ts") or 0)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            last_ts = 0.0
+    if not overdue(time.time(), last_ts, settings.coach_hour_kst):
+        return
+    today = time.strftime("%Y-%m-%d")
+    if await redis.get(COACH_WD_KEY) == today:
+        return                                  # 오늘 이미 경고함
+    hb = await redis.get(RESEARCH_HB_KEY)
+    if hb:
+        diag = ("research 프로세스는 살아 있는데 점검이 안 나갔어요 — "
+                "호스트에서 tail -50 /tmp/research.log 확인"
+                "(claude 로그인 만료/타임아웃 가능). 텔레그램 '점검'으로 수동 재시도 가능.")
+    else:
+        diag = ("호스트 research 프로세스가 죽어 있어요. Pi에서(일반 사용자로):\n"
+                "sudo pkill -f research.main\n"
+                "cd ~/SundayDeepLearning/trading-platform\n"
+                "nohup bash deploy/run-research-host.sh >/tmp/research.log 2>&1 &")
+    await sender.send(f"⏰ 아침 점검({settings.coach_hour_kst}시) 미발송 감지\n{diag}")
+    await redis.set(COACH_WD_KEY, today)
+    logger.warning("[watchdog] 아침 점검 미발송 — 경고 발송(hb=%s)", bool(hb))
+
+
 async def _guard_loop(redis: aioredis.Redis, sender: TelegramSender) -> None:
     """고속 가드 — 목표가/손절선 감시만 20초 주기(실시간 시세 대응).
 
@@ -302,6 +341,7 @@ async def _guard_loop(redis: aioredis.Redis, sender: TelegramSender) -> None:
     while True:
         try:
             await _holdings_alerts(redis, sender)
+            await _coach_watchdog(redis, sender)
         except Exception as exc:
             logger.warning("[DATA_ERROR] guard 실패: %s", exc)
         await asyncio.sleep(settings.guard_interval_sec)

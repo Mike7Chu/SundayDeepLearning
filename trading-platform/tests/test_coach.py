@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from research.coach import KST, build_coach_prompt, should_run
+from research.coach import KST, build_coach_prompt, overdue, should_run
 
 
 def _ts(y, m, d, hh, mm=0):
@@ -18,6 +18,17 @@ def test_should_run_daily_8am():
     assert should_run(_ts(2026, 7, 7, 15, 0), ran, 8) is False   # 오늘 이미 점검
     assert should_run(_ts(2026, 7, 8, 8, 1), ran, 8) is True     # 다음날 아침
     assert should_run(_ts(2026, 7, 8, 7, 0), ran, 8) is False    # 다음날 8시 전
+
+
+def test_overdue_watchdog():
+    """감시견: 8시+유예(20분)를 지나도 오늘 리포트가 없을 때만 True."""
+    y_report = _ts(2026, 7, 19, 8, 5)                       # 어제 발송분
+    assert overdue(_ts(2026, 7, 20, 8, 10), y_report) is False   # 유예 중
+    assert overdue(_ts(2026, 7, 20, 8, 25), y_report) is True    # 유예 지남 → 경고
+    today = _ts(2026, 7, 20, 8, 3)
+    assert overdue(_ts(2026, 7, 20, 8, 25), today) is False      # 오늘 발송됨
+    assert overdue(_ts(2026, 7, 20, 7, 0), y_report) is False    # 아직 8시 전
+    assert overdue(_ts(2026, 7, 20, 8, 25), None) is True        # 리포트 자체가 없음
 
 
 def test_should_run_missed_catchup():

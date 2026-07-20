@@ -19,8 +19,24 @@ if [ ! -d "$VENV" ]; then
   "$VENV/bin/pip" install -q -r requirements.txt
 fi
 
+# root(sudo) 실행 차단 — root에는 claude 구독 로그인이 없어 CLI가 rc=129로
+# 조용히 실패하고, 큐만 가로채는 좀비가 된다(실제 사고 이력).
+if [ "$(id -u)" -eq 0 ]; then
+  echo "❌ root(sudo)로 실행하지 마세요 — claude 로그인이 없는 계정입니다."
+  echo "   일반 사용자로: nohup bash deploy/run-research-host.sh >/tmp/research.log 2>&1 &"
+  exit 1
+fi
+
 # Redis는 docker compose의 것을 사용(호스트에서 localhost:6379로 접속)
 export REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
 # .env의 RESEARCH_*/TELEGRAM_* 등을 그대로 사용(pydantic-settings가 .env 로드)
 echo "[research] 호스트 구동 (REDIS_URL=$REDIS_URL). 중지: Ctrl+C"
-exec "$VENV/bin/python" -m research.main
+
+# 크래시해도 10초 후 자동 재기동 — '아침 점검 무소식'의 최후 방어선.
+# (정상 종료 Ctrl+C(SIGINT)/kill(SIGTERM)은 루프도 함께 끝난다.)
+trap 'echo "[research] 중지됨"; exit 0' INT TERM
+while true; do
+  "$VENV/bin/python" -m research.main && break
+  echo "[research] 비정상 종료(rc=$?) — 10초 후 재시작 $(date '+%F %T')"
+  sleep 10
+done

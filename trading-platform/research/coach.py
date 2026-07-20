@@ -51,6 +51,20 @@ def should_run(now_ts: float, last_ts: float | None, hour_kst: int = 8) -> bool:
     return (last_ts or 0.0) < due.timestamp()
 
 
+def overdue(now_ts: float, last_ts: float | None, hour_kst: int = 8,
+            grace_min: int = 20) -> bool:
+    """정기 점검이 (due+유예)를 지나도 안 온 상태인지(순수 함수).
+
+    엔진(24h 도커) 감시견용 — 호스트 research가 죽어 '무소식'이 되는 것을
+    제3자가 감지해 텔레그램으로 알린다.
+    """
+    now = datetime.fromtimestamp(now_ts, KST)
+    due = now.replace(hour=hour_kst, minute=0, second=0, microsecond=0)
+    if now < due + timedelta(minutes=grace_min):
+        return False
+    return (last_ts or 0.0) < due.timestamp()
+
+
 def _pct(part: float, total: float) -> float:
     return round(part / total * 100, 1) if total else 0.0
 

@@ -114,26 +114,36 @@ async def run() -> None:
         except Exception as exc:
             logger.warning("[DATA_ERROR] %s 역방향 검증 실패: %s", code, exc)
 
+    coach_fail_ts = 0.0   # 정기 점검 실패 시 30분 쿨다운(15초 루프의 재시도 스팸 방지)
+
     async def run_coach(reason: str) -> None:
         """아침 점검(포트폴리오 코치) 1회: 수집→분석→저장→텔레그램.
 
         실패도 텔레그램으로 통보 — 온디맨드 요청이 소리 없이 사라지지 않게.
+        어떤 예외도 프로세스를 죽이지 않는다(내부 처리 + 쿨다운 후 재시도).
         """
-        block = await gather_coach(redis)
-        if block is None:
-            logger.info("[coach] 보유 데이터 없음(토스 미연동?) — 점검 생략(%s)", reason)
-            await sender.send("🧭 점검 불가 — 보유 데이터가 없어요. "
-                              "토스 연동(TOSS_CLIENT_ID/SECRET)과 collector 로그를 확인해 주세요.")
-            return
-        result = await analyst.analyze_coach(block)
-        await redis.set(COACH_KEY, json.dumps(result, ensure_ascii=False))
-        if result.get("enabled") and not result["report"].startswith("⚠️"):
-            await sender.send_long(result["report"])   # 전문 발송(잘림 없이 분할)
-        else:
-            await sender.send(("🧭 아침 점검 실패 — 원인:\n"
-                               + result.get("report", "")[:500]
-                               + "\n(호스트에서 claude 로그인/네트워크 확인)"))
-        logger.info("[coach] 아침 점검 완료(%s)", reason)
+        nonlocal coach_fail_ts
+        try:
+            block = await gather_coach(redis)
+            if block is None:
+                logger.info("[coach] 보유 데이터 없음(토스 미연동?) — 점검 생략(%s)", reason)
+                await sender.send("🧭 점검 불가 — 보유 데이터가 없어요. "
+                                  "토스 연동(TOSS_CLIENT_ID/SECRET)과 collector 로그를 확인해 주세요.")
+                return
+            result = await analyst.analyze_coach(block)
+            await redis.set(COACH_KEY, json.dumps(result, ensure_ascii=False))
+            if result.get("enabled") and not result["report"].startswith("⚠️"):
+                await sender.send_long(result["report"])   # 전문 발송(잘림 없이 분할)
+            else:
+                await sender.send(("🧭 아침 점검 실패 — 원인:\n"
+                                   + result.get("report", "")[:500]
+                                   + "\n(호스트에서 claude 로그인/네트워크 확인)"))
+            logger.info("[coach] 아침 점검 완료(%s)", reason)
+        except Exception as exc:
+            coach_fail_ts = time.time()
+            logger.warning("[coach] 점검 처리 오류(%s): %s — 30분 후 재시도", reason, exc)
+            await sender.send(f"🧭 아침 점검 오류({reason}) — {str(exc)[:300]}\n"
+                              "30분 후 자동 재시도합니다. 계속 실패하면 /tmp/research.log 확인.")
 
     async def coach_last_ts() -> float:
         raw = await redis.get(COACH_KEY)
@@ -159,38 +169,45 @@ async def run() -> None:
     last_full = 0.0
     try:
         while True:
-            await heartbeat()
-            # 코치: 온디맨드('지금 점검' 버튼) + 매일 코치 시각(KST) 정기 1회
-            if settings.coach_enabled:
-                if await redis.spop(COACH_REQ_KEY):
-                    await run_coach("요청")
-                elif should_run(time.time(), await coach_last_ts(),
-                                settings.coach_hour_kst):
-                    await run_coach(f"정기 {settings.coach_hour_kst}시")
-            # 0) 매매 엔진의 역방향 검증 요청(감점) — 매수 판단에 직결되므로 최우선
-            inv = await redis.spop(RESEARCH_INV_REQ_KEY, 5)
-            for code in (inv or []):
+            # 사이클 전체를 방어 — Redis 순단·일시 오류가 프로세스를 죽여
+            # '아침 점검 무소식'이 되는 일을 막는다(다음 사이클 재시도).
+            try:
                 await heartbeat()
-                await coach_if_requested()   # 점검 요청은 긴 작업 사이에도 우선
-                await inversion_code(code)
-                await asyncio.sleep(2)
-            # 1) 온디맨드 요청(대시보드 🧠 '다시 분석' → API가 큐에 넣음)은 무조건 처리
-            reqs = await redis.spop(RESEARCH_REQ_KEY, 5)
-            for code in (reqs or []):
-                await heartbeat()
-                await coach_if_requested()
-                await analyze_code(code)
-                await asyncio.sleep(2)
-            # 2) 정기 전체 분석 — 최근 리포트가 있는 종목은 건너뜀(재시작해도 재분석 안 함)
-            if time.time() - last_full >= 3600:   # 1시간마다 점검(신규/만료분만 분석)
-                for item in await effective_watchlist(redis):
+                # 코치: 온디맨드('지금 점검' 버튼) + 매일 코치 시각(KST) 정기 1회
+                if settings.coach_enabled:
+                    if await redis.spop(COACH_REQ_KEY):
+                        await run_coach("요청")
+                    elif (time.time() - coach_fail_ts > 1800
+                          and should_run(time.time(), await coach_last_ts(),
+                                         settings.coach_hour_kst)):
+                        await run_coach(f"정기 {settings.coach_hour_kst}시")
+                # 0) 매매 엔진의 역방향 검증 요청(감점) — 매수 판단에 직결되므로 최우선
+                inv = await redis.spop(RESEARCH_INV_REQ_KEY, 5)
+                for code in (inv or []):
+                    await heartbeat()
+                    await coach_if_requested()   # 점검 요청은 긴 작업 사이에도 우선
+                    await inversion_code(code)
+                    await asyncio.sleep(2)
+                # 1) 온디맨드 요청(대시보드 🧠 '다시 분석' → API가 큐에 넣음)은 무조건 처리
+                reqs = await redis.spop(RESEARCH_REQ_KEY, 5)
+                for code in (reqs or []):
                     await heartbeat()
                     await coach_if_requested()
-                    if await is_fresh(item["code"]):
-                        continue
-                    await analyze_code(item["code"], item.get("name", ""))
+                    await analyze_code(code)
                     await asyncio.sleep(2)
-                last_full = time.time()
+                # 2) 정기 전체 분석 — 최근 리포트가 있는 종목은 건너뜀(재시작해도 재분석 안 함)
+                if time.time() - last_full >= 3600:   # 1시간마다 점검(신규/만료분만 분석)
+                    for item in await effective_watchlist(redis):
+                        await heartbeat()
+                        await coach_if_requested()
+                        if await is_fresh(item["code"]):
+                            continue
+                        await analyze_code(item["code"], item.get("name", ""))
+                        await asyncio.sleep(2)
+                    last_full = time.time()
+            except Exception as exc:
+                logger.warning("[research] 사이클 오류(프로세스는 계속 살아있음): %s", exc)
+                await asyncio.sleep(30)
             await asyncio.sleep(15)   # 요청 큐 폴링 주기
     finally:
         await redis.aclose()
