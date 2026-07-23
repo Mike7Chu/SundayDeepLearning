@@ -23,6 +23,7 @@ from api.services.stock_signal import (
 )
 from api.services.cache import get_or_compute
 from api.services.stock_score import compute_score
+from api.services.stock_radar import market_regime, radar_pool, radar_score
 from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
 from collector.stock.kis import effective_watchlist, is_kr_code
@@ -30,9 +31,12 @@ from fastapi import HTTPException
 from shared.redis_keys import (
     DART_CORP_KEY,
     DART_RECENT_KEY,
+    MARKET_INDICATORS_KEY,
+    MARKET_RANKINGS_KEY,
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
+    TOSS_HOLDINGS_KEY,
     stock_ohlcv_key,
 )
 
@@ -72,6 +76,85 @@ async def stocks_value(limit: int = 200) -> dict:
     return await get_or_compute(
         f"stocks_value:{limit}", 30,
         lambda: value_screener(get_redis(), limit=limit))
+
+
+@router.get("/stocks/radar")
+async def stocks_radar(limit: int = 12) -> dict:
+    """터질 종목 발굴 레이더 — 급등 전조(거래대금·신고가·강도·실적·추세) 조합 랭킹.
+
+    후보군(랭킹 급등∪실적 촉매∪신고가 근접)에만 온디맨드 캔들 조회 → 전조 점수.
+    Pi 부하 억제를 위해 3분 캐시. 예측이 아닌 '지금 깨어나는' 종목 스캔(면책).
+    """
+    return await get_or_compute(f"stocks_radar:{limit}", 180,
+                                lambda: _radar_build(limit))
+
+
+async def _radar_build(limit: int) -> dict:
+    redis = get_redis()
+    quotes = await load_quotes(redis)
+    # 토스 랭킹(급등·거래대금 상위) — 이미 '움직이는' 종목
+    ranking_codes: list[str] = []
+    rk_raw = await redis.get(MARKET_RANKINGS_KEY)
+    if rk_raw:
+        try:
+            rk = _json.loads(rk_raw)
+            for key in ("kr_gainers", "kr_amount"):
+                for r in rk.get(key) or []:
+                    if r.get("symbol"):
+                        ranking_codes.append(r["symbol"])
+        except (ValueError, TypeError):
+            pass
+    # 최근 실적·공시 촉매 종목(DART)
+    flash_codes: set[str] = set()
+    for item in await redis.lrange(DART_RECENT_KEY, 0, 60):
+        try:
+            d = _json.loads(item)
+        except (ValueError, TypeError):
+            continue
+        if d.get("stock_code"):
+            flash_codes.add(d["stock_code"])
+    # 보유 종목 제외(이미 들고 있으면 '발굴' 대상 아님)
+    held: set[str] = set()
+    h_raw = await redis.get(TOSS_HOLDINGS_KEY)
+    if h_raw:
+        try:
+            held = {h["symbol"] for h in _json.loads(h_raw).get("holdings", [])
+                    if h.get("symbol")}
+        except (ValueError, TypeError):
+            pass
+    pool = radar_pool(quotes, ranking_codes, list(flash_codes), held)
+    qmap = {q.get("code"): q for q in quotes if q.get("code")}
+    rows: list[dict] = []
+    async with httpx.AsyncClient(timeout=20) as tc:
+        for code in pool:
+            q = qmap.get(code, {"code": code})
+            candles: list = []
+            oraw = await redis.get(stock_ohlcv_key(code))
+            if oraw:
+                try:
+                    candles = _json.loads(oraw)
+                except (ValueError, TypeError):
+                    candles = []
+            if len(candles) < 20 and _toss.enabled:
+                try:
+                    candles = await _toss.fetch_daily_history(tc, code)
+                    if candles:
+                        await redis.set(stock_ohlcv_key(code),
+                                        _json.dumps(candles), ex=21600)
+                except Exception:
+                    candles = []
+            r = radar_score(q, candles, has_flash=(code in flash_codes))
+            if r:
+                if not r.get("name"):
+                    r["name"] = q.get("name") or code
+                rows.append(r)
+    rows.sort(key=lambda x: x["radar"], reverse=True)
+    ind_raw = await redis.get(MARKET_INDICATORS_KEY)
+    try:
+        regime = market_regime(_json.loads(ind_raw) if ind_raw else None)
+    except (ValueError, TypeError):
+        regime = market_regime(None)
+    return {"rows": rows[:limit], "regime": regime, "scanned": len(pool)}
 
 
 @router.get("/stocks/score")
