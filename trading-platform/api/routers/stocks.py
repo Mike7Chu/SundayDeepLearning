@@ -207,6 +207,25 @@ async def stock_detail(code: str) -> dict:
                               if v is not None})
             except (ValueError, TypeError):
                 pass
+    # 시세 self-heal: 저장된 현재가가 없거나 오래됐으면(수집 루프가 멈춰도) 토스에서
+    # 즉시 다시 불러온다 — 상세 모달이 항상 '지금 가격'을 보이게(지앤씨 +25% 미반영 fix).
+    price_ts = quote.get("ts")
+    stale = (not quote.get("price")) or (not price_ts) or (_time.time() - price_ts > 60)
+    if is_kr_code(code) and _toss.enabled and stale:
+        try:
+            async with httpx.AsyncClient(timeout=12) as tc:
+                fresh = await _toss.fetch_prices(tc, [code])
+            fp = next((p.get("price") for p in fresh if p.get("symbol") == code), None)
+            if fp:
+                prev = quote.get("prev_close")
+                quote["price"] = fp
+                if prev:
+                    quote["change_pct"] = round((fp - prev) / prev * 100, 2)
+                quote["ts"] = price_ts = _time.time()
+                await redis.hset(STOCK_QUOTE_KEY, code,
+                                 _json.dumps(quote, ensure_ascii=False))
+        except Exception:
+            pass                                    # 실패해도 저장분으로 진행
     # 일봉: 저장분 → 없으면 토스 온디맨드
     candles: list = []
     oraw = await redis.get(stock_ohlcv_key(code))
@@ -289,4 +308,5 @@ async def stock_detail(code: str) -> dict:
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
             "levels": levels, "pillar": pillar, "earnings_flash": flash,
+            "price_ts": quote.get("ts"),
             "in_watchlist": any(w.get("code") == code for w in wl)}

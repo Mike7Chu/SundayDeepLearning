@@ -30,10 +30,61 @@ router = APIRouter()
 _toss = TossClient()
 
 
+async def _resync_holdings(redis) -> None:
+    """잔고 스냅샷이 오래됐으면(수집 루프 정지 등) 토스에서 즉시 재수집.
+
+    portfolio_loop(30초)가 멈춰도 화면이 실제 잔고를 보이게 하는 self-heal —
+    '추가매수 반영 안 됨'의 근본 방어. 20초 캐시로 토스 과호출 방지.
+    """
+    import time
+    a_raw = await redis.get(TOSS_ACCOUNT_KEY)
+    acc = json.loads(a_raw) if a_raw else {}
+    if acc.get("ts") and time.time() - acc["ts"] < 45:
+        return                                      # 최근 수집됨 — 재호출 불필요
+
+    async def _do() -> bool:
+        async with httpx.AsyncClient(timeout=15) as client:
+            account = await _toss.resolve_account_seq(client)
+            if not account:
+                return False
+            snap = await _toss.fetch_holdings(client, account)
+            rate = None
+            try:
+                fx = await _toss.fetch_exchange_rate(client)
+                rate = float(fx.get("rate") or 0) or None
+                if rate:
+                    await redis.set(FX_USDKRW_KEY, json.dumps(
+                        {"rate": rate, "ts": time.time()}))
+            except Exception:
+                pass
+            total = snap.get("total_eval_krw") or 0.0
+            usd = snap.get("total_eval_usd")
+            if usd and rate:
+                total += usd * rate
+            snap["total_eval"] = round(total, 2)
+            snap["ts"] = time.time()
+            try:
+                bp = await _toss.fetch_buying_power(client, account, "KRW")
+            except Exception:
+                bp = {"buying_power": None}
+        await redis.set(TOSS_HOLDINGS_KEY, json.dumps(snap, ensure_ascii=False))
+        await redis.set(TOSS_ACCOUNT_KEY, json.dumps(
+            {"accountSeq": account, "buying_power": bp.get("buying_power"),
+             "ts": time.time()}, ensure_ascii=False))
+        return True
+
+    try:
+        await get_or_compute("portfolio:resync", 20.0, _do)
+    except Exception:
+        pass                                        # 실패 시 기존 스냅샷 사용
+
+
 @router.get("/portfolio")
 async def portfolio() -> dict:
     """실보유 종목 + 총평가·손익·매수여력. 토스 키 없으면 idle 빈 응답."""
     redis = get_redis()
+    if _toss.enabled:
+        await _resync_holdings(redis)               # 스냅샷 오래됐으면 즉시 재수집
     h_raw = await redis.get(TOSS_HOLDINGS_KEY)
     a_raw = await redis.get(TOSS_ACCOUNT_KEY)
     f_raw = await redis.get(FX_USDKRW_KEY)
@@ -77,7 +128,7 @@ async def portfolio() -> dict:
         "pnl": (totals or {}).get("pnl", snap.get("pnl")),
         "pnl_pct": (totals or {}).get("pnl_pct", snap.get("pnl_pct")),
         "buying_power": acc.get("buying_power"),
-        "ts": snap.get("ts"),
+        "ts": snap.get("ts") or acc.get("ts"),   # 마지막 실제 동기화 시각(신선도 표시용)
     }
 
 

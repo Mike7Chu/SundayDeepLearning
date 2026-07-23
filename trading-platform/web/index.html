@@ -349,6 +349,19 @@ const capF=(e)=> e==null?"–":(e>=10000? Number(e/10000).toLocaleString("ko-KR"
 const won=(n)=> n==null?"–":Number(n).toLocaleString("ko-KR")+"원";
 const money=(v,c)=> v==null?"–":(c==="USD"?"$"+Number(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}):won(v));
 const eok=(n)=> n==null?"–":(n/1e8).toLocaleString("ko-KR",{maximumFractionDigits:1})+"억";
+// 데이터 나이(초 epoch ts) → 사람 읽는 문구. 오래됐는지는 staleSec으로 별도 판정.
+function ago(ts){ if(!ts) return "확인 불가"; const s=Date.now()/1000-Number(ts);
+  if(s<45) return "방금"; if(s<3600) return Math.floor(s/60)+"분 전";
+  if(s<86400) return Math.floor(s/3600)+"시간 전"; return Math.floor(s/86400)+"일 전"; }
+function staleSec(ts){ return ts?Date.now()/1000-Number(ts):Infinity; }
+// KRX 정규장 여부(대략) — 장중엔 시세가 안 흐르면 더 강한 경고
+function krxOpen(){ const n=new Date(Date.now()+(new Date().getTimezoneOffset()+540)*60000);
+  if(n.getDay()===0||n.getDay()===6) return false; const hm=n.getHours()*100+n.getMinutes(); return hm>=900&&hm<=1530; }
+// 신선도 배지 HTML — 오래되면 색·경고 강화
+function freshBadge(ts,label){ const s=staleSec(ts);
+  const bad=krxOpen()?s>180:s>4*3600;   // 장중 3분·장외 4시간 초과면 경고
+  const cls=ts==null?"sell":(bad?"sell":(s<120?"pos":""));
+  return `<span class="badge ${cls}" title="데이터가 마지막으로 갱신된 시각">${label||"시세"} ${ago(ts)}${bad?" ⚠️":""}</span>`; }
 let activeTab="home", busy=false;
 const term=()=>$("search").value.trim();
 const match=(s)=>{ const t=term(); return !t || (s||"").toLowerCase().includes(t.toLowerCase()); };
@@ -636,7 +649,11 @@ async function renderPortfolio(){
   if(pf.trading_enabled){ try{ oco=(await jget("/portfolio/oco")).rows||[]; }catch(e){} }
   const kpi=(k,v,cls="")=>`<div class="card" style="min-width:150px"><h3>${k}</h3><div class="kpi ${cls}">${v}</div></div>`;
   const pcls=(pf.pnl||0)>=0?"pos":"neg";
+  const syncBad=staleSec(pf.ts)>120;
+  const syncBar=`<div class="helpbar" style="margin:0 0 12px;${syncBad?'border-color:rgba(255,77,94,.35);background:rgba(255,77,94,.08)':''}">
+    ${syncBad?'⚠️':'🔄'} 토스 잔고 <b>${ago(pf.ts)}</b> 동기화됨${syncBad?' — 추가매수/매도가 아직 안 보이면 잠시 후 새로고침하세요. 계속 안 맞으면 collector·토스 연동 확인이 필요해요.':' · 화면을 열면 최신 잔고를 다시 불러옵니다.'}</div>`;
   $("portfolioBox").innerHTML=`
+    ${syncBar}
     <div class="grid" style="margin-bottom:12px">
       ${kpi("총 평가액", won(pf.total_eval))}
       ${kpi("평가손익", ((pf.pnl||0)>=0?"+":"")+won(pf.pnl)+" ("+numC(pf.pnl_pct)+"%)", pcls)}
@@ -945,7 +962,15 @@ async function openStock(code,name){
       ${EF?`<div class="num" style="margin-top:4px"><a class="clk" href="${EF.url}" target="_blank">${escH(EF.title)}</a></div>`:''}
       ${figH}
       ${hasFig?'':'<div class="num" style="opacity:.7;margin-top:2px">아래 분기 성장 수치는 직전 정기보고서 기준 — 이 공시가 가장 최신 실적이에요. 수치 자동 추출은 발표 직후 몇 분 내 반영됩니다.</div>'}</div>`:'';
-    $("mBody").innerHTML=`<div class="arow" style="margin-bottom:8px">${wbtn}</div>
+    const pts=d.price_ts||Q.ts;
+    const staleWarn=(staleSec(pts)>(krxOpen()?180:4*3600))
+      ?`<div class="card" style="margin-bottom:8px;border-left:3px solid var(--up)">
+          ⚠️ <b>이 종목 시세가 ${ago(pts)} 값이에요.</b> 수집이 지연/중단된 상태라 아래 가격·추천가·점수가
+          최신이 아닐 수 있어요. 잠시 후 다시 열면 자동으로 다시 불러옵니다.
+          ${krxOpen()?'<div class="num" style="margin-top:4px">장중인데 시세가 안 흐르면 collector 로그를 확인하세요.</div>':''}
+        </div>`:'';
+    $("mBody").innerHTML=`<div class="arow" style="margin-bottom:8px">${wbtn}${freshBadge(pts)}</div>
+      ${staleWarn}
       <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}
       <div class="modal-sec">회사 가치·실적</div>${flashH}${fund}
       <div class="modal-sec">주가 흐름</div>${sgH}
