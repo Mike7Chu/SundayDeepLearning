@@ -921,12 +921,35 @@ async function delWatch(code){
 
 // ===== 종목 상세 모달 =====
 function kv(k,v,sub){ return `<div class="ccard"><div class="mk">${k}</div><div class="pr">${v}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`; }
-function closeModal(){ $("modal").style.display="none"; }
+let mCode=null, mName="", mTimer=null;
+function closeModal(){ $("modal").style.display="none"; mCode=null; if(mTimer){clearInterval(mTimer); mTimer=null;} }
 async function openStock(code,name){
+  mCode=code; mName=name||"";
   $("modal").style.display="flex"; $("mTitle").textContent=`${name} (${code})`;
   $("mBody").innerHTML='<div class="skel" style="height:110px;margin:10px 0"></div><div class="skel" style="height:64px;margin:10px 0"></div><div class="skel" style="height:64px;margin:10px 0;width:70%"></div>';
   try{
     const d=await jget("/stocks/"+encodeURIComponent(code));
+    if(mCode!==code) return;                 // 그 사이 다른 종목/닫힘
+    paintModal(code,name,d);
+  }catch(e){ $("mBody").innerHTML=`<div class="empty">불러오기 실패: ${e.message}</div>`; }
+  // 모달이 열려 있는 동안 상세를 주기적으로 다시 불러와 파생값(추천가·점수·MACD)도 갱신
+  if(mTimer) clearInterval(mTimer);
+  mTimer=setInterval(refreshModal, 20000);
+}
+// 조용한 갱신: 스켈레톤·스크롤 흔들림 없이 파생값만 새로. '더 알아보기'(#mExtra) 보존.
+async function refreshModal(){
+  if(!mCode || $("modal").style.display==="none"){ if(mTimer){clearInterval(mTimer);mTimer=null;} return; }
+  const code=mCode;
+  try{
+    const d=await jget("/stocks/"+encodeURIComponent(code));
+    if(mCode!==code || $("modal").style.display==="none") return;
+    const extra=$("mExtra"); const keep=extra?extra.innerHTML:"";
+    paintModal(code, mName, d);
+    if(keep){ const e2=$("mExtra"); if(e2) e2.innerHTML=keep; }   // AI분석/백테스트 결과 유지
+    for(const c in LIVE) patchLive(c,LIVE[c]);                    // 실시간가 재적용
+  }catch(e){}
+}
+function paintModal(code,name,d){
     const Q=d.quote||{}, S=d.signal, D=d.dividend;
     if(!name&&Q.name) $("mTitle").textContent=`${Q.name} (${code})`;   // 온디맨드 조회 시 이름 보강
     const US=Q.currency==="USD", MN=(v)=>US?money(v,"USD"):fmt(v)+"원";
@@ -999,7 +1022,6 @@ async function openStock(code,name){
       <div class="modal-sec">더 알아보기</div>
       <div class="arow"><button class="btn" onclick="mBacktest('${qesc(code)}')">📈 과거 성과</button>
         <button class="btn" onclick="mResearch('${qesc(code)}')">🧠 AI 분석</button></div><div id="mExtra"></div>`;
-  }catch(e){ $("mBody").innerHTML=`<div class="empty">불러오기 실패: ${e.message}</div>`; }
 }
 async function addWatchModal(code,name){
   const r=await fetch("/watchlist",{method:"POST",headers:{"Content-Type":"application/json"},
