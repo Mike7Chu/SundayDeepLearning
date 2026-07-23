@@ -495,7 +495,7 @@ async function render(){
 }
 
 async function renderHome(){
-  const [q,v,sc,d,n,pf,eng,co,mk,pl,cal]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine"),jget("/coach"),jget("/market"),jget("/plan"),jget("/calibration").catch(()=>({}))]);
+  const [q,v,sc,d,n,pf,eng,co,mk,pl,cal,rm]=await Promise.all([jget("/stocks"),jget("/stocks/value"),jget("/stocks/score"),jget("/stocks/dividend"),jget("/news"),jget("/portfolio"),jget("/engine"),jget("/coach"),jget("/market"),jget("/plan"),jget("/calibration").catch(()=>({})),jget("/roadmap").catch(()=>({}))]);
   const quotes=q.rows||[], scores=sc.rows||[];
   const buys=scores.filter(r=>r.score>=60), sells=scores.filter(r=>r.score<45);
   const up=quotes.filter(r=>(r.change_pct||0)>0).length, dn=quotes.filter(r=>(r.change_pct||0)<0).length;
@@ -522,6 +522,7 @@ async function renderHome(){
         : `<div class="arow"><label>현재 평가자산(원) <input id="curAsset" type="number" style="width:180px" value="${cur||''}" placeholder="예: 50000000"></label>
              <button class="btn" onclick="saveAsset()">저장</button>
              <span class="badge">목표까지 ${eok(Math.max(0,TARGET-cur))}</span></div>`}
+      ${roadmapLine(rm)}
     </div>
     ${coachCardHTML(co)}
     ${planCardHTML(pl)}
@@ -553,6 +554,24 @@ async function renderHome(){
   $("metaInfo").textContent=`관심종목 ${quotes.length} · 매수후보 ${buys.length}`;
 }
 function saveAsset(){ localStorage.setItem("curAsset", $("curAsset").value||0); renderHome(); }
+function roadmapLine(rm){
+  rm=rm||{}; if(rm.progress_pct==null) return '';
+  const parts=[];
+  if(rm.required_cagr!=null) parts.push(`기한(${rm.deadline})까지 필요 <b>연 ${numC(rm.required_cagr,0)}%</b>`);
+  if(rm.pace_cagr!=null){
+    parts.push(`현재 페이스 <b class="${rm.on_track?'pos':'neg'}">연 ${numC(rm.pace_cagr,0)}%</b>`);
+    if(rm.projected_years!=null&&rm.projected_years>0){
+      const yr=new Date().getFullYear()+Math.round(rm.projected_years);
+      parts.push(`이 속도면 <b>${yr}년경</b> 도달`);
+    }
+  } else {
+    parts.push(`<span class="num">페이스는 자산 기록 30일↑ 쌓이면 표시(현재 ${rm.history_days||0}일)</span>`);
+  }
+  const verdict=rm.on_track==null?'':(rm.on_track
+    ?'<span class="badge pos">🟢 궤도 위</span>'
+    :'<span class="badge sell">🔴 궤도 이탈 — 페이스 부족</span>');
+  return `<div class="num" style="margin-top:8px;line-height:1.7">🧭 로드맵: ${parts.join(" · ")} ${verdict}</div>`;
+}
 
 function calCardHTML(cal){
   // 점수 검증(Validation First): 포워드 로그 T+N 실현 수익률 — 데이터가 쌓여야 표시

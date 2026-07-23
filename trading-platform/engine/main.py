@@ -31,6 +31,7 @@ from engine.screener import final_score, quant_filter
 from engine.telegram_cmd import command_loop
 from notifier.telegram import TelegramSender
 from shared.redis_keys import (
+    ASSET_HIST_KEY,
     ENGINE_ALERTS_KEY,
     ENGINE_TRAIL_KEY,
     ENGINE_AUTO_KEY,
@@ -388,10 +389,29 @@ async def _cycle_loop(redis: aioredis.Redis, sender: TelegramSender,
             await _pipeline(redis, sender, risk, toss, kis)
             await _swing_plan(redis, toss, risk)
             await _forward_log(redis)
+            await _asset_snapshot(redis)
         except Exception as exc:
             # 어떤 오류도 엔진을 죽이지 않는다 — 기록 후 다음 주기.
             logger.warning("[DATA_ERROR] engine 사이클 실패: %s", exc)
         await asyncio.sleep(settings.engine_interval_sec)
+
+
+async def _asset_snapshot(redis: aioredis.Redis) -> None:
+    """총자산 일 1회 스냅샷(100억 로드맵 페이스 계산용). ~730일 보존."""
+    today = time.strftime("%Y-%m-%d")
+    hist = await redis.lrange(ASSET_HIST_KEY, -1, -1)
+    if hist:
+        try:
+            if json.loads(hist[0]).get("date") == today:
+                return                              # 오늘 이미 기록
+        except (json.JSONDecodeError, TypeError):
+            pass
+    asset, _cash = await _assets(redis)
+    if not asset:
+        return
+    await redis.rpush(ASSET_HIST_KEY, json.dumps(
+        {"date": today, "ts": time.time(), "eval": round(asset, 0)}))
+    await redis.ltrim(ASSET_HIST_KEY, -730, -1)
 
 
 async def _forward_log(redis: aioredis.Redis) -> None:

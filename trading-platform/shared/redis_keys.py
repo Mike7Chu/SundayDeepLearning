@@ -46,6 +46,8 @@ ENGINE_BUYLIST_KEY = "engine:buylist"
 ENGINE_ALERTS_KEY = "engine:alerts"
 # 매도 규율(트레일링 스탑) 상태(hash{code: json{peak, half_taken, ts}}) — 진입 후 고점 추적
 ENGINE_TRAIL_KEY = "engine:trail"
+# 자산 히스토리(list of json{ts, eval}, 하루 1스냅샷·~730일 보존) — 100억 로드맵 페이스 계산
+ASSET_HIST_KEY = "asset:history"
 # 자동매매 실행 기록(hash{code: json{ts,order_id,qty,price}} — 재매수 쿨다운)
 ENGINE_AUTO_KEY = "engine:auto_orders"
 # 빛의기둥(수급 포착) 알림 기록(hash{code: "YYYY-MM-DD"} — 하루 1회)
