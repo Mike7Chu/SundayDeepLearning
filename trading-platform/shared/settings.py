@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     auto_trade_enabled: bool = False
     auto_trade_broker: str = "kis"              # kis | toss
     auto_trade_cooldown_sec: float = 604800.0   # 같은 종목 자동 재매수 금지 기간(7일)
+    # 수급 확인 게이트: 외인+기관 5일 순매도가 이 값(억)을 넘으면 자동매수 보류.
+    auto_supply_block_eok: float = 20.0
     # 한투(KIS) 주문 게이트 — kis_paper=true면 모의투자 주문(리허설), false면 실전
     kis_trading_enabled: bool = False
     kis_max_order_krw: float = 100_000.0        # 한투 주문당 안전 상한

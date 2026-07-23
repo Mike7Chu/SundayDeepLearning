@@ -18,6 +18,7 @@ import time
 import httpx
 import redis.asyncio as aioredis
 
+from api.services.stock_radar import supply_demand
 from api.services.stock_score import compute_score
 from api.services.stock_signal import light_pillar, pillar_guide, trade_levels
 from api.services.stock_value import load_quotes
@@ -147,6 +148,23 @@ async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
                     continue                     # 쿨다운 내 재매수 금지
             except (json.JSONDecodeError, TypeError):
                 pass
+        # 수급 확인 게이트: 외인·기관이 '분산(순매도)' 중인 종목은 자동매수 보류.
+        # (스마트머니가 파는데 규칙만 믿고 사지 않기 — 매수는 확인, 매도는 항상 허용 원칙과 일관.)
+        if code.isdigit() and toss.enabled:
+            try:
+                async with httpx.AsyncClient(timeout=12) as sdc:
+                    inv = await toss.fetch_investor_trading(sdc, code, count=5)
+                sd = supply_demand(inv)
+                if (sd.get("net_eok") or 0) <= -settings.auto_supply_block_eok:
+                    await sender.send(
+                        f"⏸️ 자동매수 보류 — {r['name']}({code})\n"
+                        f"필터는 통과했으나 외인+기관 5일 {sd['net_eok']:.0f}억 순매도(분산) "
+                        f"— 스마트머니 매도 중이라 매수 보류.")
+                    logger.info("[auto] %s 수급 분산(%.0f억) — 매수 보류", code,
+                                sd.get("net_eok") or 0)
+                    continue
+            except Exception:
+                pass                             # 수급 조회 실패는 게이트 통과(막지 않음)
         budget = min(risk.get("per_stock_cap") or max_order, max_order)
         qty = int(budget // entry)
         if qty < 1:
