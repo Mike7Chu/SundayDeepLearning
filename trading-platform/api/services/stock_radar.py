@@ -108,7 +108,7 @@ def radar_score(quote: dict, candles: list[dict],
 
 
 def radar_pool(quotes: list[dict], ranking_codes: list[str],
-               flash_codes: list[str], held: set[str], cap: int = 40) -> list[str]:
+               flash_codes: list[str], held: set[str], cap: int = 30) -> list[str]:
     """레이더 후보군 선정(순수) — 온디맨드 캔들 조회 비용을 cap으로 제한.
 
     우선순위: ①토스 랭킹(이미 움직임 — 급등·거래대금 상위) ②실적·공시 촉매

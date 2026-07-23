@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from collector.stock.toss import (
+    TossClient,
     TossError,
     _json_or_raise,
     _unwrap,
@@ -273,3 +274,69 @@ def test_live_overlay_recomputes_rows_and_totals():
            "cur_price": 110.0, "eval_amount": 110.0}]
     t3 = live_overlay(h3, {}, None)
     assert h3[0]["cur_price"] == 110.0 and t3["total_eval"] == 110.0
+
+
+class _FakeClient:
+    """호출 시퀀스대로 응답을 돌려주는 httpx.AsyncClient 흉내."""
+
+    def __init__(self, get_responses):
+        self._get = list(get_responses)
+        self.token_calls = 0
+        self.get_calls = 0
+
+    async def post(self, url, **kw):
+        self.token_calls += 1                      # /oauth2/token
+        return _Resp({"access_token": "T", "expires_in": 3600})
+
+    async def get(self, url, **kw):
+        self.get_calls += 1
+        return _Resp(self._get.pop(0))
+
+
+def _run_toss(get_responses, monkeypatch, setup=None):
+    import asyncio
+    from collector.stock import toss as T
+    monkeypatch.setattr(T.settings, "toss_client_id", "id")
+    monkeypatch.setattr(T.settings, "toss_client_secret", "sec")
+    monkeypatch.setattr(T.settings, "toss_min_interval_sec", 0.0)
+
+    async def _nosleep(*a, **k):
+        return None
+    monkeypatch.setattr(T.asyncio, "sleep", _nosleep)   # 백오프 즉시
+    c = _FakeClient(get_responses)
+    client = TossClient()
+    if setup:
+        setup(client)
+    out = asyncio.run(client._get(c, "/api/v1/x"))
+    return out, c
+
+
+def test_toss_retries_rate_limit(monkeypatch):
+    """rate-limit-exceeded는 백오프 후 재시도해 결국 성공한다."""
+    out, c = _run_toss([
+        {"error": {"code": "rate-limit-exceeded", "message": "over", "requestId": "r"}},
+        {"result": {"ok": 1}},
+    ], monkeypatch)
+    assert out == {"ok": 1}
+    assert c.get_calls == 2                          # 1회 실패 + 1회 재시도 성공
+
+
+def test_toss_invalid_token_refreshes(monkeypatch):
+    """invalid-token이면 캐시 토큰을 폐기하고 재발급 후 재시도한다."""
+    def _stale(client):
+        client._token, client._exp = "STALE", 9e18
+    out, c = _run_toss([
+        {"error": {"code": "invalid-token", "message": "bad", "requestId": "r"}},
+        {"result": {"ok": 2}},
+    ], monkeypatch, setup=_stale)
+    assert out == {"ok": 2}
+    # 캐시된 STALE 토큰으로 시작 → 폐기 후 재발급(post 1회)해 성공
+    assert c.token_calls >= 1
+
+
+def test_toss_gives_up_after_max_retry(monkeypatch):
+    """계속 rate-limit이면 max_retry 후 TossError를 던진다(무한 재시도 아님)."""
+    import pytest as _pt
+    err = {"error": {"code": "rate-limit-exceeded", "message": "over", "requestId": "r"}}
+    with _pt.raises(TossError):
+        _run_toss([err, err, err, err, err], monkeypatch)

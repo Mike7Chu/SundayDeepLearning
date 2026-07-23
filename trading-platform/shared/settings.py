@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     toss_interval_sec: float = 30.0       # 보유/잔고 수집 주기
     toss_trading_enabled: bool = False    # 실주문 하드 게이트(기본 잠금). True라야 주문 허용
     toss_max_order_krw: float = 100_000.0  # 주문당 안전 상한(소액 실전)
+    # 레이트리밋 방어(전 루프 공유): 요청 간 최소 간격 + 한도초과 시 백오프 재시도.
+    # 여러 수집 루프가 동시에 토스를 두들겨 rate-limit-exceeded 나던 문제 대응.
+    toss_min_interval_sec: float = 0.3    # 요청 사이 최소 간격(≈3req/s)
+    toss_max_retry: int = 4               # rate-limit/invalid-token 시 재시도 횟수
 
     # 텔레그램 일일 브리핑(주식 시세·시그널·가치·배당 요약). 키 없으면 로그만
     briefing_interval_sec: float = 86400.0        # 브리핑 주기(기본 1일)
