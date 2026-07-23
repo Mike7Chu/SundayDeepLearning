@@ -94,6 +94,12 @@ async def place_gated_order(redis: aioredis.Redis, *, side: str, code: str,
         return False, f"주문 실패: {exc}"
     oid = res.get("order_id") or "OK"
     logger.info("[order/%s] %s %s x%s @%s → %s", broker, side, code, qty, price, oid)
+    try:                                             # 매매 일지 자동 기록(복기용)
+        from api.services.journal import record_trade
+        await record_trade(redis, code=code, name="", side=side, qty=qty,
+                           price=price, note=f"자동/{broker} 주문", source="engine")
+    except Exception as exc:
+        logger.warning("[journal] 자동 기록 실패: %s", exc)
     px = f"{price:,.0f}원" if is_kr_code(code) else f"${price:,.2f}"
     return True, (f"[{label}] {'매수' if side == 'BUY' else '매도'} 접수 — {code} "
                   f"{qty:g}주 @{px} (주문ID {oid})")

@@ -477,6 +477,9 @@ async def stock_detail(code: str) -> dict:
             return supply_demand(inv)
         try:
             supply = await get_or_compute(f"sd:{code}", 600, _fetch_sd)
+            if supply:                              # 매매 일지 스냅샷용으로 최근값 보존
+                await redis.set(f"sd_last:{code}",
+                                _json.dumps(supply), ex=86400)
         except Exception:
             supply = None
     wl = await effective_watchlist(redis)

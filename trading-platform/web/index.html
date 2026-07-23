@@ -268,6 +268,7 @@
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
   <symbol id="i-ai" viewBox="0 0 24 24"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="m19 15 .9 2.6 2.6.9-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z"/></symbol>
   <symbol id="i-set" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1.5 14h5M9.5 8h5M17.5 16h5"/></symbol>
+  <symbol id="i-journal" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M9 3v18M13 8h3M13 12h3"/></symbol>
   <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></symbol>
 </svg>
 
@@ -283,6 +284,7 @@
     <button data-tab="dividend"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-coin"/></svg>배당금</button>
     <button data-tab="news"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-bell"/></svg>공시</button>
     <button data-tab="research"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-ai"/></svg>AI 분석</button>
+    <button data-tab="journal"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-journal"/></svg>매매일지</button>
     <button data-tab="settings"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-set"/></svg>설정</button>
   </nav>
   <div class="side-foot">🍓 Raspberry Pi · 24h 가동</div>
@@ -313,6 +315,7 @@
   <div id="panel-dividend" class="panel"><div class="scroll" id="dividendBox"><div class="skel" style="height:44px"></div><div class="skel" style="height:260px"></div></div></div>
   <div id="panel-news" class="panel"><div id="newsBox"><div class="skel" style="height:80px"></div><div class="skel" style="height:80px"></div></div></div>
   <div id="panel-research" class="panel"><div id="researchBox"><div class="skel" style="height:80px"></div><div class="skel" style="height:80px"></div></div></div>
+  <div id="panel-journal" class="panel"><div id="journalBox"><div class="skel" style="height:80px"></div><div class="skel" style="height:180px"></div></div></div>
   <div id="panel-settings" class="panel"><div id="settingsBox"></div></div>
 </div>
 </div><!-- /.main -->
@@ -331,6 +334,7 @@
   <button data-tab="dividend"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-coin"/></svg>배당금</button>
   <button data-tab="news"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-bell"/></svg>공시</button>
   <button data-tab="research"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-ai"/></svg>AI 분석</button>
+  <button data-tab="journal"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-journal"/></svg>매매일지</button>
   <button data-tab="settings"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-set"/></svg>설정</button>
 </div>
 
@@ -462,8 +466,8 @@ function patchLive(code,q){
   });
 }
 
-const TABNAME={home:"홈",portfolio:"내 주식",signal:"살까 말까",stocks:"전체 종목",value:"저평가",dividend:"배당금",news:"공시",research:"AI 분석",settings:"설정"};
-const MORE_TABS=["value","dividend","news","research","settings"];   // 모바일 '더보기' 시트 소속
+const TABNAME={home:"홈",portfolio:"내 주식",signal:"살까 말까",stocks:"전체 종목",value:"저평가",dividend:"배당금",news:"공시",research:"AI 분석",journal:"매매일지",settings:"설정"};
+const MORE_TABS=["value","dividend","news","research","journal","settings"];   // 모바일 '더보기' 시트 소속
 function switchTab(t){
   activeTab=t;
   document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("active",b.dataset.tab===t));
@@ -487,6 +491,7 @@ async function render(){
     else if(activeTab==="dividend") await renderDividend();
     else if(activeTab==="news") await renderNews();
     else if(activeTab==="research") await renderResearch();
+    else if(activeTab==="journal") await renderJournal();
     else if(activeTab==="settings") await renderSettings();
     for(const c in LIVE) patchLive(c,LIVE[c]);   // 방금 그린 셀에 최신 실시간가 덧칠
     setStatus("live",(es&&es.readyState===1)?"실시간":"자동갱신");
@@ -902,6 +907,50 @@ async function renderResearch(){
     ${d.enabled?'':' · <b class="neg">비활성</b>(.env ANTHROPIC_API_KEY 또는 RESEARCH_USE_CLI)'}</div>
     ${list||'<div class="empty">아직 리포트 없음 — 종목 상세에서 🧠 AI 분석</div>'}`;
   $("metaInfo").textContent=`리서치 ${rows.length}건`;
+}
+async function renderJournal(){
+  const j=await jget("/journal"); const rows=j.rows||[];
+  const hit=j.hit_rate!=null?`<span class="badge ${j.hit_rate>=50?'pos':'sell'}">AI 판단 부합률 ${numC(j.hit_rate,0)}% (${j.judged}건)</span>`:'<span class="num">복기할 매수 기록이 쌓이면 부합률 표시</span>';
+  const form=`<div class="card"><h3>매매 일지 <span class="badge">기록 → 복기 → 개선</span>
+      <span class="badge" title="매수/매도한 이유·그때 AI 점수·수급을 남겨두면, 나중에 결과와 대조해 '내 판단이 맞았나'를 복기할 수 있어요. 감정 매매를 줄이는 루프예요">?</span></h3>
+    <div class="num" style="margin-bottom:8px">토스 앱에서 직접 매매한 것도 여기 남겨 복기하세요. 자동매매는 자동 기록돼요.</div>
+    <div class="arow" style="flex-wrap:wrap;gap:8px">
+      <input id="jCode" placeholder="005930 / NVDA" style="width:120px" maxlength="8">
+      <select id="jSide" style="width:90px"><option value="BUY">매수</option><option value="SELL">매도</option></select>
+      <input id="jQty" type="number" placeholder="수량" style="width:80px">
+      <input id="jPrice" type="number" step="any" placeholder="체결가" style="width:110px">
+      <input id="jNote" placeholder="이유·메모(예: 실적·수급 좋아서)" style="width:220px">
+      <button class="btn buy" onclick="addJournal()">＋ 기록</button>
+    </div>
+    <div style="margin-top:8px">${hit}</div></div>`;
+  const list=rows.map(r=>{
+    const J=r.judgment||{}; const us=!(r.code||"").match(/^\d/);
+    const px=v=>v==null?"–":(us?money(v,"USD"):won(v));
+    const ret=r.ret_pct==null?'<span class="num">진행 중</span>':`<b class="${r.ret_pct>=0?'pos':'neg'}">${r.ret_pct>=0?'+':''}${numC(r.ret_pct)}%</b>`;
+    const ok=r.judged_ok==null?'':(r.judged_ok?'<span class="badge pos">✅ 판단 부합</span>':'<span class="badge sell">❌ 판단 빗나감</span>');
+    const jt=J.score!=null?`당시 점수 <b class="${VC(J.score)}">${numC(J.score,0)}</b>·${J.verdict||''}${J.supply_net_eok!=null?` · 수급 ${J.supply_net_eok>=0?'+':''}${numC(J.supply_net_eok,0)}억`:''}`:'<span class="num">당시 판단 기록 없음</span>';
+    const when=r.ts?new Date(r.ts*1000).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+    return `<div class="card" style="margin-top:8px"><div class="row">
+        <span><b class="clk" onclick="openStock('${qesc(r.code)}','${qesc(r.name)}')">${r.name} <span class="num">${r.code}</span></b>
+          <span class="badge ${r.side==='BUY'?'pos':'sell'}">${r.side==='BUY'?'매수':'매도'}</span>
+          <span class="num">${numC(r.qty,0)}주 @${px(r.price)}</span></span>
+        <span>결과 ${ret} ${ok} <a class="clk num" onclick="delJournal('${r.id}')">✕</a></span></div>
+      <div class="num" style="margin-top:4px">${when} · 🧠 ${jt}${r.note?` · "<span style="color:var(--text)">${escH(r.note)}</span>"`:''}</div></div>`;
+  }).join("");
+  $("journalBox").innerHTML=form+(list||'<div class="empty">아직 기록이 없어요 — 매매하면 여기서 복기해요</div>');
+  $("metaInfo").textContent=`매매일지 ${rows.length}건`;
+}
+async function addJournal(){
+  const code=$("jCode").value.trim(); const price=Number($("jPrice").value);
+  if(!code||!(price>0)){ alert("종목코드와 체결가는 필수예요"); return; }
+  const body={code, side:$("jSide").value, qty:Number($("jQty").value)||0, price, note:$("jNote").value||""};
+  const r=await fetch("/journal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok){ const d=await r.json().catch(()=>({})); alert("기록 실패: "+(d.detail||r.status)); return; }
+  $("jCode").value="";$("jQty").value="";$("jPrice").value="";$("jNote").value=""; renderJournal();
+}
+async function delJournal(id){
+  if(!confirm("이 기록을 삭제할까요?")) return;
+  await fetch("/journal/"+encodeURIComponent(id),{method:"DELETE"}); renderJournal();
 }
 async function renderSettings(){
   const cur=Number(localStorage.getItem("curAsset")||0);
