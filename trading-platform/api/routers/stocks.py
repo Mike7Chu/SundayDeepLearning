@@ -23,7 +23,12 @@ from api.services.stock_signal import (
 )
 from api.services.cache import get_or_compute
 from api.services.stock_score import compute_score
-from api.services.stock_radar import market_regime, radar_pool, radar_score
+from api.services.stock_radar import (
+    market_regime,
+    radar_pool,
+    radar_score,
+    supply_demand,
+)
 from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
 from collector.stock.kis import effective_watchlist, is_kr_code
@@ -148,6 +153,22 @@ async def _radar_build(limit: int) -> dict:
                 if not r.get("name"):
                     r["name"] = q.get("name") or code
                 rows.append(r)
+        rows.sort(key=lambda x: x["radar"], reverse=True)
+        # 종목별 수급(외인·기관 매집) — 상위 후보만 조회(Pi 부하 억제).
+        # 스마트머니가 매집 중이면 돌파 신뢰↑ → 보너스 가점 + 사유, 분산이면 표시만.
+        for r in rows[:15]:
+            try:
+                inv = await _toss.fetch_investor_trading(tc, r["code"], count=5)
+            except Exception:
+                continue
+            sd = supply_demand(inv)
+            r["sd_net_eok"] = sd["net_eok"]
+            r["sd_foreign"] = sd["foreign_eok"]
+            r["sd_inst"] = sd["inst_eok"]
+            if sd["reason"]:
+                r["signals"] = (r.get("signals") or []) + [sd["reason"]]
+            if sd["bonus"]:
+                r["radar"] = round(min(100.0, r["radar"] + sd["bonus"]), 1)
     rows.sort(key=lambda x: x["radar"], reverse=True)
     ind_raw = await redis.get(MARKET_INDICATORS_KEY)
     try:
@@ -447,8 +468,19 @@ async def stock_detail(code: str) -> dict:
         flash = find_earnings_flash(filings, code)
     else:
         flash = quote.get("earnings_flash")
+    # 종목별 수급(외인·기관 매집) — 국내 전용, 5일 순매수. 10분 캐시.
+    supply = None
+    if kr and _toss.enabled:
+        async def _fetch_sd():
+            async with httpx.AsyncClient(timeout=10) as tc:
+                inv = await _toss.fetch_investor_trading(tc, code, count=5)
+            return supply_demand(inv)
+        try:
+            supply = await get_or_compute(f"sd:{code}", 600, _fetch_sd)
+        except Exception:
+            supply = None
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
             "levels": levels, "pillar": pillar, "earnings_flash": flash,
-            "price_ts": quote.get("ts"),
+            "supply": supply, "price_ts": quote.get("ts"),
             "in_watchlist": any(w.get("code") == code for w in wl)}

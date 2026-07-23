@@ -5,6 +5,7 @@ from api.services.stock_radar import (
     market_regime,
     radar_pool,
     radar_score,
+    supply_demand,
     turnover_surge,
 )
 
@@ -88,6 +89,24 @@ def test_radar_pool_cap():
     codes = [f"{i:06d}" for i in range(100)]
     pool = radar_pool(quotes, codes, [], set(), cap=40)
     assert len(pool) == 40
+
+
+def test_supply_demand():
+    # 최근 5일 외인+기관 순매수 합이 양(+)이면 매집 신호 + 보너스
+    rows = [{"date": f"d{i}", "foreigner": 20, "institution": 10} for i in range(5)]
+    sd = supply_demand(rows)                       # (20+10)×5 = 150억
+    assert sd["net_eok"] == 150 and sd["foreign_eok"] == 100 and sd["inst_eok"] == 50
+    assert sd["bonus"] == 15.0                      # 100억↑ → 만점
+    assert "매집" in sd["reason"]
+    # 순매도(분산)면 보너스 0 + 주의 사유
+    dist = supply_demand([{"foreigner": -30, "institution": -20}])
+    assert dist["bonus"] == 0.0 and "분산" in dist["reason"]
+    # 중립(±20억 미만)이면 사유 없음, 데이터 없으면 None
+    assert supply_demand([{"foreigner": 5, "institution": 3}])["reason"] is None
+    assert supply_demand([])["net_eok"] is None
+    # days 파라미터로 집계 구간 제한
+    many = [{"foreigner": 10, "institution": 0} for _ in range(10)]
+    assert supply_demand(many, days=3)["net_eok"] == 30
 
 
 def test_market_regime():

@@ -107,6 +107,30 @@ def radar_score(quote: dict, candles: list[dict],
     }
 
 
+def supply_demand(rows: list[dict], days: int = 5) -> dict:
+    """종목별 투자자 순매수(억, 최신순) → 스마트머니(외인+기관) 매집 신호(순수 함수).
+
+    한국 시장에서 급등의 핵심 선행지표 — 외국인·기관이 '매집'하면 상승 확률↑,
+    '분산(순매도)'이면 개인만 받치는 약한 상승. 최근 days일 순매수 합으로 판정.
+    반환 {net_eok, foreign_eok, inst_eok, bonus(0~15), reason}.
+    """
+    if not rows:
+        return {"net_eok": None, "foreign_eok": None, "inst_eok": None,
+                "bonus": 0.0, "reason": None}
+    recent = rows[:days]
+    f = sum(r.get("foreigner") or 0 for r in recent)
+    i = sum(r.get("institution") or 0 for r in recent)
+    net = f + i
+    bonus = round(_clamp(net / 100) * 15, 1)          # 5일 +100억이면 만점(15)
+    reason = None
+    if net >= 20:
+        reason = f"외인+기관 {days}일 순매수 +{net:.0f}억(매집)"
+    elif net <= -20:
+        reason = f"외인+기관 {days}일 순매도 {net:.0f}억(분산 주의)"
+    return {"net_eok": round(net, 0), "foreign_eok": round(f, 0),
+            "inst_eok": round(i, 0), "bonus": bonus, "reason": reason}
+
+
 def radar_pool(quotes: list[dict], ranking_codes: list[str],
                flash_codes: list[str], held: set[str], cap: int = 30) -> list[str]:
     """레이더 후보군 선정(순수) — 온디맨드 캔들 조회 비용을 cap으로 제한.

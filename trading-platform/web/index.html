@@ -987,7 +987,11 @@ function paintModal(code,name,d){
               :`오늘 거래대금 ${numC(P.value_eok,0)}억${P.surge_x?` · 평소의 ${numC(P.surge_x,1)}배`:''}`):'';
     const macdTxt=S&&S.macd_hist!=null?((S.macd_hist>0?'<span class="pos">상승 우세</span>':'<span class="neg">하락 우세</span>')+(S.macd_state==="golden"?' · <b class="buy">골든</b>':S.macd_state==="dead"?' · <b class="sell">데드</b>':'')):'–';
     const adxTxt=S&&S.adx!=null?(numC(S.adx,0)+(S.adx>=25?' · <span class="pos">강한 추세</span>':S.adx<20?' · 횡보':'')):'–';
-    const sgH=S?`<div class="cgrid">${kv("흐름",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"위 종합점수의 '추세'와 같은 기준")}${kv("추세 힘(MACD)",macdTxt,HELP.macd)}${kv("추세 강도(ADX)",adxTxt,HELP.adx)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}${pillarCard}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
+    const SD=d.supply;
+    const sdCard=(SD&&SD.net_eok!=null)?kv("수급(외인+기관 5일)",
+      `<span class="${SD.net_eok>=0?'pos':'neg'}">${SD.net_eok>=0?'+':''}${numC(SD.net_eok,0)}억</span>`,
+      `외국인 ${SD.foreign_eok>=0?'+':''}${numC(SD.foreign_eok,0)}억 · 기관 ${SD.inst_eok>=0?'+':''}${numC(SD.inst_eok,0)}억 · ${SD.net_eok>=20?'매집(상승 선행)':SD.net_eok<=-20?'분산(주의)':'중립'}`):'';
+    const sgH=S?`<div class="cgrid">${kv("흐름",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"위 종합점수의 '추세'와 같은 기준")}${kv("추세 힘(MACD)",macdTxt,HELP.macd)}${kv("추세 강도(ADX)",adxTxt,HELP.adx)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}${sdCard}${pillarCard}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
     const L=d.levels;
     const lvH=L?`<div class="cgrid">
       ${kv("추천 매수가",`<span class="pos">${MN(L.entry)}</span>`,`${L.entry_basis} 기준 · 추격 매수 방지`)}
