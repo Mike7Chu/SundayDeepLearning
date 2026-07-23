@@ -683,8 +683,9 @@ async function renderPortfolio(){
     return;
   }
   const hs=pf.holdings||[];
-  let oco=[];
+  let oco=[], rk={};
   if(pf.trading_enabled){ try{ oco=(await jget("/portfolio/oco")).rows||[]; }catch(e){} }
+  try{ rk=await jget("/portfolio/risk"); }catch(e){}
   const kpi=(k,v,cls="")=>`<div class="card" style="min-width:150px"><h3>${k}</h3><div class="kpi ${cls}">${v}</div></div>`;
   const pcls=(pf.pnl||0)>=0?"pos":"neg";
   const syncBad=staleSec(pf.ts)>120;
@@ -698,6 +699,7 @@ async function renderPortfolio(){
       ${kpi("현금", won(pf.cash))}
       ${kpi("매수여력", won(pf.buying_power))}
     </div>
+    ${riskCardHTML(rk)}
     ${orderPanelHTML(pf)}
     ${ocoPanelHTML(pf,oco)}
     <div class="scroll" id="pfTable"></div>`;
@@ -721,6 +723,31 @@ async function renderPortfolio(){
   $("metaInfo").textContent=`보유 ${hs.length}종목 · 평가 ${eok(pf.total_eval)}`;
 }
 
+function riskCardHTML(rk){
+  rk=rk||{}; if(!rk.weights||!rk.weights.length) return '';
+  const lvlCls=rk.level==="높음"?"sell":rk.level==="보통"?"":"pos";
+  const lvlIcon=rk.level==="높음"?"🔴":rk.level==="보통"?"🟡":"🟢";
+  // 섹터 막대(상위 5개)
+  const secMax=Math.max(...rk.sectors.map(s=>s.weight),1);
+  const secBars=rk.sectors.slice(0,5).map(s=>`<div class="row" style="border:none;padding:3px 0">
+    <span style="width:88px">${s.sector}</span>
+    <div class="prog" style="flex:1;margin:0 8px;height:10px"><i style="width:${s.weight/secMax*100}%;background:linear-gradient(90deg,var(--accent),#8aa0ff);box-shadow:none"></i></div>
+    <b class="num" style="width:44px;text-align:right">${numC(s.weight,0)}%</b></div>`).join("");
+  // 단일 종목 비중 상위 3
+  const topW=rk.weights.slice(0,3).map(w=>`<span class="badge ${w.weight>=30?'sell':''}">${w.name} ${numC(w.weight,0)}%</span>`).join(" ");
+  // 동조(상관 높은) 쌍
+  const highCorr=(rk.correlations||[]).filter(c=>c.high).slice(0,3)
+    .map(c=>`<div class="num">🔗 ${c.a_name}·${c.b_name} 상관 <b class="neg">${c.r}</b> (같이 움직임)</div>`).join("");
+  const flags=(rk.flags||[]).length?rk.flags.map(f=>`<div class="num" style="margin-top:3px">⚠️ ${f}</div>`).join(""):'<div class="num" style="margin-top:3px">✅ 뚜렷한 쏠림·동조 위험 없음 — 분산 양호</div>';
+  return `<div class="card" style="grid-column:1/-1;margin-bottom:12px;border:1px solid ${rk.level==="높음"?'rgba(255,77,94,.3)':'var(--line)'}">
+    <h3>🧩 포트폴리오 리스크 <span class="badge ${lvlCls}">${lvlIcon} ${rk.level||'–'}</span>
+      <span class="badge" title="한 방에 안 터지게 — 단일 종목 비중·섹터 쏠림·보유 종목 상관관계(사실상 1베팅)를 점검해요. 종목 수가 아니라 '진짜 분산됐나'를 봅니다">?</span></h3>
+    <div style="margin:2px 0 8px">비중 상위: ${topW}</div>
+    ${secBars?`<div class="num" style="margin-bottom:4px">섹터 배분</div>${secBars}`:''}
+    ${highCorr?`<div style="margin-top:8px">${highCorr}</div>`:''}
+    <div style="margin-top:8px">${flags}</div>
+    <div class="num" style="margin-top:8px;opacity:.75">집중지수(HHI) ${rk.hhi!=null?rk.hhi:'–'} · 낮을수록 분산(단일종목=1) · 판단 보조</div></div>`;
+}
 function orderPanelHTML(pf){
   if(!pf.trading_enabled){
     return `<div class="card" style="grid-column:1/-1;margin-bottom:12px">

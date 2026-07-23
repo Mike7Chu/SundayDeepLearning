@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from api.redis_client import get_redis
 from api.services.cache import get_or_compute
 from collector.stock.toss import TossClient, TossError, live_overlay
+from api.services.portfolio_risk import assess_risk
 from engine.plan import exit_plan
 from engine.risk import order_allowed
 from shared.redis_keys import (
@@ -160,6 +161,38 @@ async def portfolio() -> dict:
         "buying_power": acc.get("buying_power"),
         "ts": snap.get("ts") or acc.get("ts"),   # 마지막 실제 동기화 시각(신선도 표시용)
     }
+
+
+@router.get("/portfolio/risk")
+async def portfolio_risk() -> dict:
+    """포트폴리오 리스크 — 단일 종목 비중·섹터 쏠림·보유 종목 상관('사실상 1베팅')."""
+    redis = get_redis()
+    snap = json.loads(await redis.get(TOSS_HOLDINGS_KEY) or "{}")
+    holdings = snap.get("holdings", [])
+    if not holdings:
+        return {"total": 0, "weights": [], "sectors": [], "flags": [],
+                "level": None, "correlations": []}
+    f_raw = await redis.get(FX_USDKRW_KEY)
+    fx = None
+    if f_raw:
+        try:
+            fx = json.loads(f_raw).get("rate")
+        except (json.JSONDecodeError, TypeError):
+            fx = None
+    closes_map: dict[str, list[float]] = {}
+    for h in holdings:
+        code = h.get("symbol")
+        if not code:
+            continue
+        raw = await redis.get(stock_ohlcv_key(code))
+        if not raw:
+            continue
+        try:
+            closes_map[code] = [c["close"] for c in json.loads(raw)
+                                if isinstance(c, dict) and c.get("close")][-90:]
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return assess_risk(holdings, closes_map, fx)
 
 
 @router.get("/portfolio/orders")
