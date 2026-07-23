@@ -107,6 +107,8 @@ us_stocks:
   - {code: T, name: AT&T}
   - {code: VZ, name: 버라이즌}
   - {code: TMUS, name: T모바일}
+  # ===== 신규 상장 =====
+  - {code: SPCX, name: 스페이스엑스}   # 2026-06 나스닥 상장
   # ===== ETF (지수·배당·섹터) — 토스가 US ETF를 지원하면 자동 수집 =====
   - {code: SPY, name: S&P500 ETF}
   - {code: VOO, name: 뱅가드 S&P500}
