@@ -72,7 +72,8 @@ async def place_gated_order(redis: aioredis.Redis, *, side: str, code: str,
         if est > settings.toss_max_order_krw:
             return False, (f"주문금액 {est:,.0f}원 > 토스 한도 "
                            f"{settings.toss_max_order_krw:,.0f}원(TOSS_MAX_ORDER_KRW)")
-    ok, reason = order_allowed(await _risk_state(redis), side, est)
+    paper = broker == "kis" and settings.kis_paper   # 모의 계좌면 실계좌 buy_lock 무시
+    ok, reason = order_allowed(await _risk_state(redis), side, est, paper=paper)
     if not ok:
         return False, reason
     label = "한투" + ("·모의" if settings.kis_paper else "") if broker == "kis" else "토스"

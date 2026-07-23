@@ -73,6 +73,15 @@ async def _json_get(redis: aioredis.Redis, key: str) -> dict:
         return {}
 
 
+def _paper_auto() -> bool:
+    """자동매매가 모의(가짜 돈) 계좌로 도는가 — 모의면 실계좌 기준 현금잠금을 우회.
+
+    자동매매는 KIS 계좌로 나가는데(broker=kis), 리스크 실드의 현금/MDD는 토스
+    실계좌 스냅샷 기준이라 모의 리허설을 실계좌 상태가 막는 모순이 생긴다.
+    """
+    return settings.auto_trade_broker == "kis" and settings.kis_paper
+
+
 async def _assets(redis: aioredis.Redis) -> tuple[float | None, float | None]:
     """(총자산=평가액+현금, 현금). 데이터 없으면 (None, None)."""
     hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
@@ -131,7 +140,9 @@ async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
     AUTO_TRADE_ENABLED + 브로커 매매 플래그 + BUY_LOCK 아님 + 상승추세 +
     미보유 + 쿨다운(7일) 밖. 예산 = min(종목당 5% 한도, 브로커 주문 한도).
     """
-    if not settings.auto_trade_enabled or risk.get("buy_lock"):
+    if not settings.auto_trade_enabled:
+        return
+    if risk.get("buy_lock") and not _paper_auto():   # 모의는 실계좌 잠금 우회
         return
     broker = settings.auto_trade_broker
     max_order = (settings.kis_max_order_krw if broker == "kis"
@@ -538,7 +549,7 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
     """
     if not (settings.auto_trade_enabled and settings.us_auto_enabled):
         return
-    if risk.get("buy_lock"):
+    if risk.get("buy_lock") and not _paper_auto():   # 모의는 실계좌 잠금 우회
         return
     now = time.time()
     for b in us_buys[:2]:                            # 상위 2개만(과도한 자동주문 억제)

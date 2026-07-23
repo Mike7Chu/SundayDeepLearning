@@ -49,13 +49,19 @@ def evaluate_risk(total_asset: float | None, peak_asset: float | None,
             "per_stock_cap": per_stock_cap, "reasons": reasons}
 
 
-def order_allowed(risk: dict, side: str, est_amount: float) -> tuple[bool, str]:
-    """주문 1건이 리스크 실드를 통과하는지. 매도(SELL)는 항상 허용(위험 축소)."""
+def order_allowed(risk: dict, side: str, est_amount: float,
+                  paper: bool = False) -> tuple[bool, str]:
+    """주문 1건이 리스크 실드를 통과하는지. 매도(SELL)는 항상 허용(위험 축소).
+
+    paper=True(모의 계좌 리허설)면 buy_lock(실계좌 현금·MDD 기준)은 무시한다 —
+    가짜 돈 리허설을 실제 계좌 상태로 막으면 모의투자의 의미가 없다. 단일종목
+    한도(per_stock_cap)는 과대 주문 방지용이라 모의에서도 유지.
+    """
     if side.upper() != "BUY":
         return True, ""
     if not isinstance(risk, dict) or not risk:
         return True, ""     # 엔진 미가동 시 기존 게이트(TOSS_TRADING_ENABLED 등)만 적용
-    if risk.get("buy_lock"):
+    if risk.get("buy_lock") and not paper:
         return False, "리스크 실드: " + " / ".join(risk.get("reasons", ["매수 잠금"]))
     cap = risk.get("per_stock_cap")
     if cap and est_amount > cap:

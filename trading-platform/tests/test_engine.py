@@ -42,6 +42,11 @@ def test_per_stock_cap_and_order_gate():
     locked = evaluate_risk(80_000_000, 100_000_000, 40_000_000)
     ok, reason = order_allowed(locked, "BUY", 1_000)
     assert not ok and "리스크 실드" in reason
+    # 모의(paper)면 실계좌 buy_lock 무시(리허설 진행) — 단, 단일종목 한도는 유지
+    ok, _ = order_allowed(locked, "BUY", 1_000, paper=True)
+    assert ok
+    ok, reason = order_allowed(locked, "BUY", 6_000_000, paper=True)
+    assert not ok and "한도" in reason           # per_stock_cap은 모의에서도 적용
 
 
 # ---------- 정량 필터(능력 범위) ----------
