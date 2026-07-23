@@ -248,6 +248,45 @@ async def _ondemand_candles(redis, code: str) -> list[dict]:
         return []
 
 
+async def _ondemand_financials(redis, code: str, year: int) -> dict:
+    """미수집 종목의 재무(순이익 YoY·부채비율·매출/영익 YoY·FCF)를 DART에서 즉시.
+
+    관심종목이 아니어도 상세를 열면 리서치가 쓰던 '미상' 항목이 채워진다.
+    12h 캐시(재무는 분기 단위라 자주 안 바뀜). corp_code 없으면 빈 dict.
+    """
+    if not _dart.enabled:
+        return {}
+    craw = await redis.get(DART_CORP_KEY)
+    corp = (_json.loads(craw) if craw else {}).get(code)
+    if not corp:
+        return {}
+    out: dict = {}
+    try:
+        async with httpx.AsyncClient(timeout=12) as dc:
+            fin = await _dart.fetch_financials(dc, corp, year)
+            if fin.get("ni_yoy") is not None:
+                out["ni_growth_pct"] = fin["ni_yoy"]
+            if fin.get("debt_ratio") is not None:
+                out["debt_ratio"] = fin["debt_ratio"]
+            if fin.get("rev_yoy") is not None:
+                out["rev_growth_pct"] = fin["rev_yoy"]
+            if fin.get("op_yoy") is not None:
+                out["op_growth_pct"] = fin["op_yoy"]
+            qg = await _dart.fetch_quarterly_growth(dc, corp)
+            if qg:
+                out["ni_growth_q_pct"] = qg["growth"]
+                out["ni_growth_q_label"] = qg["label"]
+            try:
+                fcf = await _dart.fetch_fcf(dc, corp, year)
+                if fcf is not None:
+                    out["fcf_eok"] = fcf
+            except Exception:
+                pass
+    except Exception:
+        return out
+    return out
+
+
 async def _ondemand_dividend(redis, code: str) -> list[dict]:
     """미수집 종목의 배당 3개년을 DART에서 즉시 수집 — 관심종목 아니어도 표시."""
     if not _dart.enabled:
@@ -309,6 +348,26 @@ async def stock_detail(code: str) -> dict:
                                  _json.dumps(quote, ensure_ascii=False))
         except Exception:
             pass                                    # 실패해도 저장분으로 진행
+    # 재무 self-heal(국내): 순이익 YoY·부채비율·매출/영익 YoY·FCF가 비었으면 DART 온디맨드.
+    # 리서치·모달이 '미상'으로 비우던 항목을 관심종목이 아니어도 채운다(12h 캐시).
+    if is_kr_code(code) and quote.get("debt_ratio") is None:
+        fin = await get_or_compute(f"fin:{code}", 43200,
+                                   lambda: _ondemand_financials(redis, code,
+                                                                _dt.date.today().year - 1))
+        if fin:
+            quote.update(fin)
+            await redis.hset(STOCK_QUOTE_KEY, code,
+                             _json.dumps(quote, ensure_ascii=False))
+    # 시가총액 self-heal(국내): 상장주식수 미상이면 토스 종목정보로 보강.
+    if is_kr_code(code) and not quote.get("market_cap") and _toss.enabled:
+        try:
+            async with httpx.AsyncClient(timeout=10) as tc:
+                meta = (await _toss.fetch_stocks(tc, [code])).get(code) or {}
+            if meta.get("shares") and quote.get("price"):
+                quote["shares"] = meta["shares"]
+                quote["market_cap"] = round(quote["price"] * meta["shares"] / 1e8, 1)
+        except Exception:
+            pass
     # 일봉: 저장분 → 없으면 토스 온디맨드
     candles: list = []
     oraw = await redis.get(stock_ohlcv_key(code))

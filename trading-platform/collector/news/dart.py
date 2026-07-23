@@ -22,6 +22,7 @@ _LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 _CORP_URL = "https://opendart.fss.or.kr/api/corpCode.xml"
 _ALOT_URL = "https://opendart.fss.or.kr/api/alotMatter.json"   # 배당에 관한 사항
 _FNLTT_URL = "https://opendart.fss.or.kr/api/fnlttSinglAcnt.json"  # 단일회사 주요계정(재무)
+_FNLTT_ALL_URL = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"  # 전체 재무제표(현금흐름표 포함)
 
 
 def parse_disclosure_list(payload: dict) -> list[dict]:
@@ -124,6 +125,84 @@ def parse_net_income_growth(payload: dict) -> float | None:
     if cur is None or not prev:
         return None
     return round((cur - prev) / abs(prev) * 100, 1)
+
+
+def _fnum(v) -> float | None:
+    try:
+        s = str(v).replace(",", "").strip()
+        return float(s) if s and s != "-" else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _acct(rows: list, name: str, field: str = "thstrm_amount") -> float | None:
+    """주요계정에서 account_nm이 name과 일치(공백 무시)하는 행의 금액. 연결 우선."""
+    hit = [r for r in rows
+           if (r.get("account_nm") or "").replace(" ", "") == name.replace(" ", "")]
+    if not hit:
+        return None
+    pref = [r for r in hit if r.get("fs_div") == "CFS"] or hit
+    return _fnum(pref[0].get(field))
+
+
+def parse_financials(payload: dict) -> dict:
+    """fnlttSinglAcnt(주요계정) → 재무 건전성·성장 지표 묶음(순수 함수).
+
+    한 번의 호출로 부채비율·순이익/매출/영업이익 YoY를 함께 추출(연결 우선).
+    반환 {debt_ratio, ni_yoy, rev_yoy, op_yoy} — 각 미상은 None.
+    부채비율 = 부채총계/자본총계 ×100 (100 미만이면 무차입 우량 신호).
+    """
+    out = {"debt_ratio": None, "ni_yoy": None, "rev_yoy": None, "op_yoy": None}
+    if not isinstance(payload, dict) or payload.get("status") != "000":
+        return out
+    rows = payload.get("list") or []
+    debt, equity = _acct(rows, "부채총계"), _acct(rows, "자본총계")
+    if debt is not None and equity and equity > 0:
+        out["debt_ratio"] = round(debt / equity * 100, 1)
+
+    def _yoy(name: str) -> float | None:
+        cur = _acct(rows, name, "thstrm_amount")
+        prev = _acct(rows, name, "frmtrm_amount")
+        if cur is None or not prev:
+            return None
+        return round((cur - prev) / abs(prev) * 100, 1)
+
+    out["ni_yoy"] = _yoy("당기순이익")
+    out["rev_yoy"] = _yoy("매출액")
+    out["op_yoy"] = _yoy("영업이익")
+    return out
+
+
+# 현금흐름표 계정명 편차 대응(회사마다 표기 상이)
+_OCF_NAMES = ("영업활동현금흐름", "영업활동으로인한현금흐름", "영업활동순현금흐름")
+_CAPEX_NAMES = ("유형자산의취득", "유형자산의증가", "유형자산취득")
+
+
+def parse_fcf(payload: dict) -> float | None:
+    """fnlttSinglAcntAll(전체 재무제표) → 잉여현금흐름(FCF, 억원) 근사(순수 함수).
+
+    FCF = 영업활동현금흐름 − 유형자산 취득(CAPEX 근사). 버핏의 '주주이익' 프록시.
+    계정명 표기가 회사마다 달라 후보군으로 매칭, 못 찾으면 None(무리한 추정 금지).
+    """
+    if not isinstance(payload, dict) or payload.get("status") != "000":
+        return None
+    rows = payload.get("list") or []
+
+    def _find(names) -> float | None:
+        for r in rows:
+            nm = (r.get("account_nm") or "").replace(" ", "")
+            if any(nm == n for n in names):
+                pref = _fnum(r.get("thstrm_amount"))
+                if pref is not None:
+                    return pref
+        return None
+
+    ocf = _find(_OCF_NAMES)
+    capex = _find(_CAPEX_NAMES)
+    if ocf is None:
+        return None
+    fcf = ocf - (capex or 0.0)
+    return round(fcf / 1e8, 1)   # 원 → 억원
 
 
 def quarter_candidates(today: _dt.date) -> list[tuple[str, int, str]]:
@@ -231,6 +310,31 @@ class DartClient:
         r = await client.get(_FNLTT_URL, params=params, timeout=5)
         r.raise_for_status()
         return parse_net_income_growth(r.json())
+
+    async def fetch_financials(self, client: httpx.AsyncClient,
+                               corp_code: str, year: int,
+                               reprt: str = "11011") -> dict:
+        """주요계정 1회 호출로 부채비율·순이익/매출/영업이익 YoY 묶음. 타임아웃 5초."""
+        params = {"crtfc_key": settings.dart_api_key, "corp_code": corp_code,
+                  "bsns_year": str(year), "reprt_code": reprt}
+        r = await client.get(_FNLTT_URL, params=params, timeout=5)
+        r.raise_for_status()
+        return parse_financials(r.json())
+
+    async def fetch_fcf(self, client: httpx.AsyncClient, corp_code: str,
+                        year: int) -> float | None:
+        """사업보고서(전체 재무제표) 기준 잉여현금흐름(FCF, 억원). 타임아웃 8초."""
+        params = {"crtfc_key": settings.dart_api_key, "corp_code": corp_code,
+                  "bsns_year": str(year), "reprt_code": "11011", "fs_div": "CFS"}
+        r = await client.get(_FNLTT_ALL_URL, params=params, timeout=8)
+        r.raise_for_status()
+        fcf = parse_fcf(r.json())
+        if fcf is None:                      # 연결 없으면 별도(OFS) 재시도
+            params["fs_div"] = "OFS"
+            r = await client.get(_FNLTT_ALL_URL, params=params, timeout=8)
+            r.raise_for_status()
+            fcf = parse_fcf(r.json())
+        return fcf
 
     async def fetch_quarterly_growth(self, client: httpx.AsyncClient,
                                      corp_code: str,

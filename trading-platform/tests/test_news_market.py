@@ -137,6 +137,47 @@ def test_parse_net_income_growth():
     assert parse_net_income_growth(z) is None
 
 
+def test_parse_financials_bundle():
+    from collector.news.dart import parse_financials
+    payload = {"status": "000", "list": [
+        {"account_nm": "부채총계", "fs_div": "CFS",
+         "thstrm_amount": "44,000", "frmtrm_amount": "40,000"},
+        {"account_nm": "자본총계", "fs_div": "CFS",
+         "thstrm_amount": "100,000", "frmtrm_amount": "90,000"},
+        {"account_nm": "매출액", "fs_div": "CFS",
+         "thstrm_amount": "120,000", "frmtrm_amount": "100,000"},
+        {"account_nm": "영업이익", "fs_div": "CFS",
+         "thstrm_amount": "15,000", "frmtrm_amount": "10,000"},
+        {"account_nm": "당기순이익", "fs_div": "CFS",
+         "thstrm_amount": "9,000", "frmtrm_amount": "6,000"},
+    ]}
+    f = parse_financials(payload)
+    assert f["debt_ratio"] == 44.0      # 44,000 / 100,000 × 100
+    assert f["rev_yoy"] == 20.0
+    assert f["op_yoy"] == 50.0
+    assert f["ni_yoy"] == 50.0
+    # 자본 0/누락이면 부채비율 None(계산 불가), 상태 오류면 전부 None
+    assert parse_financials({"status": "013"})["debt_ratio"] is None
+    empty = parse_financials({"status": "000", "list": [
+        {"account_nm": "매출액", "fs_div": "CFS", "thstrm_amount": "1", "frmtrm_amount": "-"}]})
+    assert empty["debt_ratio"] is None and empty["rev_yoy"] is None
+
+
+def test_parse_fcf():
+    from collector.news.dart import parse_fcf
+    payload = {"status": "000", "list": [
+        {"account_nm": "영업활동현금흐름", "thstrm_amount": "50,000,000,000"},
+        {"account_nm": "유형자산의 취득", "thstrm_amount": "20,000,000,000"},
+    ]}
+    assert parse_fcf(payload) == 300.0     # (500억 − 200억) = 300억
+    # CAPEX 없으면 영업CF 그대로, 영업CF 없으면 None
+    assert parse_fcf({"status": "000", "list": [
+        {"account_nm": "영업활동으로인한현금흐름", "thstrm_amount": "10,000,000,000"}]}) == 100.0
+    assert parse_fcf({"status": "000", "list": [
+        {"account_nm": "매출액", "thstrm_amount": "1"}]}) is None
+    assert parse_fcf({"status": "013"}) is None
+
+
 def test_normalize_watch_item():
     assert normalize_watch_item("005930", "삼성전자") == {"code": "005930", "name": "삼성전자"}
     assert normalize_watch_item(" 000660 ")["code"] == "000660"

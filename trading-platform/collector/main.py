@@ -286,17 +286,30 @@ async def stock_history_loop(redis: aioredis.Redis,
                 elif is_watch:
                     logger.warning("[DATA_ERROR] %s 배당금 수집 실패(응답 없음/무배당)",
                                    name or code)
-                # 순이익 성장률 — 연간(사업보고서) + 최근 분기(전년 동기 대비, 더 최신).
+                # 재무 — 순이익/매출/영업이익 YoY + 부채비율(1콜) + 분기 YoY + FCF.
                 try:
                     fields: dict = {}
-                    g = await dart.fetch_net_income_growth(
+                    fin = await dart.fetch_financials(
                         dclient, corp, _latest_report_year())
-                    if g is not None:
-                        fields["ni_growth_pct"] = g
+                    if fin.get("ni_yoy") is not None:
+                        fields["ni_growth_pct"] = fin["ni_yoy"]
+                    for k_src, k_dst in (("debt_ratio", "debt_ratio"),
+                                         ("rev_yoy", "rev_growth_pct"),
+                                         ("op_yoy", "op_growth_pct")):
+                        if fin.get(k_src) is not None:
+                            fields[k_dst] = fin[k_src]
                     qg = await dart.fetch_quarterly_growth(dclient, corp)
                     if qg:
                         fields["ni_growth_q_pct"] = qg["growth"]
                         fields["ni_growth_q_label"] = qg["label"]
+                    if is_watch:              # FCF는 무거워 관심·보유만(온디맨드는 상세에서)
+                        try:
+                            fcf = await dart.fetch_fcf(dclient, corp,
+                                                       _latest_report_year())
+                            if fcf is not None:
+                                fields["fcf_eok"] = fcf
+                        except Exception:
+                            pass
                     if fields:
                         if is_watch:
                             await merge_quote(redis, code, name, fields)

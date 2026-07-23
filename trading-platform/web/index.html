@@ -957,7 +957,11 @@ function paintModal(code,name,d){
       ${kv("PER",numC(Q.per),HELP.per)}${kv("PBR",numC(Q.pbr),HELP.pbr)}${kv("EPS",numC(Q.eps,0),HELP.eps)}${kv("BPS",numC(Q.bps,0),HELP.bps)}
       ${kv("시가총액",US?(Q.market_cap==null?"–":numC(Q.market_cap,0)+"억$"):capF(Q.market_cap),HELP.cap)}${kv("1년 최저~최고",US?(money(Q.low_52w,"USD")+"~"+money(Q.high_52w,"USD")):(numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0)+"원"),HELP.w52)}
       ${Q.ni_growth_q_pct!=null?kv("순이익 성장("+(Q.ni_growth_q_label||"최근 분기")+")",(Q.ni_growth_q_pct>=0?"+":"")+numC(Q.ni_growth_q_pct,0)+"%","전년 동기 대비 · 공식 분기보고서"):""}
-      ${Q.ni_growth_pct!=null?kv("순이익 성장(연간)",(Q.ni_growth_pct>=0?"+":"")+numC(Q.ni_growth_pct,0)+"%","작년 사업보고서 기준"):""}</div>`;
+      ${Q.ni_growth_pct!=null?kv("순이익 성장(연간)",(Q.ni_growth_pct>=0?"+":"")+numC(Q.ni_growth_pct,0)+"%","작년 사업보고서 기준"):""}
+      ${Q.rev_growth_pct!=null?kv("매출 성장(연간)",(Q.rev_growth_pct>=0?"+":"")+numC(Q.rev_growth_pct,0)+"%","전년 대비 · 사업보고서"):""}
+      ${Q.op_growth_pct!=null?kv("영업이익 성장(연간)",(Q.op_growth_pct>=0?"+":"")+numC(Q.op_growth_pct,0)+"%","전년 대비 · 사업보고서"):""}
+      ${Q.debt_ratio!=null?kv("부채비율",`<span class="${Q.debt_ratio<100?'pos':Q.debt_ratio>200?'neg':''}">${numC(Q.debt_ratio,0)}%</span>`,"부채총계÷자본총계 · 100%↓ 우량, 200%↑ 주의"):""}
+      ${Q.fcf_eok!=null?kv("잉여현금흐름(FCF)",`<span class="${Q.fcf_eok>=0?'pos':'neg'}">${numC(Q.fcf_eok,0)}억</span>`,"영업현금흐름−설비투자 · 실제 벌어 남긴 현금"):""}</div>`;
     const collectHint='일시 수집 실패 — 팝업을 다시 열어보세요';   // 어떤 종목이든 온디맨드 수집
     const SC=d.score||{};
     const bar=(lab,val,max)=>`<div class="row"><span style="width:56px">${lab}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:${Math.max(0,Math.min(100,(val||0)/max*100))}%"></i></div><b class="num">${numC(val,0)}/${max}</b></div>`;
