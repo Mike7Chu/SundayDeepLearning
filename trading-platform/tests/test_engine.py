@@ -106,6 +106,9 @@ def test_parse_command_orders():
     # 미장(미국 티커): 소문자도 대문자 통일, 달러 소수점 가격 허용
     us = parse_command("토스매수 nvda 2 185.50")
     assert us["code"] == "NVDA" and us["price"] == 185.5 and us["broker"] == "toss"
+    # 한투 명시 미장 → kis(해외). 미지정 미장 → None(핸들러가 기본 브로커=KIS 해외로)
+    assert parse_command("한투매수 NVDA 1 185.50")["broker"] == "kis"
+    assert parse_command("매수 NVDA 1 185.50")["broker"] is None
     assert parse_command("매도 BRK.B 1")["code"] == "BRK.B"
     assert parse_command("확인 42") == {"cmd": "confirm", "n": "42"}
     assert parse_command("주문취소 abc-123") == {"cmd": "cancel", "order_id": "abc-123"}

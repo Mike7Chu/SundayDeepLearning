@@ -214,15 +214,18 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
             return
         n = str(int(time.time()) % 100000)
         kr = p["code"].isdigit()
-        bk = p.get("broker") or settings.auto_trade_broker
-        if not kr:
-            bk = "toss"   # 미국 종목은 토스 전용(한투는 국내만)
+        # 브로커 선택: 명시(한투/토스)면 그대로, 미지정이면 기본값.
+        # 미국 종목은 이제 KIS 해외(모의 지원)도 가능 — 명시 안 하면 KIS 모의를
+        # 기본으로(실전 토스보다 안전). '토스매수'로 명시해야 토스 실전으로 감.
+        bk = p.get("broker")
+        if bk is None:
+            bk = settings.auto_trade_broker      # 기본(대개 kis) — 미국도 KIS 해외로
+        side_kr = "매수" if p["side"] == "BUY" else "매도"
+        broker_kr = ("한투" + ("·모의" if settings.kis_paper else "")
+                     + ("·미장" if not kr else "") if bk == "kis" else "토스")
         await redis.hset(TG_PENDING_KEY, n, json.dumps(
             {**p, "broker": bk, "price": price, "ts": time.time()},
             ensure_ascii=False))
-        side_kr = "매수" if p["side"] == "BUY" else "매도"
-        broker_kr = ("한투" + ("(모의)" if settings.kis_paper else "")
-                     if bk == "kis" else "토스")
         px = f"{price:,.0f}원" if kr else f"${price:,.2f}"
         est = (f"{p['qty'] * price:,.0f}원" if kr
                else f"${p['qty'] * price:,.2f}")
