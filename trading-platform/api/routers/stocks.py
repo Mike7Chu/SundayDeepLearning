@@ -1,6 +1,7 @@
 """주식(KIS) 시세 + 전략 API (시그널·가치·배당)."""
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import json
 import time as _time
@@ -21,7 +22,7 @@ from api.services.stock_signal import (
     signals_for,
     trade_levels,
 )
-from api.services.cache import get_or_compute
+from api.services.cache import get_or_compute, get_or_swr
 from api.services.stock_score import compute_score
 from api.services.stock_radar import (
     market_regime,
@@ -88,10 +89,11 @@ async def stocks_radar(limit: int = 12) -> dict:
     """터질 종목 발굴 레이더 — 급등 전조(거래대금·신고가·강도·실적·추세) 조합 랭킹.
 
     후보군(랭킹 급등∪실적 촉매∪신고가 근접)에만 온디맨드 캔들 조회 → 전조 점수.
-    Pi 부하 억제를 위해 3분 캐시. 예측이 아닌 '지금 깨어나는' 종목 스캔(면책).
+    SWR 캐시(3분) — 오래된 값은 즉시 반환하고 백그라운드 갱신(Toss REST 수십 콜을
+    요청 경로에서 제거해 화면 지연 없음). 예측이 아닌 '지금 깨어나는' 종목 스캔(면책).
     """
-    return await get_or_compute(f"stocks_radar:{limit}", 180,
-                                lambda: _radar_build(limit))
+    return await get_or_swr(f"stocks_radar:{limit}", 180,
+                            lambda: _radar_build(limit))
 
 
 async def _radar_build(limit: int) -> dict:
@@ -156,12 +158,16 @@ async def _radar_build(limit: int) -> dict:
         rows.sort(key=lambda x: x["radar"], reverse=True)
         # 종목별 수급(외인·기관 매집) — 상위 후보만 조회(Pi 부하 억제).
         # 스마트머니가 매집 중이면 돌파 신뢰↑ → 보너스 가점 + 사유, 분산이면 표시만.
-        for r in rows[:15]:
+        # 병렬 조회(Toss 스로틀이 직렬화하지만 요청 오버헤드는 파이프라인화).
+        async def _sd(code: str):
             try:
-                inv = await _toss.fetch_investor_trading(tc, r["code"], count=5)
+                return supply_demand(await _toss.fetch_investor_trading(tc, code, count=5))
             except Exception:
+                return None
+        top = rows[:15]
+        for r, sd in zip(top, await asyncio.gather(*(_sd(r["code"]) for r in top))):
+            if not sd:
                 continue
-            sd = supply_demand(inv)
             r["sd_net_eok"] = sd["net_eok"]
             r["sd_foreign"] = sd["foreign_eok"]
             r["sd_inst"] = sd["inst_eok"]
