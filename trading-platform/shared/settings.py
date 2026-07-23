@@ -88,7 +88,9 @@ class Settings(BaseSettings):
 
     # ADR 괴리율 추적: "본주코드:후보티커1|후보티커2:비율(1 ADR당 본주 수)".
     # 토스 앱에서 보이는 실제 ADR 티커로 맞추면 아침 점검에 괴리율이 표시됨.
-    adr_map: str = "000660:SKH|HXSCL:1"
+    # SK하이닉스 ADR 후보(SKHY/SKHYY)를 기본 포함 — 토스가 잡히는 티커를 자동 채택.
+    # 비율은 본주가 대비 ADR$×환율이 맞도록 조정(예: ADR이 본주의 절반 가치면 0.5).
+    adr_map: str = "000660:SKHY|SKHYY|SKH:1"
     adr_interval_sec: float = 1800.0         # ADR 시세 갱신 주기(30분)
 
     # SEC EDGAR(미국 공시 — 무료·키 불필요): 미장 분기 실적·실적발표 감지.

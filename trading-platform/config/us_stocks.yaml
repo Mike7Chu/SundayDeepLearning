@@ -107,3 +107,20 @@ us_stocks:
   - {code: T, name: AT&T}
   - {code: VZ, name: 버라이즌}
   - {code: TMUS, name: T모바일}
+  # ===== ETF (지수·배당·섹터) — 토스가 US ETF를 지원하면 자동 수집 =====
+  - {code: SPY, name: S&P500 ETF}
+  - {code: VOO, name: 뱅가드 S&P500}
+  - {code: QQQ, name: 나스닥100 ETF}
+  - {code: QQQM, name: 나스닥100 ETF(저보수)}
+  - {code: VTI, name: 미국 전체시장}
+  - {code: DIA, name: 다우 ETF}
+  - {code: IWM, name: 러셀2000 ETF}
+  - {code: SCHD, name: 슈왑 배당 ETF}
+  - {code: JEPI, name: JP모건 프리미엄 인컴}
+  - {code: JEPQ, name: JP모건 나스닥 인컴}
+  - {code: VYM, name: 뱅가드 고배당}
+  - {code: SMH, name: 반도체 ETF(반에크)}
+  - {code: SOXX, name: 반도체 ETF(아이셰어즈)}
+  - {code: VUG, name: 뱅가드 성장주}
+  - {code: ARKK, name: 아크 이노베이션}
+  - {code: TLT, name: 미국 장기국채}
