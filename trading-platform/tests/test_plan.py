@@ -30,6 +30,22 @@ def test_stage1_rank_filters():
     assert stage1_rank([flash], set())
 
 
+def test_stage1_rank_us_momentum_no_earnings():
+    # 미국=모멘텀: 실적 YoY 미상(KIS/DART 국내 전용)이라도 52주 상단권+당일 강세면 통과.
+    quotes = [
+        {"code": "AAPL", "name": "애플", "price": 250.0, "currency": "USD",
+         "high_52w": 260.0, "low_52w": 160.0, "change_pct": 2.0},   # 상단권 통과
+        {"code": "INTC", "name": "인텔", "price": 20.0, "currency": "USD",
+         "high_52w": 50.0, "low_52w": 18.0, "change_pct": -1.0},     # 하단권 제외
+        {"code": "PENNY", "name": "잡주", "price": 2.0, "currency": "USD",
+         "high_52w": 9.0, "low_52w": 1.0, "change_pct": 5.0},        # 페니주 제외
+        {"code": "NEW", "name": "신규", "price": 30.0, "currency": "USD",
+         "change_pct": -0.5},                                        # 52주 미상+약세 제외
+    ]
+    codes = [q["code"] for q in stage1_rank(quotes, set())]
+    assert codes == ["AAPL"]
+
+
 def test_swing_metrics_gates_and_score():
     # 지그재그 우상향(+15/-10 반복): 정배열·RSI ~60 — 현실적인 스윙 진입 구간
     up, v = [], 1000.0

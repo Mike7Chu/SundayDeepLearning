@@ -50,27 +50,40 @@ def _growth_of(q: dict) -> tuple[float | None, str]:
 
 
 def stage1_rank(quotes: list[dict], held: set[str], top: int = 40) -> list[dict]:
-    """1차 후보(차트 불필요): 실적 개선 + 52주 상단권 + 당일 흐름(순수 함수).
+    """1차 후보(차트 불필요): 전략 분기 — 국내=실적 스윙 / 미국=모멘텀(순수 함수).
 
-    스윙 스타일 하드필터 — 실적 YoY +10% 미만·미상 제외, 52주 하단권(추세 프록시)
-    제외, 보유·동전주 제외. 상위 top개만 2차(차트) 검증으로.
+    - 국내(KR): 실적 YoY +10% 미만·미상 제외(실적 개선이 스윙 전제) + 52주 상단권.
+    - 미국(US): KIS/DART 펀더멘털이 국내 전용이라 실적 YoY가 없음 → 실적 게이트를
+      적용하지 않고 **모멘텀**(52주 상단권 + 당일 강세)으로 선별. 2차 swing_metrics가
+      SMA·MACD·ADX로 추세를 최종 검증하므로 여기선 하락/약세만 걸러 통과폭을 준다.
+    공통: 보유·동전주(잡주) 제외. 상위 top개만 2차(차트) 검증으로.
     """
     rows: list[tuple[float, dict]] = []
     for q in quotes:
         code, price = q.get("code"), q.get("price")
         if not code or not price or code in held:
             continue
-        if q.get("currency") != "USD" and price < 500:
-            continue                                   # 동전주 제외
-        g, _ = _growth_of(q)
-        if g is None or g < 10:
-            continue                                   # 실적 개선이 스윙의 전제
+        is_us = q.get("currency") == "USD"
+        if is_us:
+            if price < 5:
+                continue                               # 미국 페니주(잡주) 제외
+        elif price < 500:
+            continue                                   # 국내 동전주 제외
         hi, lo = q.get("high_52w"), q.get("low_52w")
         pos = (price - lo) / (hi - lo) if (hi and lo and hi > lo) else None
         if pos is not None and pos < 0.5:
             continue                                   # 52주 하단권 = 추세 미확인
-        s1 = min(g, 100) + (pos if pos is not None else 0.6) * 50 \
-            + (q.get("change_pct") or 0)
+        chg = q.get("change_pct") or 0
+        if is_us:
+            # 미국=모멘텀: 실적 없음 → 추세·흐름으로. 근거 전무(52주 미상+당일 약세)면 제외.
+            if pos is None and chg <= 0:
+                continue
+            s1 = (pos if pos is not None else 0.6) * 60 + chg
+        else:
+            g, _ = _growth_of(q)
+            if g is None or g < 10:
+                continue                               # 국내 스윙은 실적 개선 전제
+            s1 = min(g, 100) + (pos if pos is not None else 0.6) * 50 + chg
         rows.append((s1, q))
     rows.sort(key=lambda x: x[0], reverse=True)
     return [q for _, q in rows[:top]]
