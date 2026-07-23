@@ -546,6 +546,7 @@ async function renderHome(){
     <div class="card"><h3>등락 TOP</h3>${movers.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span>
       <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</b></div>`).join("")||'<div class="empty">데이터 없음(KIS 키 필요)</div>'}</div>
     <div class="card"><h3>🎯 오늘의 매수 후보 (매력도)</h3>${buys.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name} <span class="badge">${r.verdict}</span></span><b class="num strong ${VC(r.score)}">${numC(r.score,0)}</b></div>`).join("")||'<div class="empty">후보 없음 (KIS 키 필요)</div>'}</div>
+    ${autoStatusCard(eng)}
     ${eng&&eng.enabled?`<div class="card"><h3>🛡️ 리스크 실드 ${eng.risk.buy_lock?'<span class="badge sell">매수 잠금</span>':'<span class="badge pos">정상</span>'}</h3>
       <div class="row"><span>최고점 대비(MDD)</span><b class="${(eng.risk.mdd_pct||0)>=10?'neg':'num'}">${eng.risk.mdd_pct!=null?'-'+numC(eng.risk.mdd_pct,1)+'%':'–'} <span class="num">(한도 -${numC(eng.rules.mdd_limit_pct,0)}%)</span></b></div>
       <div class="row"><span>현금 비중</span><b class="${(eng.risk.cash_pct||0)<eng.rules.cash_floor_pct?'neg':'pos'}">${eng.risk.cash_pct!=null?numC(eng.risk.cash_pct,1)+'%':'–'} <span class="num">(바닥 ${numC(eng.rules.cash_floor_pct,0)}%)</span></b></div>
@@ -559,6 +560,19 @@ async function renderHome(){
   $("metaInfo").textContent=`관심종목 ${quotes.length} · 매수후보 ${buys.length}`;
 }
 function saveAsset(){ localStorage.setItem("curAsset", $("curAsset").value||0); renderHome(); }
+function autoStatusCard(eng){
+  const a=(eng&&eng.auto)||null; if(!a) return '';
+  const krOn=a.enabled&&a.kis_trading;
+  const usOn=krOn&&a.us_enabled;
+  const mode=a.paper?'모의(가짜 돈)':'<b class="neg">실전(진짜 돈)</b>';
+  const chip=(on,label)=>`<span class="badge ${on?'pos':''}">${label} ${on?'ON':'OFF'}</span>`;
+  return `<div class="card"><h3>🤖 자동매매 상태
+      <span class="badge" title="엔진이 10분마다 조건을 점검해 통과 종목만 자동 주문해요. 조건이 빡빡해서 며칠 안 나갈 수도 있어요(정상). 실행된 주문은 매매일지 탭에서 확인">?</span></h3>
+    <div class="arow" style="gap:8px;margin:2px 0 6px">${chip(krOn,'국내(가치)')} ${chip(usOn,'미장(모멘텀)')} <span class="badge">${mode}</span></div>
+    <div class="num">${krOn?'조건 충족 시 자동 주문 → ':''}실행 내역은 <b class="clk" onclick="switchTab('journal')">매매일지</b>·텔레그램에서 확인. 후보는 아래 카드들.
+      ${!krOn?'<br><span class="neg">자동매매 꺼짐</span> — .env AUTO_TRADE_ENABLED·KIS_TRADING_ENABLED 확인':''}
+      ${krOn&&!usOn?'<br>미장 자동은 .env US_AUTO_ENABLED=true로 켜요':''}</div></div>`;
+}
 function roadmapLine(rm){
   rm=rm||{}; if(rm.progress_pct==null) return '';
   const parts=[];

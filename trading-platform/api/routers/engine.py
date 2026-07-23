@@ -88,5 +88,12 @@ async def engine_state() -> dict:
             "cash_floor_pct": settings.cash_floor_pct,
             "buy_score_min": settings.buy_score_min,
         },
+        "auto": {                                    # 자동매매 상태(대시보드 표시)
+            "enabled": settings.auto_trade_enabled,
+            "broker": settings.auto_trade_broker,
+            "paper": settings.kis_paper,
+            "us_enabled": settings.us_auto_enabled,
+            "kis_trading": settings.kis_trading_enabled,
+        },
         "enabled": bool(risk),
     }
