@@ -208,13 +208,35 @@ async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
         sc = compute_score(q, closes)
         scored.append((sc["score"], q, sc, closes))
     scored.sort(key=lambda x: x[0], reverse=True)
+    # 상위 후보는 일봉을 온디맨드로 채운다 — 캔들이 없으면 추세·타이밍 축이 0으로
+    # 눌려 최종점수가 실제보다 낮게 나와 전부 탈락한다(스윙 플랜과 동일한 보정, 6h 캐시).
+    top = scored[:30]
+    if toss.enabled:
+        async with httpx.AsyncClient(timeout=15) as tc:
+            refreshed = []
+            for qscore, q, sc, closes in top:
+                if len(closes) < 60:
+                    try:
+                        candles = await toss.fetch_daily_history(tc, q["code"])
+                    except Exception:
+                        candles = []
+                    if candles:
+                        await redis.set(stock_ohlcv_key(q["code"]),
+                                        json.dumps(candles, ensure_ascii=False), ex=21600)
+                        closes = [c["close"] for c in candles
+                                  if isinstance(c, dict) and c.get("close")]
+                        sc = compute_score(q, closes)
+                        qscore = sc["score"]
+                refreshed.append((qscore, q, sc, closes))
+            refreshed.sort(key=lambda x: x[0], reverse=True)
+            top = refreshed
 
     inv_raw = await redis.hgetall(RESEARCH_INV_KEY)
     now = time.time()
     rows, requested = [], 0
     prev = await _json_get(redis, ENGINE_BUYLIST_KEY)
     prev_codes = {r.get("code") for r in prev.get("rows", [])}
-    for qscore, q, sc, closes in scored[:30]:  # 상위 30개만 관리(부하·토큰 절약)
+    for qscore, q, sc, closes in top:          # 상위 30개(캔들 보정 후)만 관리
         code = q["code"]
         inv = None
         if code in inv_raw:
