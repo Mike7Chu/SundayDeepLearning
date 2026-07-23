@@ -83,7 +83,7 @@ def _paper_auto() -> bool:
 
 
 async def _assets(redis: aioredis.Redis) -> tuple[float | None, float | None]:
-    """(총자산=평가액+현금, 현금). 데이터 없으면 (None, None)."""
+    """(총자산=평가액+현금, 현금) — 토스 실계좌 기준. 100억 로드맵/스냅샷용."""
     hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
     acc = await _json_get(redis, TOSS_ACCOUNT_KEY)
     ev = hold.get("total_eval")
@@ -93,8 +93,30 @@ async def _assets(redis: aioredis.Redis) -> tuple[float | None, float | None]:
     return (ev or 0.0) + (cash or 0.0), cash
 
 
-async def _update_risk(redis: aioredis.Redis, sender: TelegramSender) -> dict:
-    total, cash = await _assets(redis)
+async def _trade_assets(redis: aioredis.Redis,
+                        kis=None) -> tuple[float | None, float | None]:
+    """자동매매 리스크 실드·사이징용 자산 — '실제 주문이 나가는 계좌' 기준.
+
+    모의(KIS_PAPER)면 KIS 모의계좌 잔고를 쓴다(토스 실계좌가 아니라). 그래야 종목당
+    한도(5%)·현금바닥·MDD가 리허설 계좌를 반영. 조회 실패 시 (None, None)이며 주문은
+    paper 우회로 진행(max_order 사이징). 실전 모드는 토스 실계좌(_assets).
+    ※ 100억 로드맵은 항상 토스 실계좌 = _assets(별개).
+    """
+    if _paper_auto() and kis is not None and getattr(kis, "enabled", False):
+        try:
+            async with httpx.AsyncClient(timeout=15) as c:
+                bal = await kis.fetch_balance(c)
+            if bal.get("total_eval") is not None:
+                return bal["total_eval"], bal.get("cash")
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] KIS 모의잔고 조회 실패: %s", exc)
+        return None, None
+    return await _assets(redis)
+
+
+async def _update_risk(redis: aioredis.Redis, sender: TelegramSender,
+                       kis=None) -> dict:
+    total, cash = await _trade_assets(redis, kis)
     peak = None
     raw = await redis.get(ENGINE_PEAK_KEY)
     if raw:
@@ -416,7 +438,7 @@ async def _cycle_loop(redis: aioredis.Redis, sender: TelegramSender,
                       toss: TossClient, kis) -> None:
     while True:
         try:
-            risk = await _update_risk(redis, sender)
+            risk = await _update_risk(redis, sender, kis)
             await _holdings_alerts(redis, sender)
             await _pillar_scan(redis, sender)
             await _pipeline(redis, sender, risk, toss, kis)
@@ -485,7 +507,7 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
     hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
     holdings = hold.get("holdings", [])
     held = {h.get("symbol") for h in holdings if h.get("symbol")}
-    asset, _cash = await _assets(redis)
+    asset, _cash = await _trade_assets(redis, kis)   # 사이징도 주문 나가는 계좌 기준
     fx_raw = await redis.get(FX_USDKRW_KEY)
     fx = None
     if fx_raw:

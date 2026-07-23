@@ -275,6 +275,32 @@ class KISClient:
                 "org_no": out.get("KRX_FWDG_ORD_ORGNO", ""),
                 "time": out.get("ORD_TMD", ""), "paper": paper}
 
+    async def fetch_balance(self, client: httpx.AsyncClient) -> dict:
+        """국내 계좌 잔고 요약 → {total_eval(순자산), cash(예수금)}. kis_paper면 모의계좌.
+
+        inquire-balance(모의 tr_id VTTC8434R / 실전 TTTC8434R). 자동매매 리스크
+        실드를 '실제 주문이 나가는 계좌' 기준으로 계산하기 위함(토스 실계좌 아님).
+        파라미터·필드는 KIS 문서 기준, 실계좌 검증은 Pi 모의 조회로 확정.
+        """
+        if "-" not in (settings.kis_account or ""):
+            raise RuntimeError("KIS_ACCOUNT 미설정/형식 오류(예: 12345678-01)")
+        cano, prdt = settings.kis_account.split("-", 1)
+        tr_id = "VTTC8434R" if settings.kis_paper else "TTTC8434R"
+        token = await self._token_value(client, self.order_base)
+        params = {
+            "CANO": cano.strip(), "ACNT_PRDT_CD": prdt.strip(),
+            "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "02",
+            "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "01",
+            "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
+        }
+        await self._throttle()
+        r = await client.get(
+            f"{self.order_base}/uapi/domestic-stock/v1/trading/inquire-balance",
+            headers=self._headers(token, tr_id), params=params)
+        r.raise_for_status()
+        return parse_balance(self._check_rt(r.json(), "잔고조회"))
+
     async def place_overseas_order(self, client: httpx.AsyncClient, *, code: str,
                                    side: str, qty: int, price: float,
                                    exchange: str = "NASD") -> dict:
@@ -364,6 +390,40 @@ def parse_dividend(output1: list) -> list[dict]:
         })
     items.sort(key=lambda r: r["date"])
     return items
+
+
+def parse_balance(payload: dict) -> dict:
+    """inquire-balance 응답 → {total_eval(순자산), cash(예수금)}. 순수 함수.
+
+    output2(계좌 요약)에서 nass_amt(순자산금액)=총자산, dnca_tot_amt(예수금총금액)=현금.
+    순자산이 없으면 유가증권평가(scts_evlu_amt)+예수금으로 폴백. 값 없으면 None.
+    """
+    if not isinstance(payload, dict):
+        return {"total_eval": None, "cash": None}
+    out2 = payload.get("output2")
+    if isinstance(out2, list):
+        row = out2[0] if out2 else {}
+    elif isinstance(out2, dict):
+        row = out2
+    else:
+        row = {}
+
+    def _n(key: str) -> float | None:
+        v = row.get(key)
+        if v in (None, ""):
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    cash = _n("dnca_tot_amt")
+    total = _n("nass_amt")
+    if total is None:                              # 폴백: 유가증권평가 + 예수금
+        se = _n("scts_evlu_amt")
+        if se is not None or cash is not None:
+            total = (se or 0.0) + (cash or 0.0)
+    return {"total_eval": total, "cash": cash}
 
 
 def parse_price(o: dict) -> dict:
