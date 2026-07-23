@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     dart_api_key: str = ""
     dart_interval_sec: float = 30.0          # 공시 폴링 주기(속도)
     dart_watch_all: bool = False             # True=전 종목 공시, False=관심/유니버스만
+    dart_value_cap: int = 250                # 재무 수집 대상(가치 상위 top N) — 무료 한도 절약
 
     # 전체 시장 스크리너: 유니버스 펀더멘털 수집(배치·느린 주기, KIS 레이트리밋 대비)
     market_scan_interval_sec: float = 1800.0  # 유니버스 1바퀴 목표 주기(KIS 펀더멘털·수급 감지)

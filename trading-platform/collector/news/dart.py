@@ -18,6 +18,11 @@ from shared.settings import settings
 
 logger = logging.getLogger(__name__)
 
+
+class DartQuotaExceeded(Exception):
+    """DART 일일 호출한도 초과(status 020). 그날은 재시도 중단 신호."""
+
+
 _LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 _CORP_URL = "https://opendart.fss.or.kr/api/corpCode.xml"
 _ALOT_URL = "https://opendart.fss.or.kr/api/alotMatter.json"   # 배당에 관한 사항
@@ -289,8 +294,14 @@ class DartClient:
         r = await client.get(_CORP_URL, params={"crtfc_key": settings.dart_api_key},
                              timeout=15)
         r.raise_for_status()
-        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-            xml = z.read(z.namelist()[0])
+        try:
+            with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+                xml = z.read(z.namelist()[0])
+        except zipfile.BadZipFile:
+            # zip이 아니면 에러 XML(status/message) — 020=한도초과는 별도 신호로 올림.
+            if b"<status>020</status>" in r.content:
+                raise DartQuotaExceeded("DART 일일 호출한도 초과(020)")
+            raise
         return parse_corp_map(xml)
 
     async def fetch_dividend_years(self, client: httpx.AsyncClient,

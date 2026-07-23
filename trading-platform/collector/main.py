@@ -14,7 +14,7 @@ import httpx
 import redis.asyncio as aioredis
 
 from api.services.stock_signal import candle_trading_value, pillar_guide, pillar_precheck
-from collector.news.dart import DartClient
+from collector.news.dart import DartClient, DartQuotaExceeded
 from collector.news.sec import SecClient
 from collector.stock.kis import KISClient, effective_watchlist, is_kr_code, load_watchlist
 from collector.stock.kis_ws import pick_subs, realtime_loop
@@ -130,6 +130,8 @@ async def _dart_corp_map(redis: aioredis.Redis, dart: DartClient,
             pass
     try:
         m = await dart.fetch_corp_map(client)
+    except DartQuotaExceeded:
+        raise                                    # 한도초과는 상위에서 백오프 처리
     except Exception as exc:
         logger.warning("[DATA_ERROR] DART corp_code 매핑 다운로드 실패: %s", exc)
         return {}
@@ -238,13 +240,57 @@ async def _merge_market_field(redis: aioredis.Redis, code: str, fields: dict) ->
     await redis.hset(STOCK_MARKET_KEY, code, json.dumps(rec, ensure_ascii=False))
 
 
+async def _held_codes(redis: aioredis.Redis) -> list[dict]:
+    """토스 보유종목 → [{code, name}](없으면 []). 재무 수집 대상에 항상 포함."""
+    raw = await redis.get(TOSS_HOLDINGS_KEY)
+    if not raw:
+        return []
+    try:
+        snap = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    out = []
+    for h in snap.get("holdings", []):
+        code = h.get("symbol") or h.get("code")
+        if code:
+            out.append({"code": code, "name": h.get("name", "")})
+    return out
+
+
+async def _value_shortlist(redis: aioredis.Redis, cap: int = 250) -> list[dict]:
+    """DART 재무 수집 대상 축소용 — stock:market에서 '가치 상위' 후보만 추린다.
+
+    무료 DART 키는 하루 2만콜 제한 → 전체 3,600종목×3콜은 한도를 태운다. 마법공식
+    프록시(이익수익률 1/PER + ROE=EPS/BPS)로 상위 cap개만 뽑아 재무를 채운다.
+    KIS 시장배치가 넣어둔 PER/PBR/EPS/BPS만 쓰므로 네트워크 없음(순수 랭킹).
+    """
+    raw = await redis.hgetall(STOCK_MARKET_KEY)
+    scored: list[tuple[float, dict]] = []
+    for v in raw.values():
+        try:
+            q = json.loads(v)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        code = q.get("code")
+        if not code or not is_kr_code(code):
+            continue
+        per, eps, bps = q.get("per"), q.get("eps"), q.get("bps")
+        if not (per and per > 0) or eps is None or eps <= 0:
+            continue                             # 적자·무효 PER 제외(가치 후보 아님)
+        ey = 100.0 / per                         # 이익수익률(%)
+        roe = (eps / bps * 100.0) if bps else 0.0
+        scored.append((ey + roe, {"code": code, "name": q.get("name", "")}))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [item for _, item in scored[:cap]]
+
+
 async def stock_history_loop(redis: aioredis.Redis,
                              dart: DartClient) -> None:
-    """배당 3개년 + 순이익 성장(DART 사업보고서) — 관심종목 우선, 전체 유니버스까지.
+    """배당 3개년 + 순이익 성장(DART 사업보고서) — 관심·보유 + 가치 상위 후보만.
 
-    일봉(차트)은 toss_history_loop 담당. DART 무료 키 한도(일 2만건) 존중을 위해
-    호출 간 0.15초 페이싱(유니버스 900종목 × 2콜 ≈ 5분/사이클, 하루 4사이클 ≈ 7,200콜).
-    실패는 기록 후 다음 종목 — 절대 멈추지 않는다. 유니버스 무배당은 조용히 스킵.
+    일봉(차트)은 toss_history_loop 담당. DART 무료 키 한도(일 2만건)를 지키려고
+    전체 유니버스(~3,600) 대신 대상을 압축: 관심종목 ∪ 보유 ∪ 가치 상위(마법공식
+    프록시 top N). 한도초과(020)면 그날은 재시도 중단(6h 백오프). 실패는 기록 후 다음.
     """
     if not dart.enabled:
         logger.info("[div] DART_API_KEY 미설정 → 배당 수집 비활성")
@@ -252,11 +298,24 @@ async def stock_history_loop(redis: aioredis.Redis,
     while True:
         watch = await effective_watchlist(redis)
         wset = {w["code"] for w in watch}
-        uni = await _universe_codes(redis)
-        targets = list(watch) + [u for u in uni if u.get("code") not in wset]
+        held = await _held_codes(redis)
+        shortlist = await _value_shortlist(redis, settings.dart_value_cap)
+        seen = set(wset)
+        targets = list(watch)
+        for item in held + shortlist:            # 보유·가치 상위 추가(중복 제거)
+            c = item.get("code")
+            if c and c not in seen:
+                seen.add(c)
+                targets.append(item)
         got = 0
         async with httpx.AsyncClient(timeout=15) as dclient:
-            cmap = await _dart_corp_map(redis, dart, dclient)
+            try:
+                cmap = await _dart_corp_map(redis, dart, dclient)
+            except DartQuotaExceeded:
+                logger.warning("[div] DART 일일 한도 초과(020) — 오늘은 재시도 중단, "
+                               "자정(KST) 리셋 후 재개(6h 백오프)")
+                await asyncio.sleep(21600)
+                continue
             for item in targets:
                 code, name = item["code"], item.get("name", "")
                 if not is_kr_code(code):
@@ -319,7 +378,7 @@ async def stock_history_loop(redis: aioredis.Redis,
                     if is_watch:
                         logger.warning("[DATA_ERROR] %s 순이익 성장률 수집 실패", name or code)
                 await asyncio.sleep(0.15)   # DART 페이싱(무료 키 레이트 존중)
-        logger.info("[stock] 배당/재무 수집 완료(대상 %d종목, 배당 %d종목)",
+        logger.info("[stock] 배당/재무 수집 완료(대상 %d종목=관심+보유+가치상위, 배당 %d종목)",
                     len(targets), got)
         await asyncio.sleep(settings.stock_history_interval_sec if got else 600)
 
