@@ -35,6 +35,48 @@ def parse_adr_map(s: str) -> list[dict]:
     return out
 
 
+# KIS 해외주식 주문의 OVRS_EXCG_CD — 티커별 상장 거래소. 기본 NASD, 예외만 명시.
+# (뉴욕거래소 상장 / NYSE Arca ETF는 KIS에서 AMEX 코드로 주문.)
+_NYSE = {
+    "JPM", "BAC", "WFC", "GS", "MS", "C", "V", "MA", "AXP", "BLK", "SCHW",
+    "KO", "PG", "WMT", "HD", "MCD", "NKE", "DIS", "XOM", "CVX", "COP",
+    "JNJ", "LLY", "ABBV", "MRK", "PFE", "UNH", "TMO", "ABT", "CRM", "ORCL",
+    "IBM", "GE", "BA", "CAT", "HON", "LMT", "RTX", "DE", "UPS", "FDX", "UNP",
+    "T", "VZ", "NVO", "TSM", "SHOP", "UBER", "NOW", "SPOT", "RBLX", "GM",
+    "F", "TGT", "DELL", "SNOW", "PM", "RIVN",
+}
+_AMEX = {                                            # NYSE Arca ETF 등
+    "SPY", "VOO", "VTI", "DIA", "IWM", "SCHD", "JEPI", "JEPQ", "VYM",
+    "SMH", "VUG", "ARKK", "TLT",
+}
+
+
+def kis_exchange(ticker: str, override: dict | None = None) -> str:
+    """티커 → KIS OVRS_EXCG_CD(NASD/NYSE/AMEX). 미상은 NASD 기본(순수 함수).
+
+    override(설정 KIS_US_EXCHANGE_MAP)가 있으면 최우선 — 거래소 오분류를
+    코드 수정 없이 .env로 교정할 수 있다(모의 테스트에서 거부되면 여기 추가).
+    """
+    t = (ticker or "").upper()
+    if override and t in override:
+        return override[t]
+    if t in _NYSE:
+        return "NYSE"
+    if t in _AMEX:
+        return "AMEX"
+    return "NASD"
+
+
+def parse_exchange_override(s: str) -> dict:
+    """"NVDA:NASD,JPM:NYSE" → {NVDA:NASD, JPM:NYSE} (순수 함수)."""
+    out: dict = {}
+    for item in (s or "").split(","):
+        parts = [p.strip() for p in item.split(":")]
+        if len(parts) == 2 and parts[0] and parts[1]:
+            out[parts[0].upper()] = parts[1].upper()
+    return out
+
+
 @lru_cache(maxsize=1)
 def load_us_universe() -> list[dict]:
     """[{code, name, market:"US"}] — 파일 없거나 손상이면 빈 리스트(안전)."""

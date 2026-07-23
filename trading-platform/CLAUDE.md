@@ -67,7 +67,13 @@
 - ✅ **데이터 self-heal·신선도**: 상세 모달(`/stocks/{code}`)은 저장 시세가 60s↑ 오래되면 토스 재조회, 잔고
   (`/portfolio`)는 스냅샷 45s↑ 오래되면 토스 직접 재수집(20s 캐시) — 수집 루프가 멈춰도 화면이 최신값을 갖는다.
   UI에 '시세/잔고 N분 전' 나이 배지 + 오래되면 경고(장중 3분·장외 4시간 초과).
-- ⏭️ **다음(로드맵)**: 자동매매 규칙화(시그널·가치·배당 DRIP → 게이트 주문), KIS 해외 재무(미국 살까말까/저평가).
+- ✅ **미장 자동매매(KIS 해외 모의투자)**: `kis.place_overseas_order`(해외주식 주문 API, 모의 tr_id VTTT/실전 TTTT,
+  OVRS_EXCG_CD=NASD/NYSE/AMEX). `us_master.kis_exchange` 티커별 거래소 resolver(+KIS_US_EXCHANGE_MAP .env 교정).
+  engine.orders가 US 티커면 KIS 해외로 라우팅(USD→환율 원화 한도 검증). `_auto_buy_us`가 스윙 상위 미국 후보를
+  자동매수(국내=가치 2단계필터 / 미국=모멘텀 스윙 — 전략 분리). 게이트: US_AUTO_ENABLED+AUTO_TRADE_ENABLED+
+  KIS_TRADING_ENABLED, BUY_LOCK·한도·쿨다운. **KIS 해외 주문 파라미터는 Pi 모의 테스트로 최종 확정 필요**
+  (거래소 오분류는 rt_cd 거부로 노출 → KIS_US_EXCHANGE_MAP로 교정).
+- ⏭️ **다음(로드맵)**: KIS 해외 재무(미국 살까말까/저평가), 포트폴리오 리스크(섹터·상관).
 
 전체 계획은 승인된 플랜(`~/.claude/plans/toasty-wobbling-truffle.md`), 진행 기록은 `docs/PROGRESS.md`.
 

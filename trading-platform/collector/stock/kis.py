@@ -275,6 +275,48 @@ class KISClient:
                 "org_no": out.get("KRX_FWDG_ORD_ORGNO", ""),
                 "time": out.get("ORD_TMD", ""), "paper": paper}
 
+    async def place_overseas_order(self, client: httpx.AsyncClient, *, code: str,
+                                   side: str, qty: int, price: float,
+                                   exchange: str = "NASD") -> dict:
+        """미국주식 지정가 주문. kis_paper=true면 해외 모의투자 주문(가짜 돈).
+
+        KIS 해외주식 주문 API(/uapi/overseas-stock/v1/trading/order).
+        exchange = OVRS_EXCG_CD: NASD(나스닥)·NYSE(뉴욕)·AMEX(아멕스).
+        tr_id는 실전/모의 × 매수/매도로 분기(미국). 파라미터는 KIS 문서 기준이며
+        실계좌 검증은 Pi 모의 테스트 주문으로 확정(rt_cd/msg1로 오류 즉시 노출).
+        """
+        if "-" not in (settings.kis_account or ""):
+            raise RuntimeError("KIS_ACCOUNT 미설정/형식 오류(예: 12345678-01)")
+        cano, prdt = settings.kis_account.split("-", 1)
+        paper = settings.kis_paper
+        # 미국: 실전 매수 TTTT1002U·매도 TTTT1006U / 모의 매수 VTTT1002U·매도 VTTT1001U
+        if side.upper() == "BUY":
+            tr_id = "VTTT1002U" if paper else "TTTT1002U"
+        else:
+            tr_id = "VTTT1001U" if paper else "TTTT1006U"
+        token = await self._token_value(client, self.order_base)
+        body = {
+            "CANO": cano.strip(), "ACNT_PRDT_CD": prdt.strip(),
+            "OVRS_EXCG_CD": exchange,                  # NASD/NYSE/AMEX
+            "PDNO": code.upper(),
+            "ORD_QTY": str(int(qty)),
+            "OVRS_ORD_UNPR": f"{price:.2f}",           # 미국 지정가(소수 2자리)
+            "ORD_SVR_DVSN": "0",
+            "ORD_DVSN": "00",                          # 00=지정가
+        }
+        await self._throttle()
+        r = await client.post(
+            f"{self.order_base}/uapi/overseas-stock/v1/trading/order",
+            headers=self._headers(token, tr_id), json=body)
+        r.raise_for_status()
+        d = self._check_rt(r.json(), f"해외주문 {side} {code}")
+        if d.get("rt_cd") != "0":
+            raise RuntimeError(f"KIS 해외주문 거부: {d.get('msg1') or d.get('msg_cd')}")
+        out = d.get("output", {}) or {}
+        return {"order_id": out.get("ODNO", ""),
+                "org_no": out.get("KRX_FWDG_ORD_ORGNO", ""),
+                "time": out.get("ORD_TMD", ""), "paper": paper, "exchange": exchange}
+
 
 def _f(v) -> float | None:
     """문자열 숫자 → float (빈값/None은 None)."""

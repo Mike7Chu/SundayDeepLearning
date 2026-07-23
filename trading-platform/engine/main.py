@@ -387,7 +387,7 @@ async def _cycle_loop(redis: aioredis.Redis, sender: TelegramSender,
             await _holdings_alerts(redis, sender)
             await _pillar_scan(redis, sender)
             await _pipeline(redis, sender, risk, toss, kis)
-            await _swing_plan(redis, toss, risk)
+            await _swing_plan(redis, toss, risk, kis, sender)
             await _forward_log(redis)
             await _asset_snapshot(redis)
         except Exception as exc:
@@ -440,7 +440,8 @@ async def _forward_log(redis: aioredis.Redis) -> None:
     logger.info("[fwd] 점수 스냅샷 %d종목 저장(%s)", n, today)
 
 
-async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict) -> None:
+async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
+                      kis=None, sender: TelegramSender | None = None) -> None:
     """오늘의 매매 플랜(설문 맞춤: 실적+추세 스윙 · 후보 3개+근거 · 중립 · KR+US).
 
     1차(실적·52주 위치)로 전 시장에서 상위 40개 → 일봉(없으면 토스 온디맨드,
@@ -521,6 +522,48 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict) -> No
         ensure_ascii=False))
     logger.info("[plan] 매수 후보 %d(검증 %d) · 매도 점검 %d",
                 min(3, len(buys)), len(buys), min(3, len(sells)))
+    # 미장 자동매매(옵트인): 스윙 상위 미국 후보를 KIS 해외(모의 지원)로 자동매수.
+    # 국내=가치(2단계 필터), 미국=모멘텀(스윙) — 전략 분리 유지.
+    if kis is not None and sender is not None:
+        us_buys = [b for b in buys if b.get("currency") == "USD"]
+        await _auto_buy_us(redis, kis, sender, risk, held, us_buys)
+
+
+async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
+                       risk: dict, held: set, us_buys: list[dict]) -> None:
+    """미장 자동매수(옵트인) — 스윙 상위 미국 후보를 KIS 해외주식으로 주문.
+
+    조건: US_AUTO_ENABLED + AUTO_TRADE_ENABLED + BUY_LOCK 아님 + 미보유 +
+    쿨다운(7일) 밖. place_gated_order가 브로커 게이트·한도·리스크 실드 재검증.
+    """
+    if not (settings.auto_trade_enabled and settings.us_auto_enabled):
+        return
+    if risk.get("buy_lock"):
+        return
+    now = time.time()
+    for b in us_buys[:2]:                            # 상위 2개만(과도한 자동주문 억제)
+        code, entry = b["code"], b.get("entry")
+        qty = b.get("qty")
+        if not entry or not qty or qty < 1 or code in held or code.isdigit():
+            continue
+        raw = await redis.hget(ENGINE_AUTO_KEY, code)
+        if raw:
+            try:
+                if now - (json.loads(raw).get("ts") or 0) < settings.auto_trade_cooldown_sec:
+                    continue
+            except (json.JSONDecodeError, TypeError):
+                pass
+        ok, msg = await place_gated_order(redis, side="BUY", code=code,
+                                          qty=qty, price=entry, broker="kis",
+                                          kis=kis, toss=None)
+        await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
+            {"ts": now, "ok": ok, "qty": qty, "price": entry, "broker": "kis-us"},
+            ensure_ascii=False))
+        await sender.send(("🌎 미장 자동매수 " + ("접수 ✅" if ok else "거부 🚫")) +
+                          f"\n{b.get('name', '')}({code}) {qty:g}주 @${entry:,.2f} "
+                          f"(스윙 {b.get('swing')}점)\n{msg}\n"
+                          f"손절 ${b.get('stop') or 0:,.2f} · 목표 ${b.get('target') or 0:,.2f}")
+        logger.info("[auto/kis-us] %s BUY x%s @%.2f → %s", code, qty, entry, ok)
 
 
 async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:

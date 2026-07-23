@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     # 한투(KIS) 주문 게이트 — kis_paper=true면 모의투자 주문(리허설), false면 실전
     kis_trading_enabled: bool = False
     kis_max_order_krw: float = 100_000.0        # 한투 주문당 안전 상한
+    # 미장 자동매매(KIS 해외주식 주문 — 모의 지원): 기본 잠금. 국내(가치)와 별개 전략(모멘텀).
+    us_auto_enabled: bool = False
+    # 거래소 오분류 교정 맵(모의 테스트에서 거부되면 .env로 추가): "PLTR:NASD,SNOW:NYSE"
+    kis_us_exchange_map: str = ""
 
     # AI 가치투자 리서치 (Addendum 9) — 키 없으면 비활성(idle)
     anthropic_api_key: str = ""

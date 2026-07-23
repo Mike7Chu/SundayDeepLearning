@@ -43,10 +43,9 @@ async def place_gated_order(redis: aioredis.Redis, *, side: str, code: str,
     if qty <= 0 or price <= 0:
         return False, "수량·가격은 양수여야 함"
     est = qty * price
-    if not is_kr_code(code):
-        # 미국 티커: 토스 전용 + USD 금액을 환율로 원화 환산해 한도 검증(환율 없으면 거부)
-        if broker == "kis":
-            return False, f"{code}는 미국 종목 — 한투(KIS)는 국내 전용, '토스매수/토스매도'로"
+    is_us = not is_kr_code(code)
+    if is_us:
+        # 미국 티커: KIS 해외주식(모의 지원) 또는 토스. USD 금액을 환율로 원화 환산해 한도 검증.
         raw = await redis.get(FX_USDKRW_KEY)
         rate = None
         if raw:
@@ -77,9 +76,19 @@ async def place_gated_order(redis: aioredis.Redis, *, side: str, code: str,
     if not ok:
         return False, reason
     label = "한투" + ("·모의" if settings.kis_paper else "") if broker == "kis" else "토스"
+    if broker == "kis" and is_us:
+        label += "·미장"
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            if broker == "kis":
+            if broker == "kis" and is_us:
+                from collector.stock.us_master import (kis_exchange,
+                                                       parse_exchange_override)
+                exch = kis_exchange(code, parse_exchange_override(
+                    settings.kis_us_exchange_map))
+                res = await kis.place_overseas_order(
+                    client, code=code, side=side, qty=int(qty), price=price,
+                    exchange=exch)
+            elif broker == "kis":
                 res = await kis.place_order(client, code=code, side=side,
                                             qty=int(qty), price=int(price))
             else:
