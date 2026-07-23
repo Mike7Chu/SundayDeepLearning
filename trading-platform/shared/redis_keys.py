@@ -44,6 +44,8 @@ ENGINE_RISK_KEY = "engine:risk"
 ENGINE_BUYLIST_KEY = "engine:buylist"
 # 보유 종목 목표가/손절선 도달 알림 상태(hash{code: json{kind,ts}} — 중복 알림 방지)
 ENGINE_ALERTS_KEY = "engine:alerts"
+# 매도 규율(트레일링 스탑) 상태(hash{code: json{peak, half_taken, ts}}) — 진입 후 고점 추적
+ENGINE_TRAIL_KEY = "engine:trail"
 # 자동매매 실행 기록(hash{code: json{ts,order_id,qty,price}} — 재매수 쿨다운)
 ENGINE_AUTO_KEY = "engine:auto_orders"
 # 빛의기둥(수급 포착) 알림 기록(hash{code: "YYYY-MM-DD"} — 하루 1회)

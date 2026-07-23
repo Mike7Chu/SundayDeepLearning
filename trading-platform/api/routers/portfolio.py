@@ -15,13 +15,16 @@ from pydantic import BaseModel
 from api.redis_client import get_redis
 from api.services.cache import get_or_compute
 from collector.stock.toss import TossClient, TossError, live_overlay
+from engine.plan import exit_plan
 from engine.risk import order_allowed
 from shared.redis_keys import (
     ENGINE_RISK_KEY,
+    ENGINE_TRAIL_KEY,
     FX_USDKRW_KEY,
     STOCK_QUOTE_KEY,
     TOSS_ACCOUNT_KEY,
     TOSS_HOLDINGS_KEY,
+    stock_ohlcv_key,
 )
 from shared.settings import settings
 
@@ -117,6 +120,33 @@ async def portfolio() -> dict:
                 prices[h.get("symbol") or ""] = p
         if prices:
             totals = live_overlay(holdings, prices, fx)
+        # 매도 규율(트레일링 스탑) 주입 — 보유 종목별 현재 스탑·액션.
+        trail = await redis.hgetall(ENGINE_TRAIL_KEY)
+        for h in holdings:
+            code = h.get("symbol") or ""
+            cur = prices.get(code) or h.get("cur_price")
+            avg = h.get("avg_price")
+            if not (code.isdigit() and cur and avg):
+                continue
+            oraw = await redis.get(stock_ohlcv_key(code))
+            if not oraw:
+                continue
+            try:
+                closes = [c["close"] for c in json.loads(oraw)
+                          if isinstance(c, dict) and c.get("close")]
+            except (json.JSONDecodeError, TypeError):
+                continue
+            try:
+                st = json.loads(trail[code]) if code in trail else {}
+            except (json.JSONDecodeError, TypeError):
+                st = {}
+            peak = max(st.get("peak") or 0.0, cur, avg)
+            ep = exit_plan(avg, cur, peak, closes, kr=True,
+                           trail_pct=settings.trail_stop_pct)
+            if ep:
+                h["trail_stop"] = ep["trail_stop"]
+                h["exit_action"] = ep["action"]
+                h["exit_stage"] = ep["stage"]
     return {
         "fx_usdkrw": fx,
         "enabled": _toss.enabled,

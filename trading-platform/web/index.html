@@ -672,6 +672,12 @@ async function renderPortfolio(){
     {label:"평가액", key:"eval_amount", fmt:r=>money(r.eval_amount,r.currency)},
     {label:"평가손익", key:"pnl_pct", cls:r=>"num "+((r.pnl_pct||0)>=0?"pos":"neg"),
      fmt:r=>`<span data-lpnl="${qesc(r.symbol)}" data-qty="${r.qty||0}" data-avg="${r.avg_price||0}" data-cur="${r.currency||'KRW'}">${(r.pnl||0)>=0?"+":""}${money(r.pnl,r.currency)} (${(r.pnl_pct||0)>=0?"+":""}${numC(r.pnl_pct)}%)</span>`},
+    {label:"트레일링 스탑", key:"trail_stop", hint:"이 가격 밑으로 떨어지면 익절/청산 검토 — 오르면 스탑도 따라 올라가 이익을 지켜요",
+     fmt:r=>r.trail_stop==null?'<span class="num">–</span>':`<span class="neg">${money(r.trail_stop,r.currency)}</span>`},
+    {label:"매도 규율", key:"exit_action", num:false,
+     fmt:r=>{const a=r.exit_action; if(!a||a==="보유") return '<span class="num">보유</span>';
+       const cls=a.includes("손절")?"sell":a.includes("절반")?"badge pos":"badge sell";
+       return `<span class="${cls}">${a}</span>`;}},
   ], hs, {rowClick:r=>`openStock('${qesc(r.symbol)}','${qesc(r.name)}')`,
           sort:{key:"eval_amount",dir:-1}, empty:"보유 종목 없음"});
   $("metaInfo").textContent=`보유 ${hs.length}종목 · 평가 ${eok(pf.total_eval)}`;

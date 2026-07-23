@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import datetime
 
-from api.services.stock_signal import adx, evaluate_signals, macd, trade_levels
+from api.services.stock_signal import (
+    adx,
+    evaluate_signals,
+    krx_tick,
+    macd,
+    trade_levels,
+)
 
 
 def _parse_ymd(s: str | None) -> datetime.date | None:
@@ -220,6 +226,53 @@ def sell_checks(h: dict, closes: list[float]) -> dict:
         action = "관찰(실적 우위)"
     return {"severity": sev, "hard": hard, "soft": soft,
             "action": action, "reasons": reasons}
+
+
+def exit_plan(entry: float, cur: float, peak: float | None,
+              closes: list[float], kr: bool = True, trail_pct: float = 10.0,
+              half_taken: bool = False) -> dict | None:
+    """보유 종목 매도 규율(순수) — 트레일링 스탑 + 부분 익절 + 본전 보장.
+
+    '손실은 짧게, 이익은 길게': 오르면 스탑을 고점을 따라 올려 이익을 태우고,
+    목표(손익비 1:2) 첫 도달 시 절반 익절 후 나머지는 트레일링으로 러너 관리.
+    - entry=평단, cur=현재가, peak=진입 후 최고가(호출부가 갱신·저장).
+    - trail_pct=고점 대비 트레일링 폭(%). 유효 스탑은 초기 손절선과 트레일링 중
+      높은 쪽(가격이 오르면 스탑도 상승, 절대 내려가지 않음).
+    - 본전 보장: 의미있는 수익(+3%↑) 구간이면 스탑을 진입가 아래로 내리지 않음.
+    반환 {trail_stop, target, peak, pnl_pct, action, stage, reason} 또는 None.
+    """
+    if not entry or not cur or len(closes) < 20:
+        return None
+    lv = trade_levels(closes, cur, kr=kr)
+    if not lv:
+        return None
+    pnl = (cur / entry - 1) * 100
+    peak = max(peak or 0.0, cur, entry)
+    tick = krx_tick if kr else (lambda p: round(p, 2))
+    trail = peak * (1 - trail_pct / 100)
+    if cur > entry * 1.03:                       # 본전 보장(수익 구간)
+        trail = max(trail, entry)
+    stop = tick(max(lv["stop"], trail))          # 트레일링은 초기 손절선보다 위로만
+    target = lv["target"]
+    if cur <= stop:
+        if pnl >= 0:
+            action, stage = "익절/청산 검토", "트레일링 스탑 도달"
+            reason = f"고점 대비 되돌림 — 트레일링 스탑({stop:,.0f}) 도달, 이익 실현 검토"
+        else:
+            action, stage = "손절 검토", "손절선 이탈"
+            reason = f"손절선({stop:,.0f}) 이탈 — 손실 확대 차단"
+    elif not half_taken and cur >= target:
+        action, stage = "절반 익절 검토", "목표 도달"
+        reason = (f"목표가({target:,.0f}) 도달 — 절반 익절 후 나머지는 "
+                  "트레일링으로 이익 태우기")
+    else:
+        action = "보유"
+        stage = "러너 관리" if half_taken else "보유"
+        gap = (cur / stop - 1) * 100 if stop else 0
+        reason = f"스탑 {stop:,.0f}(현재가 −{gap:.1f}%)까지 보유 — 오르면 스탑도 따라 올라감"
+    return {"trail_stop": stop, "target": target, "peak": round(peak, 2),
+            "pnl_pct": round(pnl, 1), "action": action, "stage": stage,
+            "reason": reason}
 
 
 def suggest_qty(entry: float, asset: float | None, cap: float | None,

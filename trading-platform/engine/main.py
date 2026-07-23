@@ -25,13 +25,14 @@ from api.services.stock_value import load_quotes
 from collector.stock.kis import effective_watchlist
 from collector.stock.toss import TossClient
 from engine.orders import place_gated_order
-from engine.plan import sell_checks, stage1_rank, suggest_qty, swing_metrics
+from engine.plan import exit_plan, sell_checks, stage1_rank, suggest_qty, swing_metrics
 from engine.risk import evaluate_risk
 from engine.screener import final_score, quant_filter
 from engine.telegram_cmd import command_loop
 from notifier.telegram import TelegramSender
 from shared.redis_keys import (
     ENGINE_ALERTS_KEY,
+    ENGINE_TRAIL_KEY,
     ENGINE_AUTO_KEY,
     ENGINE_PILLAR_KEY,
     ENGINE_BUYLIST_KEY,
@@ -276,40 +277,52 @@ async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> Non
     """
     hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
     prev = await redis.hgetall(ENGINE_ALERTS_KEY)
+    trail_state = await redis.hgetall(ENGINE_TRAIL_KEY)
     for h in hold.get("holdings", []):
         code = h.get("symbol")
         name = h.get("name") or code
         cur, avg = h.get("cur_price"), h.get("avg_price")
         cur = await _live_price(redis, code) or cur
-        if not code or not cur:
+        if not code or not cur or not avg:
             continue
         kr = code.isdigit()
-        lv = trade_levels(await _closes(redis, code), cur, kr=kr)
-        if not lv:
+        # 진입 후 고점(peak) 추적 — 트레일링 스탑의 기준
+        try:
+            st = json.loads(trail_state[code]) if code in trail_state else {}
+        except (json.JSONDecodeError, TypeError):
+            st = {}
+        peak = max(st.get("peak") or 0.0, cur, avg)
+        ep = exit_plan(avg, cur, peak, await _closes(redis, code), kr=kr,
+                       trail_pct=settings.trail_stop_pct,
+                       half_taken=bool(st.get("half_taken")))
+        if not ep:
             continue
-        kind = "target" if cur >= lv["target"] else ("stop" if cur <= lv["stop"] else None)
-        if kind is None:
+        await redis.hset(ENGINE_TRAIL_KEY, code, json.dumps(
+            {"peak": ep["peak"], "half_taken": bool(st.get("half_taken")),
+             "ts": time.time()}))
+        if ep["action"] == "보유":
             if code in prev:
-                await redis.hdel(ENGINE_ALERTS_KEY, code)   # 구간 이탈 → 상태 리셋
+                await redis.hdel(ENGINE_ALERTS_KEY, code)   # 알림 구간 이탈 → 리셋
             continue
+        stage = ep["stage"]
         try:
             last = json.loads(prev[code]) if code in prev else {}
         except (json.JSONDecodeError, TypeError):
             last = {}
-        if last.get("kind") == kind and time.time() - (last.get("ts") or 0) < 86400:
+        if last.get("kind") == stage and time.time() - (last.get("ts") or 0) < 86400:
             continue                                        # 같은 상태 24h 내 재알림 금지
-        pnl = f" · 평단 대비 {((cur / avg) - 1) * 100:+.1f}%" if avg else ""
-        fmt = (lambda v: f"{v:,.0f}") if kr else (lambda v: f"${v:,.2f}")
-        if kind == "target":
-            msg = (f"🎯 목표가 도달 — {name}({code})\n"
-                   f"현재 {fmt(cur)} ≥ 목표 {fmt(lv['target'])}{pnl}\n익절 검토 타이밍")
-        else:
-            msg = (f"🛑 손절선 이탈 — {name}({code})\n"
-                   f"현재 {fmt(cur)} ≤ 손절 {fmt(lv['stop'])}{pnl}\n손절 검토 타이밍")
-        await sender.send(msg + "\n※ 판단 보조 — 최종 결정은 직접")
+        fmt = (lambda v: f"{v:,.0f}원") if kr else (lambda v: f"${v:,.2f}")
+        icon = {"트레일링 스탑 도달": "📉", "목표 도달": "🎯",
+                "손절선 이탈": "🛑"}.get(stage, "🔔")
+        await sender.send(
+            f"{icon} {ep['action']} — {name}({code})\n"
+            f"현재 {fmt(cur)} · 평단 대비 {ep['pnl_pct']:+.1f}% · "
+            f"트레일링 스탑 {fmt(ep['trail_stop'])}\n{ep['reason']}\n"
+            "※ 판단 보조 — 최종 결정은 직접")
         await redis.hset(ENGINE_ALERTS_KEY, code,
-                         json.dumps({"kind": kind, "ts": time.time()}))
-        logger.info("[alert] %s %s (cur %.0f)", code, kind, cur)
+                         json.dumps({"kind": stage, "ts": time.time()}))
+        logger.info("[alert] %s %s (cur %.0f, stop %.0f)",
+                    code, stage, cur, ep["trail_stop"])
 
 
 async def _coach_watchdog(redis: aioredis.Redis, sender: TelegramSender) -> None:

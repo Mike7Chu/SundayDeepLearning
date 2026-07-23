@@ -1,7 +1,7 @@
 """오늘의 매매 플랜(설문 맞춤 스윙) — 1차 랭킹·스윙 점수·매도 신호 테스트(순수)."""
 from __future__ import annotations
 
-from engine.plan import sell_checks, stage1_rank, suggest_qty, swing_metrics
+from engine.plan import exit_plan, sell_checks, stage1_rank, suggest_qty, swing_metrics
 
 
 def _q(code, price, g=None, hi=None, lo=None, chg=0.0, **kw):
@@ -145,3 +145,36 @@ def test_swing_metrics_pead_cooling():
     # today 미제공(과거 데이터 백필 등)이면 판정 생략 — 기존 동작 보존
     no_today = swing_metrics(hot, up)
     assert no_today and no_today["swing"] == normal["swing"]
+
+
+def test_exit_plan_trailing_and_partial():
+    closes = [10000 + i * 30 for i in range(80)]     # 완만한 상승 추세
+    cur = closes[-1]
+    # 수익 구간 보유 — 트레일링 스탑이 본전(진입가) 위로 올라와 있고 액션은 보유
+    ep = exit_plan(entry=9000, cur=cur, peak=cur, closes=closes, trail_pct=10.0)
+    assert ep and ep["action"] == "보유"
+    assert ep["trail_stop"] >= 9000               # 본전 보장(수익 구간)
+    assert ep["pnl_pct"] > 0
+    # 고점 대비 트레일링 폭 이상 하락 → 트레일링 스탑 도달(익절/청산)
+    high = cur * 1.3
+    dropped = exit_plan(entry=9000, cur=cur, peak=high, closes=closes, trail_pct=10.0)
+    assert dropped and dropped["stage"] == "트레일링 스탑 도달"
+    assert dropped["action"] == "익절/청산 검토"
+    # 데이터 부족/무효 입력이면 None
+    assert exit_plan(9000, cur, cur, closes[:10]) is None
+    assert exit_plan(0, cur, cur, closes) is None
+
+
+def test_exit_plan_target_partial_and_hard_stop():
+    # 하락 추세에서 손절선 이탈 → 손절 검토
+    down = [20000 - i * 100 for i in range(80)]
+    lossp = exit_plan(entry=25000, cur=down[-1], peak=25000, closes=down)
+    assert lossp and lossp["action"] in ("손절 검토", "익절/청산 검토")
+    # 목표가(1:2) 첫 도달 + 미익절 → 절반 익절 검토
+    closes = [10000 + i * 20 for i in range(80)]
+    from api.services.stock_signal import trade_levels
+    lv = trade_levels(closes, closes[-1])
+    at_target = exit_plan(entry=closes[-1] * 0.85, cur=lv["target"] + 10,
+                          peak=lv["target"] + 10, closes=closes, half_taken=False)
+    assert at_target and at_target["stage"] == "목표 도달"
+    assert "절반" in at_target["action"]
