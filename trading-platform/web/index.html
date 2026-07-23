@@ -793,25 +793,32 @@ async function renderValue(){
   $("metaInfo").textContent=`저평가 · ${rows.length}종목`;
 }
 const VC=(s)=>s>=75?"buy":s>=60?"pos":s>=45?"num":"neg";   // 판정 색
+function radarRow(r,i,late){
+  const sigs=(r.signals||[]).map(s=>`<span class="badge" style="margin:2px 3px 0 0">${s}</span>`).join("");
+  return `<div class="card" style="margin-top:8px;background:rgba(148,168,205,.04)${late?';opacity:.82':''}">
+    <div class="row clk" onclick="openStock('${r.code}','${qesc(r.name||'')}')">
+      <span><b>${i+1}. ${r.name||r.code}</b> <span class="num">${r.code}</span>
+        <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${numC(r.change_pct)}%</b>
+        <span class="badge ${late?'sell':'pos'}">${late?'🚨 눌림목 관찰':'진입 검토'}</span></span>
+      <b class="buy strong">레이더 ${numC(r.radar,0)}</b></div>
+    <div style="margin-top:5px">${sigs}</div></div>`;
+}
 function radarCardHTML(rad){
   rad=rad||{}; const rows=rad.rows||[]; const rg=rad.regime||{};
   const toneCls=rg.tone==="risk_on"?"pos":rg.tone==="risk_off"?"neg":"num";
-  const items=rows.map((r,i)=>{
-    const sigs=(r.signals||[]).map(s=>`<span class="badge" style="margin:2px 3px 0 0">${s}</span>`).join("");
-    return `<div class="card" style="margin-top:8px;background:rgba(148,168,205,.04)">
-      <div class="row clk" onclick="openStock('${r.code}','${qesc(r.name||'')}')">
-        <span><b>${i+1}. ${r.name||r.code}</b> <span class="num">${r.code}</span>
-          <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${numC(r.change_pct)}%</b></span>
-        <b class="buy strong">레이더 ${numC(r.radar,0)}</b></div>
-      <div style="margin-top:5px">${sigs}</div></div>`;}).join("");
+  const entry=rows.filter(r=>r.phase!=="late"), late=rows.filter(r=>r.phase==="late");
+  const entryH=entry.length?entry.map((r,i)=>radarRow(r,i+1,false)).join(""):'<div class="empty">지금 <b>초입(추격 아닌 진입 가능)</b> 구간 종목이 없어요 — 장중·활황장에 더 잘 잡혀요</div>';
+  const lateH=late.length?`<div class="num" style="margin-top:12px">🚨 <b>이미 급등 — 추격 위험</b> (오늘 +${numC(CHASE_PCT_UI,0)}%↑ · 지금 사기보다 <b>눌림목</b> 기다리세요)</div>`+late.map((r,i)=>radarRow(r,i+1,true)).join(""):'';
   return `<div class="card" style="margin:12px 16px 0;border:1px solid rgba(255,77,94,.28)">
     <h3>🚀 발굴 레이더 <span class="badge">터질 전조 스캔</span>
-      <span class="badge" title="급등의 5대 전조(거래대금 급증·신고가 돌파·당일 강도·실적 촉매·추세 전환)를 전 시장에서 조합해 후보를 추립니다. 예측이 아니라 '지금 깨어나는' 종목이에요. 급등주는 되돌림 위험도 큽니다">?</span></h3>
+      <span class="badge" title="급등의 5대 전조(거래대금 급증·신고가 돌파·당일 강도·실적 촉매·추세 전환)+외인/기관 매집을 조합해 '지금 깨어나는' 종목을 추립니다. 이미 크게 오른 종목은 추격 위험이라 '눌림목 관찰'로 분리해요">?</span></h3>
     <div class="row" style="border:none;padding-top:0"><span class="${toneCls}">${rg.note||'시장 지표 없음'}</span>
       <span class="num">${rad.scanned?`후보 ${rad.scanned}개 스캔`:''}</span></div>
-    ${items||'<div class="empty">지금 조건(거래대금 급증+상승)을 갖춘 종목이 없어요 — 장중·활황장에 더 잘 잡혀요</div>'}
-    <div class="num" style="margin-top:8px">전조 포착일 뿐 매수 신호가 아니에요. 종목을 눌러 상세·🧠AI 분석으로 '왜 뜨는지'까지 확인하세요.</div></div>`;
+    <div class="num" style="margin:2px 0 4px">🎯 <b>진입 검토 (초입)</b> — 이제 막 움직이는, 추격 아닌 종목</div>
+    ${entryH}${lateH}
+    <div class="num" style="margin-top:8px">전조 포착일 뿐 매수 신호가 아니에요. 종목을 눌러 상세의 <b>추천 매수가</b>(눌림목)·🧠AI로 '왜 뜨는지'까지 확인하세요.</div></div>`;
 }
+const CHASE_PCT_UI=15;   // 서버 CHASE_PCT와 일치(표시용)
 async function renderSignal(){
   const [sc,rad]=await Promise.all([jget("/stocks/score"),jget("/stocks/radar").catch(()=>({}))]);
   const rows=(sc.rows||[]).filter(r=>match(r.name)||match(r.code));

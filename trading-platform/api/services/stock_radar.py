@@ -18,6 +18,10 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
 
+# 당일 등락률이 이 값(%) 이상이면 '이미 급등' — 추격 매수 위험(눌림목 관찰 대상).
+CHASE_PCT = 15.0
+
+
 def turnover_surge(candles: list[dict]) -> tuple[float | None, float | None]:
     """(오늘 거래대금 억원, 최근 20일 평균 대비 배수) — 순수 함수.
 
@@ -99,11 +103,15 @@ def radar_score(quote: dict, candles: list[dict],
         signals.append("골든크로스")
 
     total = round(s_flow + s_high + s_day + s_cat + s_tr, 1)
+    # 초입 vs 이미 급등 구분 — 레이더는 '깨어나는 종목'을 보여줄 뿐, 상한가 추격이 아니다.
+    late = (chg or 0) >= CHASE_PCT
     return {
         "code": quote.get("code"), "name": quote.get("name"),
         "price": price, "change_pct": chg, "radar": total,
         "value_eok": today_eok, "surge_x": surge, "pos_52w": round(pos, 3),
         "flash_yoy": yoy, "signals": signals,
+        "phase": "late" if late else "entry",
+        "action": "이미 급등 — 추격 말고 눌림목 관찰" if late else "진입 검토 구간",
     }
 
 

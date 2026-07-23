@@ -50,6 +50,12 @@ def test_radar_score_fires_on_breakout():
     assert r["radar"] >= 70
     joined = " ".join(r["signals"])
     assert "거래대금" in joined and "신고가" in joined and "실적" in joined
+    # +18%는 이미 급등 → 추격 위험(눌림목 관찰) 단계로 분류
+    assert r["phase"] == "late" and "눌림목" in r["action"]
+    # 초입(+6%)은 진입 검토 단계
+    q2 = {**q, "change_pct": 6.0}
+    r2 = radar_score(q2, c, has_flash=True)
+    assert r2["phase"] == "entry" and "진입" in r2["action"]
 
 
 def test_radar_score_gates_out_weak():
