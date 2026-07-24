@@ -57,7 +57,17 @@ def test_parse_balance():
                                      "scts_evlu_amt": "3000000"}]})
     assert fb["total_eval"] == 4000000.0 and fb["cash"] == 1000000.0
     # 빈 응답은 None
-    assert parse_balance({}) == {"total_eval": None, "cash": None}
+    empty = parse_balance({})
+    assert empty["total_eval"] is None and empty["cash"] is None and empty["holdings"] == []
+    # output1 종목별 보유 파싱(에이전트 매도 대상 — KIS 계좌)
+    hb = parse_balance({"output2": [{"nass_amt": "1000000"}], "output1": [
+        {"pdno": "005930", "prdt_name": "삼성전자", "hldg_qty": "10",
+         "evlu_pfls_rt": "5.2", "prpr": "80000"},
+        {"pdno": "000660", "prdt_name": "SK하이닉스", "hldg_qty": "0"}]})   # 0주 제외
+    assert len(hb["holdings"]) == 1
+    assert hb["holdings"][0] == {"symbol": "005930", "name": "삼성전자",
+                                 "quantity": 10.0, "pnl_pct": 5.2,
+                                 "price": 80000.0, "currency": "KRW"}
 
 
 def test_quote_excd():
@@ -104,4 +114,11 @@ def test_parse_overseas_balance():
     # 후보 필드 폴백(문서 편차)
     alt = parse_overseas_balance({"output2": {"tot_asst_amt": "5000"}})
     assert alt["eval"] == 5000.0
-    assert parse_overseas_balance({}) == {"eval": None, "cash": None}
+    empty = parse_overseas_balance({})
+    assert empty["eval"] is None and empty["cash"] is None and empty["holdings"] == []
+    # output1 미국 보유 파싱
+    hb = parse_overseas_balance({"output2": [{"tot_asst_amt": "5000"}], "output1": [
+        {"ovrs_pdno": "aapl", "ovrs_item_name": "Apple", "ovrs_cblc_qty": "3",
+         "evlu_pfls_rt": "-2.1", "now_pric2": "225.5"}]})
+    assert hb["holdings"][0] == {"symbol": "AAPL", "name": "Apple", "quantity": 3.0,
+                                 "pnl_pct": -2.1, "price": 225.5, "currency": "USD"}

@@ -420,6 +420,25 @@ class KISClient:
         r.raise_for_status()
         return parse_overseas_balance(self._check_rt(r.json(), "해외잔고"))
 
+    async def fetch_positions(self, client: httpx.AsyncClient) -> list[dict]:
+        """KIS 계좌의 종목별 보유(국내+미국) — 에이전트 매도 대상. 토스 실계좌 아님.
+
+        모의(KIS_PAPER)면 모의계좌 보유. 국내/해외 각각 실패해도 나머지는 반환(무회귀).
+        """
+        positions: list[dict] = []
+        try:
+            dom = await self.fetch_balance(client)
+            positions.extend(dom.get("holdings") or [])
+        except Exception as exc:
+            logger.warning("[kis] 국내 보유 조회 실패: %s", exc)
+        if settings.us_auto_enabled:
+            try:
+                ovs = await self.fetch_overseas_balance(client)
+                positions.extend(ovs.get("holdings") or [])
+            except Exception as exc:
+                logger.info("[kis] 해외 보유 조회 실패(무시): %s", exc)
+        return positions
+
     async def place_overseas_order(self, client: httpx.AsyncClient, *, code: str,
                                    side: str, qty: int, price: float,
                                    exchange: str = "NASD") -> dict:
@@ -612,7 +631,49 @@ def parse_overseas_balance(payload: dict) -> dict:
     ev = _n("evlu_amt_smtl_amt", "tot_evlu_amt", "ovrs_tot_evlu_amt",
             "frcr_evlu_tota", "tot_asst_amt")
     cash = _n("frcr_dncl_amt_2", "frcr_dncl_amt1", "frcr_dncl_amt", "dncl_amt")
-    return {"eval": ev, "cash": cash}
+    return {"eval": ev, "cash": cash,
+            "holdings": _overseas_holdings(payload.get("output1"))}
+
+
+def _overseas_holdings(output1) -> list[dict]:
+    """해외잔고 output1 → 종목별 보유 [{symbol,name,quantity,pnl_pct,price,currency}].
+
+    필드는 KIS 문서 기준·방어적(문서 편차 대비). 잔고 0은 제외.
+    """
+    out = []
+    for o in output1 or []:
+        if not isinstance(o, dict):
+            continue
+        qty = _f(o.get("ovrs_cblc_qty") or o.get("cblc_qty13") or o.get("ord_psbl_qty"))
+        if not qty or qty <= 0:
+            continue
+        sym = (o.get("ovrs_pdno") or o.get("pdno") or "").upper()
+        if not sym:
+            continue
+        out.append({"symbol": sym,
+                    "name": o.get("ovrs_item_name") or sym,
+                    "quantity": qty, "pnl_pct": _f(o.get("evlu_pfls_rt")),
+                    "price": _f(o.get("now_pric2") or o.get("ovrs_now_pric1")),
+                    "currency": "USD"})
+    return out
+
+
+def _domestic_holdings(output1) -> list[dict]:
+    """국내 inquire-balance output1 → 종목별 보유 [{symbol,name,quantity,pnl_pct,price,currency}]."""
+    out = []
+    for o in output1 or []:
+        if not isinstance(o, dict):
+            continue
+        qty = _f(o.get("hldg_qty"))
+        if not qty or qty <= 0:
+            continue
+        code = o.get("pdno") or ""
+        if not code:
+            continue
+        out.append({"symbol": code, "name": o.get("prdt_name") or code,
+                    "quantity": qty, "pnl_pct": _f(o.get("evlu_pfls_rt")),
+                    "price": _f(o.get("prpr")), "currency": "KRW"})
+    return out
 
 
 def parse_balance(payload: dict) -> dict:
@@ -646,7 +707,8 @@ def parse_balance(payload: dict) -> dict:
         se = _n("scts_evlu_amt")
         if se is not None or cash is not None:
             total = (se or 0.0) + (cash or 0.0)
-    return {"total_eval": total, "cash": cash}
+    return {"total_eval": total, "cash": cash,
+            "holdings": _domestic_holdings(payload.get("output1"))}
 
 
 def parse_price(o: dict) -> dict:

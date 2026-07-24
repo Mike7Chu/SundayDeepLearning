@@ -30,6 +30,26 @@ def _hm_to_min(hm: str) -> int:
     return int(h) * 60 + int(m)
 
 
+def market_of(code: str) -> str:
+    """종목코드 → 'KR'(국내 6자리) | 'US'(그 외 티커)."""
+    return "KR" if str(code).isdigit() else "US"
+
+
+def tradeable_markets(now_hm: str) -> set:
+    """지금(KST HH:MM) 매매 가능한 시장 — 국장 09:00~15:30, 미장 22:30~06:00(KST).
+
+    슬롯을 각 시장 개장 시간에 맞춰 두면(예 09:40=국장, 23:40=미장) 그 슬롯은 해당
+    시장만 매매 → '하루 2회, 국장·미장으로' 요구를 시간대로 자연 분리한다.
+    """
+    m = _hm_to_min(now_hm)
+    out = set()
+    if 9 * 60 <= m <= 15 * 60 + 30:
+        out.add("KR")
+    if m >= 22 * 60 + 30 or m <= 6 * 60:      # 자정 넘김
+        out.add("US")
+    return out
+
+
 def due_slots(now_hm: str, slots: list[str], fired: dict, today: str) -> list[str]:
     """지금(now_hm=HH:MM) 실행해야 할 슬롯 목록.
 

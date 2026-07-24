@@ -1,5 +1,25 @@
-"""클로드 스윙 결정 에이전트 — 순수 로직 검증(스케줄·파싱·컨텍스트)."""
-from engine.agent import build_context, due_slots, parse_decisions, parse_slots
+"""클로드 스윙 결정 에이전트 — 순수 로직 검증(스케줄·파싱·컨텍스트·시장)."""
+from engine.agent import (
+    build_context,
+    due_slots,
+    market_of,
+    parse_decisions,
+    parse_slots,
+    tradeable_markets,
+)
+
+
+def test_market_of():
+    assert market_of("005930") == "KR"
+    assert market_of("AAPL") == "US"
+
+
+def test_tradeable_markets_by_time():
+    assert tradeable_markets("09:40") == {"KR"}      # 국장 개장
+    assert tradeable_markets("14:30") == {"KR"}
+    assert tradeable_markets("23:40") == {"US"}      # 미장 개장
+    assert tradeable_markets("02:00") == {"US"}      # 자정 넘김
+    assert tradeable_markets("18:00") == set()       # 둘 다 장외
 
 
 def test_parse_slots():

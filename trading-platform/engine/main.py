@@ -39,7 +39,13 @@ from engine.screener import final_score, quant_filter
 from engine.telegram_cmd import command_loop
 from notifier.telegram import TelegramSender
 from engine.intraday import add_tick, intraday_signal, krx_intraday
-from engine.agent import build_context, due_slots, parse_slots
+from engine.agent import (
+    build_context,
+    due_slots,
+    market_of,
+    parse_slots,
+    tradeable_markets,
+)
 from shared.redis_keys import (
     AGENT_DONE_KEY,
     AGENT_LAST_KEY,
@@ -909,23 +915,38 @@ async def _agent_sell(redis: aioredis.Redis, kis, code: str, hold: dict,
     return ok, msg, f"{qty:g}주 @{cur}{live:g}"
 
 
-async def _agent_run(redis: aioredis.Redis, kis, toss: TossClient,
-                     sender: TelegramSender, slot: str) -> None:
+async def _agent_run(redis: aioredis.Redis, kis,
+                     sender: TelegramSender, slot: str, now_hm: str) -> None:
     """스윙 결정 1회 — 플랜(후보/매도점검)+보유+리스크를 클로드에게 넘겨 최종 판정·집행.
 
-    안전: 매수는 후보 목록 안 종목만, 매도는 보유 종목만(환각·임의주문 차단).
-    실계좌 주문은 agent_live_enabled=true라야 — 기본 모의 전용.
+    안전: 매수는 후보 목록 안 종목만, 매도는 KIS 계좌 보유만(환각·임의주문 차단).
+    보유는 **KIS 계좌**(토스 실계좌 미사용 — 절대 건들지 않음). 실계좌 주문은
+    agent_live_enabled=true라야 — 기본 모의 전용. 열린 시장만 매매(국장/미장 분리).
     """
     if not settings.kis_paper and not settings.agent_live_enabled:
         logger.warning("[agent] 실계좌 모드 — agent_live_enabled=false라 스킵(모의 전용)")
         return
+    markets = tradeable_markets(now_hm)              # 지금 열린 시장(KR/US)만 매매
+    if not markets:
+        logger.info("[agent/%s] 국장·미장 모두 장외 — 스킵", slot)
+        return
     plan = await _json_get(redis, ENGINE_PLAN_KEY)
     risk = await _json_get(redis, ENGINE_RISK_KEY)
-    hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
-    holdings = hold.get("holdings", [])
-    if not (plan.get("buys") or holdings):
-        logger.info("[agent/%s] 후보·보유 모두 없음 — 스킵", slot)
+    # 보유 = KIS 계좌(종목별) — 토스 실계좌는 조회조차 하지 않는다(사용자 요구).
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            positions = await kis.fetch_positions(c)
+    except Exception as exc:
+        logger.warning("[agent] KIS 보유 조회 실패: %s", exc)
+        positions = []
+    # 열린 시장으로 후보·보유 좁히기 → 클로드가 그 시장만 판단(국장 슬롯=국장만)
+    buys = [b for b in (plan.get("buys") or []) if market_of(b.get("code", "")) in markets]
+    sells = [s for s in (plan.get("sells") or []) if market_of(s.get("code", "")) in markets]
+    holdings = [p for p in positions if market_of(p.get("symbol", "")) in markets]
+    if not (buys or holdings):
+        logger.info("[agent/%s] %s 시장 후보·보유 없음 — 스킵", slot, markets)
         return
+    plan = {**plan, "buys": buys, "sells": sells}
     asset, _cash = await _trade_assets(redis, kis)
     ctx = build_context(plan, holdings, risk, asset, risk.get("cash_pct"),
                         plan.get("style") or "")
@@ -983,9 +1004,13 @@ async def _agent_run(redis: aioredis.Redis, kis, toss: TossClient,
                       f"📊 {mv or '시장뷰 없음'}\n\n{body}")
 
 
-async def _agent_loop(redis: aioredis.Redis, kis, toss: TossClient,
+async def _agent_loop(redis: aioredis.Redis, kis,
                       sender: TelegramSender) -> None:
-    """하루 N회(agent_times, KST) 클로드 스윙 결정 실행. 기본 OFF(agent_enabled)."""
+    """하루 N회(agent_times, KST) 클로드 스윙 결정 실행. 기본 OFF(agent_enabled).
+
+    슬롯은 국장(예 09:40)·미장(예 23:40) 시간에 두면 각 슬롯이 열린 시장만 매매.
+    토스 실계좌는 사용하지 않는다(보유는 KIS 계좌).
+    """
     if not settings.agent_enabled:
         return
     slots = parse_slots(settings.agent_times)
@@ -1001,7 +1026,7 @@ async def _agent_loop(redis: aioredis.Redis, kis, toss: TossClient,
             fired = await _json_get(redis, AGENT_DONE_KEY)
             for slot in due_slots(now_hm, slots, fired, today):
                 await redis.hset(AGENT_DONE_KEY, slot, today)      # 먼저 마킹(중복 방지)
-                await _agent_run(redis, kis, toss, sender, slot)
+                await _agent_run(redis, kis, sender, slot, now_hm)
         except Exception as exc:
             logger.warning("[DATA_ERROR] agent 루프 실패: %s", exc)
         await asyncio.sleep(settings.agent_check_interval_sec)
@@ -1025,7 +1050,7 @@ async def run() -> None:
             _cycle_loop(redis, sender, toss, kis),
             _guard_loop(redis, sender),       # 목표/손절 실시간 감시(20초)
             _day_trade_loop(redis, kis, toss, sender),   # 데이 스윙/초단타(옵트인)
-            _agent_loop(redis, kis, toss, sender),        # 클로드 스윙 결정(하루 N회·옵트인)
+            _agent_loop(redis, kis, sender),              # 클로드 스윙 결정(하루 N회·옵트인)
             command_loop(redis, toss, kis),   # 텔레그램 주문지시(확인 회신 필수)
         )
     finally:
