@@ -467,7 +467,9 @@ async def us_history_loop(redis: aioredis.Redis, toss: TossClient, kis=None) -> 
     while True:
         n = 0
         async with httpx.AsyncClient(timeout=20) as client:
-            for item in us:
+            for idx, item in enumerate(us):
+                if idx and idx % 100 == 0:           # 진행 heartbeat(첫 바퀴가 길어 무응답 오해 방지)
+                    logger.info("[us] 일봉 진행 %d/%d(성공 %d)", idx, len(us), n)
                 code = item["code"]
                 candles = await _us_daily(redis, client, kis, toss, code)
                 if not candles:

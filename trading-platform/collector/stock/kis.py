@@ -268,7 +268,7 @@ class KISClient:
         body = await self._get(
             client, "/uapi/overseas-price/v1/quotations/price", "HHDFS00000300",
             {"AUTH": "", "EXCD": excd, "SYMB": symbol.upper()},
-            f"해외현재가 {symbol}")
+            f"해외현재가 {symbol}", retries=1)   # 거래소 탐색이 재시도 역할 → 재시도 최소
         return parse_overseas_price(body.get("output") or {})
 
     async def fetch_overseas_daily(self, client: httpx.AsyncClient, symbol: str,
@@ -278,7 +278,7 @@ class KISClient:
             client, "/uapi/overseas-price/v1/quotations/dailyprice", "HHDFS76240000",
             {"AUTH": "", "EXCD": excd, "SYMB": symbol.upper(),
              "GUBN": "0", "BYMD": "", "MODP": "1"},   # GUBN 0=일, MODP 1=수정주가
-            f"해외일봉 {symbol}")
+            f"해외일봉 {symbol}", retries=1)   # 거래소 탐색이 재시도 역할 → 재시도 최소
         return parse_overseas_daily(body.get("output2") or [])
 
     # ---- 국내 재무(성장성·안정성) — DART 대체/보완. corp_code 불필요(종목코드 직접) ----
