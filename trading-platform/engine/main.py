@@ -357,16 +357,18 @@ async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> Non
             {"peak": ep["peak"], "half_taken": bool(st.get("half_taken")),
              "ts": time.time()}))
         if ep["action"] == "보유":
-            if code in prev:
-                await redis.hdel(ENGINE_ALERTS_KEY, code)   # 알림 구간 이탈 → 리셋
-            continue
+            continue        # 보유 구간은 기록을 지우지 않는다(스탑 근처 진동 시 재알림 스팸 방지)
         stage = ep["stage"]
         try:
             last = json.loads(prev[code]) if code in prev else {}
         except (json.JSONDecodeError, TypeError):
             last = {}
-        if last.get("kind") == stage and time.time() - (last.get("ts") or 0) < 86400:
-            continue                                        # 같은 상태 24h 내 재알림 금지
+        since = time.time() - (last.get("ts") or 0)
+        if last.get("ts"):
+            same = last.get("kind") == stage
+            # 같은 상태는 24h 1회, 다른 상태(트레일링↔손절 진동 등)도 쿨다운 내 억제.
+            if (same and since < 86400) or (not same and since < settings.alert_cooldown_sec):
+                continue
         fmt = (lambda v: f"{v:,.0f}원") if kr else (lambda v: f"${v:,.2f}")
         icon = {"트레일링 스탑 도달": "📉", "목표 도달": "🎯",
                 "손절선 이탈": "🛑"}.get(stage, "🔔")
