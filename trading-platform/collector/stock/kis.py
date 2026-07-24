@@ -242,6 +242,29 @@ class KISClient:
                         list(sample.keys()) if isinstance(sample, dict) else None)
         return {"code": code, "items": items}
 
+    # ---- 해외(미국) 시세 — 토스 대체(토큰 안정). 시세용 EXCD는 NAS/NYS/AMS ----
+    async def fetch_overseas_price(self, client: httpx.AsyncClient, symbol: str,
+                                   excd: str = "NAS") -> dict:
+        """미국주식 현재가(HHDFS00000300). {price, change_pct, prev_close, ...}.
+
+        시세는 실전 도메인 필요할 수 있음 — 모의 앱키만 있으면 KIS_QUOTE_REAL 참고.
+        """
+        body = await self._get(
+            client, "/uapi/overseas-price/v1/quotations/price", "HHDFS00000300",
+            {"AUTH": "", "EXCD": excd, "SYMB": symbol.upper()},
+            f"해외현재가 {symbol}")
+        return parse_overseas_price(body.get("output") or {})
+
+    async def fetch_overseas_daily(self, client: httpx.AsyncClient, symbol: str,
+                                   excd: str = "NAS") -> list[dict]:
+        """미국주식 일봉(HHDFS76240000) → [{date,open,high,low,close,volume}] 오래된→최신."""
+        body = await self._get(
+            client, "/uapi/overseas-price/v1/quotations/dailyprice", "HHDFS76240000",
+            {"AUTH": "", "EXCD": excd, "SYMB": symbol.upper(),
+             "GUBN": "0", "BYMD": "", "MODP": "1"},   # GUBN 0=일, MODP 1=수정주가
+            f"해외일봉 {symbol}")
+        return parse_overseas_daily(body.get("output2") or [])
+
     # ---- 주문 (자동매매 전용 — 호출부에서 kis_trading_enabled 등 게이트 필수) ----
     async def place_order(self, client: httpx.AsyncClient, *, code: str,
                           side: str, qty: int, price: int) -> dict:
@@ -393,6 +416,51 @@ def parse_dividend(output1: list) -> list[dict]:
         })
     items.sort(key=lambda r: r["date"])
     return items
+
+
+# 시세(quotation) 거래소코드 — 주문/잔고용(NASD/NYSE/AMEX)과 다르다.
+_EXCD_QUOTE = {"NASD": "NAS", "NYSE": "NYS", "AMEX": "AMS"}
+
+
+def quote_excd(order_excd: str) -> str:
+    """주문용 거래소코드(NASD/NYSE/AMEX) → 시세용(NAS/NYS/AMS). 기본 NAS."""
+    return _EXCD_QUOTE.get((order_excd or "").upper(), "NAS")
+
+
+def parse_overseas_price(o: dict) -> dict:
+    """해외 현재가(HHDFS00000300) output → 시세(순수 함수).
+
+    표준 필드: last(현재가)·rate(등락율%)·base(전일종가)·tvol(거래량). 폴백 포함.
+    """
+    if not isinstance(o, dict):
+        return {"price": None, "change_pct": None}
+    return {
+        "price": _f(o.get("last") or o.get("ovrs_prpr") or o.get("stck_prpr")),
+        "change_pct": _f(o.get("rate") or o.get("prdy_ctrt")),
+        "prev_close": _f(o.get("base")),
+        "open": _f(o.get("open")), "high": _f(o.get("high")),
+        "low": _f(o.get("low")), "volume": _f(o.get("tvol")),
+    }
+
+
+def parse_overseas_daily(rows: list) -> list[dict]:
+    """해외 일봉(HHDFS76240000) output2 → [{date,open,high,low,close,volume}] 오래된→최신.
+
+    필드: xymd(일자)·open·high·low·clos(종가)·tvol(거래량). 토스 캔들과 동일 형식.
+    """
+    out: list[dict] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        d = str(r.get("xymd") or "")
+        close = _f(r.get("clos"))
+        if not d or close is None:
+            continue
+        out.append({"date": d, "open": _f(r.get("open")), "high": _f(r.get("high")),
+                    "low": _f(r.get("low")), "close": close,
+                    "volume": _f(r.get("tvol"))})
+    out.sort(key=lambda x: x["date"])
+    return out
 
 
 def parse_balance(payload: dict) -> dict:

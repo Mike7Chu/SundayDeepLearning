@@ -16,12 +16,23 @@ import redis.asyncio as aioredis
 from api.services.stock_signal import candle_trading_value, pillar_guide, pillar_precheck
 from collector.news.dart import DartClient, DartQuotaExceeded
 from collector.news.sec import SecClient
-from collector.stock.kis import KISClient, effective_watchlist, is_kr_code, load_watchlist
+from collector.stock.kis import (
+    KISClient,
+    effective_watchlist,
+    is_kr_code,
+    load_watchlist,
+    quote_excd,
+)
 from collector.stock.kis_ws import pick_subs, realtime_loop
 from notifier.telegram import TelegramSender
 from collector.stock.kis_master import fetch_universe
 from collector.stock.toss import TossClient, candle_metrics
-from collector.stock.us_master import load_us_universe, parse_adr_map
+from collector.stock.us_master import (
+    kis_exchange,
+    load_us_universe,
+    parse_adr_map,
+    parse_exchange_override,
+)
 from shared.redis_keys import (
     ADR_KEY,
     DART_CORP_KEY,
@@ -383,13 +394,33 @@ async def stock_history_loop(redis: aioredis.Redis,
         await asyncio.sleep(settings.stock_history_interval_sec if got else 600)
 
 
-async def us_history_loop(redis: aioredis.Redis, toss: TossClient) -> None:
-    """미장 유니버스 일봉 — 전일종가(등락률 기반)·52주·차트를 6시간마다 채움.
+async def _us_daily(client: httpx.AsyncClient, kis, toss: TossClient,
+                    code: str) -> list[dict]:
+    """미국 일봉 — KIS 해외(토큰 안정) 우선, 실패 시 토스 폴백. 동일 캔들 형식."""
+    if kis is not None and getattr(kis, "enabled", False):
+        try:
+            excd = quote_excd(kis_exchange(
+                code, parse_exchange_override(settings.kis_us_exchange_map)))
+            c = await kis.fetch_overseas_daily(client, code, excd)
+            if c:
+                return c
+        except Exception:
+            pass                                     # KIS 실패 → 토스 폴백
+    if toss is not None and getattr(toss, "enabled", False):
+        try:
+            return await toss.fetch_candles(client, code)
+        except Exception:
+            return []
+    return []
 
-    가격 스윕(market_price_loop)이 5분마다 현재가를 넣고, 여기서 채운 prev_close로
-    등락률을 재계산한다. 관심/보유 미국 종목은 toss_history_loop가 별도 커버.
+
+async def us_history_loop(redis: aioredis.Redis, toss: TossClient, kis=None) -> None:
+    """미장 유니버스 일봉 — 전일종가(등락률 기반)·52주·차트를 3시간마다 채움.
+
+    KIS 해외 우선(토큰 안정)·토스 폴백. 가격 스윕(market_price_loop)이 현재가를 넣고,
+    여기서 채운 prev_close로 등락률 재계산. 관심/보유 미국은 toss_history_loop 커버.
     """
-    if not toss.enabled:
+    if not ((kis and kis.enabled) or toss.enabled):
         return
     us = load_us_universe()
     if not us:
@@ -400,11 +431,7 @@ async def us_history_loop(redis: aioredis.Redis, toss: TossClient) -> None:
         async with httpx.AsyncClient(timeout=20) as client:
             for item in us:
                 code = item["code"]
-                try:
-                    candles = await toss.fetch_candles(client, code)
-                except Exception as exc:
-                    logger.warning("[DATA_ERROR] us %s 일봉 실패: %s", code, exc)
-                    continue
+                candles = await _us_daily(client, kis, toss, code)
                 if not candles:
                     continue
                 await redis.set(stock_ohlcv_key(code),
@@ -972,7 +999,7 @@ async def main() -> None:
             portfolio_loop(redis, toss),
             toss_history_loop(redis, toss),
             toss_price_loop(redis, toss),
-            us_history_loop(redis, toss),
+            us_history_loop(redis, toss, kis),
             indicators_loop(redis, toss),
             rankings_loop(redis, toss),
             us_fundamentals_loop(redis),
