@@ -354,8 +354,9 @@ async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
                           + ("\n※ 자동매수 활성 — 조건 충족 시 자동 주문"
                              if settings.auto_trade_enabled
                              else "\n※ 자동 주문 아님 — 최종 결정은 직접"))
-    if new:
-        await _auto_buy(redis, toss, kis, sender, risk, new)
+    # 자동매수는 매수리스트 '전체'를 대상으로 — 중복은 쿨다운(성공 7일/실패 30분)이 막는다.
+    # (신규 여부로 거르면 이미 리스트에 있던 종목이 영영 매수 시도조차 안 됨 = 버그.)
+    await _auto_buy(redis, toss, kis, sender, risk, rows)
 
 
 async def _live_price(redis: aioredis.Redis, code: str) -> float | None:
