@@ -257,6 +257,34 @@ async def stocks_backtest(code: str, strategy: str = "sma") -> dict:
     return {"code": code, **backtest(closes, strategy)}
 
 
+@router.get("/stocks/{code}/candles")
+async def stock_candles(code: str, limit: int = 180) -> dict:
+    """일봉 캔들(우리 수집분) — 국내 차트 자체 렌더용(TradingView KRX 로그인 우회).
+
+    국내 일봉엔 시가가 없어 종가·고저·거래량만. time은 'YYYY-MM-DD'. 미수집이면 온디맨드.
+    """
+    redis = get_redis()
+    code = code if code.isdigit() else code.upper()
+    candles: list = []
+    raw = await redis.get(stock_ohlcv_key(code))
+    if raw:
+        try:
+            candles = _json.loads(raw)
+        except (ValueError, TypeError):
+            candles = []
+    if len(candles) < 20:
+        candles = await _ondemand_candles(redis, code)
+    out = []
+    for c in candles[-int(limit):]:
+        if not isinstance(c, dict) or not c.get("close"):
+            continue
+        d = str(c.get("date", ""))[:8]
+        t = f"{d[:4]}-{d[4:6]}-{d[6:8]}" if len(d) == 8 and d.isdigit() else d
+        out.append({"time": t, "close": c.get("close"), "high": c.get("high"),
+                    "low": c.get("low"), "open": c.get("open"), "volume": c.get("volume")})
+    return {"code": code, "candles": out}
+
+
 _toss = TossClient()
 _dart = DartClient()
 
