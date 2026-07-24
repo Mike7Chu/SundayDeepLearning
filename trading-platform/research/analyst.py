@@ -80,11 +80,19 @@ class Analyst:
             "수요 구조)를 분석하세요. 순이익 YoY가 제공되면 트레일링 PER의 착시(이익 급증기)를 "
             "감안해 정상화·포워드 관점으로 평가하세요.\n"
             "제공된 정량 매력도 점수·안전마진을 근거로 삼아, 정성 판단(해자·경영·현금흐름)과 "
-            "종합해 '매수/분할매수/보류/회피' 관점을 명확히 제시하세요.\n\n"
+            "종합해 '매수/분할매수/보류/회피' 관점을 명확히 제시하세요.\n"
+            "[웹검색 — 가능하면 필수] 웹검색이 가능하면 다음을 **반드시 확인**해 최신성을 "
+            "보강하세요(불가하면 생략, 추측 금지): ①가장 최근 분기 실적(매출·영업이익·순이익 "
+            "YoY, 어닝 서프라이즈/쇼크) ②최근 4주 주요 뉴스·촉매(수주·가이던스·규제·M&A) "
+            "③업황(반도체면 HBM/DDR 가격, 2차전지면 리튬·가동률 등). 제공된 정량치는 수집 "
+            "시점 기준이니, 그 이후 발표된 실적/뉴스가 있으면 우선 반영하고 출처를 한 줄로 남기세요.\n\n"
             f"{format_for_prompt(data)}"
         )
         try:
-            report = await (self._via_api(prompt) if mode == "api" else self._via_cli(prompt))
+            # CLI(구독) 경로는 웹검색 허용 — 최신 실적·촉매 확인(구독 한도 내, 추가과금 없음).
+            report = await (self._via_api(prompt) if mode == "api" else self._via_cli(
+                prompt, extra_args=("--allowedTools", "WebSearch"),
+                timeout=_COACH_CLI_TIMEOUT))
         except Exception as exc:
             # 실패를 조용히 삼키지 않고 리포트에 노출(대시보드에서 원인 확인 가능).
             logger.warning("[research %s] 분석 실패(mode=%s): %s", data.code, mode, exc)
