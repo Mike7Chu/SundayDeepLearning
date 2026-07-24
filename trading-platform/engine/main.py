@@ -25,7 +25,14 @@ from api.services.stock_value import load_quotes
 from collector.stock.kis import effective_watchlist
 from collector.stock.toss import TossClient
 from engine.orders import place_gated_order
-from engine.plan import exit_plan, sell_checks, stage1_rank, suggest_qty, swing_metrics
+from engine.plan import (
+    entry_decision,
+    exit_plan,
+    sell_checks,
+    stage1_rank,
+    suggest_qty,
+    swing_metrics,
+)
 from engine.risk import evaluate_risk
 from engine.screener import final_score, quant_filter
 from engine.telegram_cmd import command_loop
@@ -243,26 +250,34 @@ async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
                     continue
             except Exception:
                 pass                             # 수급 조회 실패는 게이트 통과(막지 않음)
+        # 하이브리드 진입 — 현재가가 추천가 대비 밴드 초과면 매수 안 함(눌림목 대기·유령주문 방지).
+        live = await _live_price(redis, code) or r.get("price")
+        dec = entry_decision(entry, live, settings.entry_chase_band_pct)
+        if dec is None:
+            logger.info("[auto/%s] %s 과확장(현재 %s > 추천 %.0f) — 눌림목 대기",
+                        broker, code, f"{live:.0f}" if live else "?", entry)
+            continue                              # 쿨다운 안 걸어 다음에 눌리면 매수
+        order_price, note = dec
         budget = min(risk.get("per_stock_cap") or max_order, max_order)
-        qty = int(budget // entry)
+        qty = int(budget // order_price)
         if qty < 1:
             continue
         prev_failed = await _prev_failed(redis, code)
         ok, msg = await place_gated_order(redis, side="BUY", code=code,
-                                          qty=qty, price=entry, broker=broker,
+                                          qty=qty, price=order_price, broker=broker,
                                           kis=kis, toss=toss)
         await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
-            {"ts": now, "ok": ok, "qty": qty, "price": entry, "broker": broker},
+            {"ts": now, "ok": ok, "qty": qty, "price": order_price, "broker": broker},
             ensure_ascii=False))
         if not (ok or not prev_failed):           # 반복 거부는 조용히(첫 거부·성공만 알림)
             logger.info("[auto/%s] %s BUY x%d @%.0f → %s(반복거부 무알림)",
-                        broker, code, qty, entry, ok)
+                        broker, code, qty, order_price, ok)
             continue
         await sender.send(("🤖 자동매수 " + ("접수 ✅" if ok else "거부 🚫")) +
-                          f"\n{r['name']}({code}) {qty}주 @{entry:,.0f}원 "
-                          f"(최종 {r['final']:.0f}점)\n{msg}\n"
+                          f"\n{r['name']}({code}) {qty}주 @{order_price:,.0f}원 "
+                          f"(최종 {r['final']:.0f}점 · {note})\n{msg}\n"
                           f"손절 {r.get('stop') or 0:,.0f} · 목표 {r.get('target') or 0:,.0f}")
-        logger.info("[auto/%s] %s BUY x%d @%.0f → %s", broker, code, qty, entry, ok)
+        logger.info("[auto/%s] %s BUY x%d @%.0f → %s", broker, code, qty, order_price, ok)
 
 
 async def _pipeline(redis: aioredis.Redis, sender: TelegramSender,
@@ -654,19 +669,28 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
             continue
         if await _auto_cooldown(redis, code, now):   # 성공=7일 잠금 / 실패=짧게 재시도
             continue
+        # 하이브리드 진입 — 현재가가 추천가 대비 밴드 초과면 매수 안 함(눌림목 대기).
+        dec = entry_decision(entry, b.get("price"), settings.entry_chase_band_pct)
+        if dec is None:
+            logger.info("[auto/kis-us] %s 과확장(현재 %s > 추천 %.2f) — 눌림목 대기",
+                        code, b.get("price"), entry)
+            continue
+        order_price, note = dec
+        if order_price > entry:                      # 진입가 상향 시 예산 유지(수량 재산정)
+            qty = int(qty * entry // order_price) or qty
         prev_failed = await _prev_failed(redis, code)
         ok, msg = await place_gated_order(redis, side="BUY", code=code,
-                                          qty=qty, price=entry, broker="kis",
+                                          qty=qty, price=order_price, broker="kis",
                                           kis=kis, toss=None)
         await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
-            {"ts": now, "ok": ok, "qty": qty, "price": entry, "broker": "kis-us"},
+            {"ts": now, "ok": ok, "qty": qty, "price": order_price, "broker": "kis-us"},
             ensure_ascii=False))
-        logger.info("[auto/kis-us] %s BUY x%s @%.2f → %s", code, qty, entry, ok)
+        logger.info("[auto/kis-us] %s BUY x%s @%.2f → %s", code, qty, order_price, ok)
         if not (ok or not prev_failed):           # 반복 거부는 조용히(첫 거부·성공만 알림)
             continue
         await sender.send(("🌎 미장 자동매수 " + ("접수 ✅" if ok else "거부 🚫")) +
-                          f"\n{b.get('name', '')}({code}) {qty:g}주 @${entry:,.2f} "
-                          f"(스윙 {b.get('swing')}점)\n{msg}\n"
+                          f"\n{b.get('name', '')}({code}) {qty:g}주 @${order_price:,.2f} "
+                          f"(스윙 {b.get('swing')}점 · {note})\n{msg}\n"
                           f"손절 ${b.get('stop') or 0:,.2f} · 목표 ${b.get('target') or 0:,.2f}")
 
 

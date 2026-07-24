@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     dart_value_cap: int = 250                # 재무 수집 대상(가치 상위 top N) — 무료 한도 절약
     alert_cooldown_sec: float = 21600.0      # 보유 손절/익절 알림 종목당 최소 간격(스팸 억제, 6h)
     auto_retry_sec: float = 1800.0           # 자동매수 '실패' 후 재시도 대기(성공은 쿨다운 7일)
+    entry_chase_band_pct: float = 4.0        # 추천가 대비 이 %내면 현재가 매수, 초과면 눌림목 대기(추격 방지)
 
     # 전체 시장 스크리너: 유니버스 펀더멘털 수집(배치·느린 주기, KIS 레이트리밋 대비)
     market_scan_interval_sec: float = 1800.0  # 유니버스 1바퀴 목표 주기(KIS 펀더멘털·수급 감지)

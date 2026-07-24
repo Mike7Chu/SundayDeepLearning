@@ -1,7 +1,29 @@
 """오늘의 매매 플랜(설문 맞춤 스윙) — 1차 랭킹·스윙 점수·매도 신호 테스트(순수)."""
 from __future__ import annotations
 
-from engine.plan import exit_plan, sell_checks, stage1_rank, suggest_qty, swing_metrics
+from engine.plan import (
+    entry_decision,
+    exit_plan,
+    sell_checks,
+    stage1_rank,
+    suggest_qty,
+    swing_metrics,
+)
+
+
+def test_entry_decision_hybrid():
+    # 눌림목(현재가 ≤ 추천가) → 추천가 지정가
+    p, note = entry_decision(36700, 35000, band_pct=4)
+    assert p == 36700 and "눌림목" in note
+    # 진입가 근처(+2% ≤ 밴드 4%) → 현재가 매수
+    p, note = entry_decision(36700, 37400, band_pct=4)
+    assert p == 37400 and "근처" in note
+    # 과확장(+10% > 밴드) → None(눌림목 대기, 유령주문 방지)
+    assert entry_decision(36700, 40500, band_pct=4) is None
+    # 현재가 미상 → 추천가로
+    p, note = entry_decision(36700, None, band_pct=4)
+    assert p == 36700 and "미상" in note
+    assert entry_decision(0, 100) is None
 
 
 def _q(code, price, g=None, hi=None, lo=None, chg=0.0, **kw):

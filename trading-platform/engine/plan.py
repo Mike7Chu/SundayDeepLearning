@@ -288,6 +288,27 @@ def exit_plan(entry: float, cur: float, peak: float | None,
             "reason": reason}
 
 
+def entry_decision(entry: float | None, live: float | None,
+                   band_pct: float = 4.0) -> tuple[float, str] | None:
+    """자동매수 진입 판정(순수 함수) — '체결 안 될 유령 주문'을 없앤다.
+
+    추천가(entry, 보통 SMA20 눌림목)와 현재가(live)를 비교:
+    - live ≤ entry            → 추천가 지정가(눌림목, 잘 체결)
+    - entry < live ≤ entry×(1+밴드) → 현재가 지정가(살 만함 — 과하지 않은 추격)
+    - live > entry×(1+밴드)    → None(과확장 — 눌림목 대기, 주문 안 냄)
+    반환 (주문가격, 사유) 또는 None(스킵). live 미상이면 추천가로.
+    """
+    if not entry or entry <= 0:
+        return None
+    if not live or live <= 0:
+        return entry, "현재가 미상 — 추천가 지정가"
+    if live <= entry:
+        return entry, "눌림목 — 추천가 지정가"
+    if live <= entry * (1 + band_pct / 100):
+        return live, f"진입가 근처(+{(live / entry - 1) * 100:.1f}%) — 현재가 매수"
+    return None                                           # 과확장 → 눌림목 대기
+
+
 def suggest_qty(entry: float, asset: float | None, cap: float | None,
                 pct: float = 7.5, fx: float | None = None,
                 usd: bool = False) -> int | None:
