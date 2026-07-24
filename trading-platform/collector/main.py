@@ -394,18 +394,36 @@ async def stock_history_loop(redis: aioredis.Redis,
         await asyncio.sleep(settings.stock_history_interval_sec if got else 600)
 
 
-async def _us_daily(client: httpx.AsyncClient, kis, toss: TossClient,
-                    code: str) -> list[dict]:
-    """미국 일봉 — KIS 해외(토큰 안정) 우선, 실패 시 토스 폴백. 동일 캔들 형식."""
+_QUOTE_EXCDS = ("NAS", "NYS", "AMS")   # 시세용 거래소코드(나스닥·뉴욕·아멕스)
+
+
+async def _us_daily(redis: aioredis.Redis, client: httpx.AsyncClient, kis,
+                    toss: TossClient, code: str) -> list[dict]:
+    """미국 일봉 — KIS 해외(거래소 자동감지+캐시) 우선, 실패 시 토스 폴백.
+
+    상장 거래소가 불명확하므로 성공하는 EXCD를 찾아 30일 캐시(다음부터 1콜). KIS가
+    어느 거래소로도 안 잡히면 음성캐시('-', 3일)로 토스 폴백을 반복 프로빙 없이 유지.
+    """
+    key = f"us:excd:{code}"
     if kis is not None and getattr(kis, "enabled", False):
-        try:
-            excd = quote_excd(kis_exchange(
+        cached = await redis.get(key)
+        if cached != "-":                            # 음성캐시가 아니면 KIS 시도
+            default = quote_excd(kis_exchange(
                 code, parse_exchange_override(settings.kis_us_exchange_map)))
-            c = await kis.fetch_overseas_daily(client, code, excd)
-            if c:
-                return c
-        except Exception:
-            pass                                     # KIS 실패 → 토스 폴백
+            order: list[str] = []
+            for e in ([cached] if cached else []) + [default] + list(_QUOTE_EXCDS):
+                if e and e not in order:
+                    order.append(e)
+            for excd in order:
+                try:
+                    c = await kis.fetch_overseas_daily(client, code, excd)
+                except Exception:
+                    c = []
+                if c:
+                    if excd != cached:
+                        await redis.set(key, excd, ex=30 * 86400)
+                    return c
+            await redis.set(key, "-", ex=3 * 86400)  # KIS 미커버 → 토스로(3일)
     if toss is not None and getattr(toss, "enabled", False):
         try:
             return await toss.fetch_candles(client, code)
@@ -431,7 +449,7 @@ async def us_history_loop(redis: aioredis.Redis, toss: TossClient, kis=None) -> 
         async with httpx.AsyncClient(timeout=20) as client:
             for item in us:
                 code = item["code"]
-                candles = await _us_daily(client, kis, toss, code)
+                candles = await _us_daily(redis, client, kis, toss, code)
                 if not candles:
                     continue
                 await redis.set(stock_ohlcv_key(code),
