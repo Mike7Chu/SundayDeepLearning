@@ -5,8 +5,10 @@ from collector.stock.kis import (
     KISClient,
     load_watchlist,
     parse_balance,
+    parse_growth_ratio,
     parse_overseas_daily,
     parse_overseas_price,
+    parse_stability_ratio,
     quote_excd,
 )
 
@@ -58,3 +60,17 @@ def test_parse_overseas_daily():
     assert [c["date"] for c in out] == ["20260723", "20260724"]      # 오름차순
     assert out[-1]["close"] == 313.78 and out[0]["open"] == 305.0
     assert parse_overseas_daily([]) == []
+
+
+def test_parse_finance_ratios():
+    # 여러 결산 기간 중 최신(stac_yymm 최대) 행 사용
+    growth = [{"stac_yymm": "202409", "grs": "12.5", "bsop_prfi_inrt": "8.3"},
+              {"stac_yymm": "202406", "grs": "5.0", "bsop_prfi_inrt": "3.0"}]
+    g = parse_growth_ratio(growth)
+    assert g["rev_yoy"] == 12.5 and g["op_yoy"] == 8.3 and g["period"] == "202409"
+    stab = [{"stac_yymm": "202409", "lblt_rate": "45.2"}]
+    s = parse_stability_ratio(stab)
+    assert s["debt_ratio"] == 45.2
+    # 빈/딕셔너리 입력 방어
+    assert parse_growth_ratio([])["rev_yoy"] is None
+    assert parse_stability_ratio({"lblt_rate": "100"})["debt_ratio"] == 100.0

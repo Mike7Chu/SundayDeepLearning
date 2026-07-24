@@ -265,6 +265,33 @@ class KISClient:
             f"해외일봉 {symbol}")
         return parse_overseas_daily(body.get("output2") or [])
 
+    # ---- 국내 재무(성장성·안정성) — DART 대체/보완. corp_code 불필요(종목코드 직접) ----
+    async def fetch_finance_ratios(self, client: httpx.AsyncClient, code: str,
+                                   annual: bool = False) -> dict:
+        """성장성(매출·영익 YoY) + 안정성(부채비율) → {rev_yoy, op_yoy, debt_ratio}.
+
+        DART 무료키 한도(2만/일) 압박 없이 국내 재무를 채운다. annual=False면 분기.
+        """
+        div = "0" if annual else "1"                 # 0=연간, 1=분기
+        params = {"fid_input_iscd": code, "fid_div_cls_code": div,
+                  "fid_cond_mrkt_div_code": "J"}
+        out: dict = {}
+        try:
+            g = await self._get(
+                client, "/uapi/domestic-stock/v1/finance/growth-ratio",
+                "FHKST66430800", params, f"성장성 {code}")
+            out.update(parse_growth_ratio(g.get("output")))
+        except Exception:
+            pass
+        try:
+            s = await self._get(
+                client, "/uapi/domestic-stock/v1/finance/stability-ratio",
+                "FHKST66430600", params, f"안정성 {code}")
+            out.update(parse_stability_ratio(s.get("output")))
+        except Exception:
+            pass
+        return out
+
     # ---- 주문 (자동매매 전용 — 호출부에서 kis_trading_enabled 등 게이트 필수) ----
     async def place_order(self, client: httpx.AsyncClient, *, code: str,
                           side: str, qty: int, price: int) -> dict:
@@ -461,6 +488,30 @@ def parse_overseas_daily(rows: list) -> list[dict]:
                     "volume": _f(r.get("tvol"))})
     out.sort(key=lambda x: x["date"])
     return out
+
+
+def _fin_latest(output) -> dict:
+    """재무비율 output(기간 리스트/딕셔너리) → 최신 결산 행(stac_yymm 최대)."""
+    if isinstance(output, list):
+        rows = [r for r in output if isinstance(r, dict) and r.get("stac_yymm")]
+        return max(rows, key=lambda r: str(r.get("stac_yymm") or ""), default={})
+    return output if isinstance(output, dict) else {}
+
+
+def parse_growth_ratio(output) -> dict:
+    """성장성비율(FHKST66430800) → {rev_yoy(매출증가율), op_yoy(영익증가율), period}.
+
+    필드: grs(매출액증가율)·bsop_prfi_inrt(영업이익증가율)·stac_yymm(결산년월).
+    """
+    r = _fin_latest(output)
+    return {"rev_yoy": _f(r.get("grs")), "op_yoy": _f(r.get("bsop_prfi_inrt")),
+            "period": r.get("stac_yymm")}
+
+
+def parse_stability_ratio(output) -> dict:
+    """안정성비율(FHKST66430600) → {debt_ratio(부채비율), period}. 필드: lblt_rate."""
+    r = _fin_latest(output)
+    return {"debt_ratio": _f(r.get("lblt_rate")), "period": r.get("stac_yymm")}
 
 
 def parse_balance(payload: dict) -> dict:

@@ -296,15 +296,16 @@ async def _value_shortlist(redis: aioredis.Redis, cap: int = 250) -> list[dict]:
 
 
 async def stock_history_loop(redis: aioredis.Redis,
-                             dart: DartClient) -> None:
-    """배당 3개년 + 순이익 성장(DART 사업보고서) — 관심·보유 + 가치 상위 후보만.
+                             dart: DartClient, kis=None) -> None:
+    """배당 + 재무(부채비율·매출/영익 YoY·순이익) — 관심·보유 + 가치 상위 후보만.
 
-    일봉(차트)은 toss_history_loop 담당. DART 무료 키 한도(일 2만건)를 지키려고
-    전체 유니버스(~3,600) 대신 대상을 압축: 관심종목 ∪ 보유 ∪ 가치 상위(마법공식
-    프록시 top N). 한도초과(020)면 그날은 재시도 중단(6h 백오프). 실패는 기록 후 다음.
+    재무는 KIS 재무비율(성장성·안정성, corp_code 불필요·무료한도 없음)을 우선/보완으로
+    쓰고, DART는 배당·순이익 YoY·FCF·공시를 담당. DART가 못 채우는 경우(corp 없음·
+    미설정·한도초과 020)엔 KIS가 부채/매출/영익 YoY를 채워 화면이 비지 않게 한다.
+    대상은 관심 ∪ 보유 ∪ 가치 상위(무료 한도 절약). 일봉은 toss_history_loop 담당.
     """
-    if not dart.enabled:
-        logger.info("[div] DART_API_KEY 미설정 → 배당 수집 비활성")
+    if not (dart.enabled or (kis and kis.enabled)):
+        logger.info("[div] DART·KIS 모두 미설정 → 재무/배당 수집 비활성")
         return
     while True:
         watch = await effective_watchlist(redis)
@@ -319,21 +320,23 @@ async def stock_history_loop(redis: aioredis.Redis,
                 seen.add(c)
                 targets.append(item)
         got = 0
+        dart_quota_hit = False
+        cmap: dict = {}
         async with httpx.AsyncClient(timeout=15) as dclient:
-            try:
-                cmap = await _dart_corp_map(redis, dart, dclient)
-            except DartQuotaExceeded:
-                logger.warning("[div] DART 일일 한도 초과(020) — 오늘은 재시도 중단, "
-                               "자정(KST) 리셋 후 재개(6h 백오프)")
-                await asyncio.sleep(21600)
-                continue
+            if dart.enabled:
+                try:
+                    cmap = await _dart_corp_map(redis, dart, dclient)
+                except DartQuotaExceeded:
+                    logger.warning("[div] DART 일일 한도 초과(020) — 오늘 DART 중단, "
+                                   "KIS 재무로 계속(자정 리셋 후 재개)")
+                    dart_quota_hit = True
             for item in targets:
                 code, name = item["code"], item.get("name", "")
                 if not is_kr_code(code):
-                    continue   # DART는 국내 공시만 — 미국 티커 스킵
+                    continue   # 국내 전용 — 미국 티커 스킵
                 is_watch = code in wset
                 if not is_watch:
-                    # 유니버스(~3,600종목)는 하루 1회만 갱신 — DART 무료 한도(일 2만건) 준수.
+                    # 유니버스는 하루 1회만 갱신 — 무료 한도·부하 절약(배당 스냅샷 기준).
                     old = await redis.hget(STOCK_DIVIDEND_KEY, code)
                     if old:
                         try:
@@ -342,11 +345,27 @@ async def stock_history_loop(redis: aioredis.Redis,
                         except (json.JSONDecodeError, TypeError):
                             pass
                 corp = cmap.get(code)
+                # KIS 재무(부채비율·매출/영익 YoY) — corp 불필요·무료한도 없음.
+                # DART가 못 채우는 경우(corp 없음·DART 미설정·한도초과)에만 호출(중복 회피).
+                if kis and kis.enabled and (not corp or not dart.enabled or dart_quota_hit):
+                    try:
+                        kf = await kis.fetch_finance_ratios(dclient, code)
+                        kfields = {}
+                        if kf.get("debt_ratio") is not None:
+                            kfields["debt_ratio"] = kf["debt_ratio"]
+                        if kf.get("rev_yoy") is not None:
+                            kfields["rev_growth_pct"] = kf["rev_yoy"]
+                        if kf.get("op_yoy") is not None:
+                            kfields["op_growth_pct"] = kf["op_yoy"]
+                        if kfields:
+                            if is_watch:
+                                await merge_quote(redis, code, name, kfields)
+                            else:
+                                await _merge_market_field(redis, code, kfields)
+                    except Exception:
+                        pass
                 if not corp:
-                    if is_watch:   # 유니버스 매핑 누락은 흔함(스팩·리츠 등) — 조용히
-                        logger.warning("[DATA_ERROR] %s 배당금 수집 실패(corp_code 없음)",
-                                       name or code)
-                    continue
+                    continue   # DART 배당·순이익은 corp 필요 — 없으면 KIS 재무로만
                 items = await _dart_dividend(dart, dclient, corp)
                 if items:
                     await redis.hset(STOCK_DIVIDEND_KEY, code, json.dumps(
@@ -389,9 +408,10 @@ async def stock_history_loop(redis: aioredis.Redis,
                     if is_watch:
                         logger.warning("[DATA_ERROR] %s 순이익 성장률 수집 실패", name or code)
                 await asyncio.sleep(0.15)   # DART 페이싱(무료 키 레이트 존중)
-        logger.info("[stock] 배당/재무 수집 완료(대상 %d종목=관심+보유+가치상위, 배당 %d종목)",
-                    len(targets), got)
-        await asyncio.sleep(settings.stock_history_interval_sec if got else 600)
+        logger.info("[stock] 배당/재무 수집 완료(대상 %d종목=관심+보유+가치상위, 배당 %d종목%s)",
+                    len(targets), got, " · KIS재무 폴백" if dart_quota_hit else "")
+        await asyncio.sleep(21600 if dart_quota_hit
+                            else settings.stock_history_interval_sec)
 
 
 _QUOTE_EXCDS = ("NAS", "NYS", "AMS")   # 시세용 거래소코드(나스닥·뉴욕·아멕스)
@@ -1010,7 +1030,7 @@ async def main() -> None:
             stock_loop(redis, kis),
             realtime_loop(redis, kis, merge_quote,
                           lambda: _realtime_targets(redis)),
-            stock_history_loop(redis, dart),
+            stock_history_loop(redis, dart, kis),
             universe_loop(redis, kis),
             market_loop(redis, kis, toss),
             market_price_loop(redis, toss),
