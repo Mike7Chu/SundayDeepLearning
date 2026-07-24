@@ -309,6 +309,34 @@ class KISClient:
         return out
 
     # ---- 주문 (자동매매 전용 — 호출부에서 kis_trading_enabled 등 게이트 필수) ----
+    async def _post_order(self, client: httpx.AsyncClient, url: str, *,
+                          headers: dict, body: dict, ctx: str,
+                          retries: int = 2) -> dict:
+        """주문 POST — KIS 모의 도메인(openapivts)이 가끔 뱉는 일시 5xx에 짧게 재시도.
+
+        주문 로직은 정상인데 서버가 불안정해 500이 나는 경우(30분 뒤 그대로 성공)를
+        첫 시도에서 통과시킨다. 4xx(파라미터 거부)는 재시도 무의미 → 즉시 raise.
+        """
+        last = ""
+        for attempt in range(retries + 1):
+            try:
+                r = await client.post(url, headers=headers, json=body)
+                if r.status_code >= 500 and attempt < retries:
+                    last = f"HTTP {r.status_code}"
+                    logger.warning("[kis] %s 서버오류(%s) — 재시도 %d/%d",
+                                   ctx, last, attempt + 1, retries)
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                r.raise_for_status()
+                return r.json()
+            except (httpx.TransportError, httpx.TimeoutException) as exc:
+                last = str(exc)
+                if attempt < retries:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                raise
+        raise RuntimeError(f"{ctx} 반복 실패: {last}")
+
     async def place_order(self, client: httpx.AsyncClient, *, code: str,
                           side: str, qty: int, price: int) -> dict:
         """국내주식 현금 지정가 주문. kis_paper=true면 모의투자 주문(리허설).
@@ -329,11 +357,11 @@ class KISClient:
             "ORD_QTY": str(int(qty)), "ORD_UNPR": str(int(price)),
         }
         await self._throttle()
-        r = await client.post(
-            f"{self.order_base}/uapi/domestic-stock/v1/trading/order-cash",
-            headers=self._headers(token, tr_id, self.order_base), json=body)
-        r.raise_for_status()
-        d = self._check_rt(r.json(), f"주문 {side} {code}")
+        payload = await self._post_order(
+            client, f"{self.order_base}/uapi/domestic-stock/v1/trading/order-cash",
+            headers=self._headers(token, tr_id, self.order_base), body=body,
+            ctx=f"주문 {side} {code}")
+        d = self._check_rt(payload, f"주문 {side} {code}")
         if d.get("rt_cd") != "0":
             raise RuntimeError(f"KIS 주문 거부: {d.get('msg1') or d.get('msg_cd')}")
         out = d.get("output", {}) or {}
@@ -425,11 +453,11 @@ class KISClient:
             "ORD_DVSN": "00",                          # 00=지정가
         }
         await self._throttle()
-        r = await client.post(
-            f"{self.order_base}/uapi/overseas-stock/v1/trading/order",
-            headers=self._headers(token, tr_id, self.order_base), json=body)
-        r.raise_for_status()
-        d = self._check_rt(r.json(), f"해외주문 {side} {code}")
+        payload = await self._post_order(
+            client, f"{self.order_base}/uapi/overseas-stock/v1/trading/order",
+            headers=self._headers(token, tr_id, self.order_base), body=body,
+            ctx=f"해외주문 {side} {code}")
+        d = self._check_rt(payload, f"해외주문 {side} {code}")
         if d.get("rt_cd") != "0":
             raise RuntimeError(f"KIS 해외주문 거부: {d.get('msg1') or d.get('msg_cd')}")
         out = d.get("output", {}) or {}
