@@ -1096,8 +1096,10 @@ function paintModal(code,name,d){
     const Q=d.quote||{}, S=d.signal, D=d.dividend;
     if(!name&&Q.name) $("mTitle").textContent=`${Q.name} (${code})`;   // 온디맨드 조회 시 이름 보강
     const US=Q.currency==="USD", MN=(v)=>US?money(v,"USD"):fmt(v)+"원";
+    const perV=Q.per_ttm!=null?Q.per_ttm:Q.per, epsV=Q.eps_ttm!=null?Q.eps_ttm:Q.eps, bpsV=Q.bps_ttm!=null?Q.bps_ttm:Q.bps;
+    const ttmTag=Q.fin_period?" <span class=\"badge pos\">"+escH(Q.fin_period)+" TTM</span>":"";  // 최근 4분기 반영
     const fund=`<div class="cgrid">${kv("현재가",`<span data-lp="${qesc(code)}" data-cur="${US?'USD':'KRW'}" data-won="1">${MN(Q.price)}</span>`,HELP.price)}${kv("등락률",`<span data-lc="${qesc(code)}">${Q.change_pct!=null?Number(Q.change_pct).toFixed(2)+"%":"–"}</span>`,HELP.change)}
-      ${kv("PER",numC(Q.per),HELP.per)}${kv("PBR",numC(Q.pbr),HELP.pbr)}${kv("EPS",numC(Q.eps,0),HELP.eps)}${kv("BPS",numC(Q.bps,0),HELP.bps)}
+      ${kv("PER"+ttmTag,numC(perV),HELP.per)}${kv("PBR",numC(Q.pbr),HELP.pbr)}${kv("EPS"+ttmTag,numC(epsV,0),HELP.eps)}${kv("BPS",numC(bpsV,0),HELP.bps)}
       ${kv("시가총액",US?(Q.market_cap==null?"–":numC(Q.market_cap,0)+"억$"):capF(Q.market_cap),HELP.cap)}${kv("1년 최저~최고",US?(money(Q.low_52w,"USD")+"~"+money(Q.high_52w,"USD")):(numC(Q.low_52w,0)+"~"+numC(Q.high_52w,0)+"원"),HELP.w52)}
       ${Q.ni_growth_q_pct!=null?kv("순이익 성장("+(Q.ni_growth_q_label||"최근 분기")+")",(Q.ni_growth_q_pct>=0?"+":"")+numC(Q.ni_growth_q_pct,0)+"%","전년 동기 대비 · 공식 분기보고서"):""}
       ${Q.ni_growth_pct!=null?kv("순이익 성장(연간)",(Q.ni_growth_pct>=0?"+":"")+numC(Q.ni_growth_pct,0)+"%","작년 사업보고서 기준"):""}
@@ -1175,8 +1177,28 @@ function paintModal(code,name,d){
       <div class="modal-sec">매매 가격 가이드</div>${lvH}
       <div class="modal-sec">배당금</div>${dvH}
       <div class="modal-sec">더 알아보기</div>
-      <div class="arow"><button class="btn" onclick="mBacktest('${qesc(code)}')">📈 과거 성과</button>
+      <div class="arow"><button class="btn" onclick="mChart('${qesc(code)}','${US?'USD':'KRW'}')">📊 차트(TradingView)</button>
+        <button class="btn" onclick="mBacktest('${qesc(code)}')">📈 과거 성과</button>
         <button class="btn" onclick="mResearch('${qesc(code)}')">🧠 AI 분석</button></div><div id="mExtra"></div>`;
+}
+// 트레이딩뷰 고급차트 임베드 — #mExtra에 주입(모달 20초 새로고침이 mExtra는 보존 → 껌뻑임 없음).
+// 심볼: 국내 6자리 → KRX:코드, 미국 티커는 그대로(트레이딩뷰가 거래소 자동 해석). 자체 호스팅이라 CSP 제약 없음.
+function mChart(code,cur){
+  const e=$("mExtra"); if(!e) return;
+  const sym=/^\d{6}$/.test(code)?("KRX:"+code):code.toUpperCase();
+  const dark=(document.documentElement.dataset.theme||"dark")!=="light";
+  e.innerHTML=`<div class="num" style="margin:6px 0">TradingView 실시간 차트 · 심볼 <b>${escH(sym)}</b>${/^\d{6}$/.test(code)?"":" (미국 — 거래소 자동인식)"}</div>
+    <div class="tvwrap" style="height:420px;border-radius:10px;overflow:hidden">
+      <div class="tradingview-widget-container" style="height:100%;width:100%">
+        <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div></div></div>`;
+  const cont=e.querySelector(".tradingview-widget-container");
+  const s=document.createElement("script");   // innerHTML로는 script가 실행 안 돼 DOM으로 주입
+  s.type="text/javascript"; s.async=true;
+  s.src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+  s.text=JSON.stringify({symbol:sym,interval:"D",timezone:"Asia/Seoul",theme:dark?"dark":"light",
+    style:"1",locale:"kr",autosize:true,hide_side_toolbar:true,allow_symbol_change:false,
+    hide_volume:false,studies:["STD;SMA"]});
+  cont.appendChild(s);
 }
 async function addWatchModal(code,name){
   const r=await fetch("/watchlist",{method:"POST",headers:{"Content-Type":"application/json"},
