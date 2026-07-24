@@ -70,8 +70,13 @@ def normalize_watch_item(code: str, name: str = "") -> dict | None:
 
 class KISClient:
     def __init__(self):
-        # 조회 전용이므로 kis_quote_real면 실전 도메인 고정(예탁원 배당 등 모의도메인 미제공 대응).
-        self.base = _REAL if (settings.kis_quote_real or not settings.kis_paper) else _PAPER
+        # 이중 앱키: 실전 조회키가 있으면 시세/재무/해외는 실전 도메인(안정, 모의 500 회피),
+        # 주문은 별도(모의계좌면 모의 도메인+모의키). 실전키 없으면 기존 로직.
+        self._has_real = bool(settings.kis_real_app_key and settings.kis_real_app_secret)
+        if self._has_real:
+            self.base = _REAL
+        else:
+            self.base = _REAL if (settings.kis_quote_real or not settings.kis_paper) else _PAPER
         # 주문은 계좌 종류를 따라감: 모의계좌(kis_paper=true)→vts, 실전→real.
         self.order_base = _PAPER if settings.kis_paper else _REAL
         self._tokens: dict[str, tuple[str, float]] = {}   # base → (token, 만료시각)
@@ -103,6 +108,15 @@ class KISClient:
     def enabled(self) -> bool:
         return bool(settings.kis_app_key and settings.kis_app_secret)
 
+    def _creds_for(self, base: str) -> tuple[str, str]:
+        """도메인별 앱키/시크릿 — 실전 도메인은 실전 조회키(있으면), 그 외는 주문 앱키.
+
+        앱키는 도메인 전용(실전키는 실전 도메인, 모의키는 모의 도메인에서만 토큰 발급).
+        """
+        if base == _REAL and self._has_real:
+            return settings.kis_real_app_key, settings.kis_real_app_secret
+        return settings.kis_app_key, settings.kis_app_secret
+
     async def _token_value(self, client: httpx.AsyncClient,
                            base: str | None = None) -> str:
         """도메인별 토큰(조회=base, 주문=order_base가 다를 수 있어 base 단위 캐시)."""
@@ -119,10 +133,10 @@ class KISClient:
             if now < self._retry_after:
                 # KIS는 토큰 발급을 1분당 1회로 제한 → 실패 후 60초는 재요청 금지(스팸 방지).
                 raise RuntimeError("KIS 토큰 재발급 대기(1분당 1회 제한)")
+            key, secret = self._creds_for(base)
             r = await client.post(f"{base}/oauth2/tokenP", json={
                 "grant_type": "client_credentials",
-                "appkey": settings.kis_app_key,
-                "appsecret": settings.kis_app_secret,
+                "appkey": key, "appsecret": secret,
             })
             d = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
             if "access_token" not in d:
@@ -136,11 +150,13 @@ class KISClient:
             self._retry_after = 0.0
             return token
 
-    def _headers(self, token: str, tr_id: str) -> dict:
+    def _headers(self, token: str, tr_id: str, base: str | None = None) -> dict:
+        # appkey/시크릿은 토큰을 발급한 도메인과 반드시 일치해야 한다(도메인 전용).
+        key, secret = self._creds_for(base or self.base)
         return {
             "authorization": f"Bearer {token}",
-            "appkey": settings.kis_app_key,
-            "appsecret": settings.kis_app_secret,
+            "appkey": key,
+            "appsecret": secret,
             "tr_id": tr_id,
             "custtype": "P",
         }
@@ -315,7 +331,7 @@ class KISClient:
         await self._throttle()
         r = await client.post(
             f"{self.order_base}/uapi/domestic-stock/v1/trading/order-cash",
-            headers=self._headers(token, tr_id), json=body)
+            headers=self._headers(token, tr_id, self.order_base), json=body)
         r.raise_for_status()
         d = self._check_rt(r.json(), f"주문 {side} {code}")
         if d.get("rt_cd") != "0":
@@ -347,7 +363,7 @@ class KISClient:
         await self._throttle()
         r = await client.get(
             f"{self.order_base}/uapi/domestic-stock/v1/trading/inquire-balance",
-            headers=self._headers(token, tr_id), params=params)
+            headers=self._headers(token, tr_id, self.order_base), params=params)
         r.raise_for_status()
         return parse_balance(self._check_rt(r.json(), "잔고조회"))
 
@@ -386,7 +402,7 @@ class KISClient:
         await self._throttle()
         r = await client.post(
             f"{self.order_base}/uapi/overseas-stock/v1/trading/order",
-            headers=self._headers(token, tr_id), json=body)
+            headers=self._headers(token, tr_id, self.order_base), json=body)
         r.raise_for_status()
         d = self._check_rt(r.json(), f"해외주문 {side} {code}")
         if d.get("rt_cd") != "0":

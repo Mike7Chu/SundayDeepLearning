@@ -32,10 +32,14 @@ class Settings(BaseSettings):
     market_price_interval_sec: float = 300.0   # 유니버스 전체 가격 스윕(토스 200종목/콜)
 
     # 한국투자증권(KIS) — 키 없으면 주식 수집 비활성
-    kis_app_key: str = ""
+    kis_app_key: str = ""                # 주문 계좌용 앱키(모의계좌면 모의 앱키)
     kis_app_secret: str = ""
+    # 실전 조회 전용 앱키(선택) — 있으면 시세·재무·해외를 실전 도메인(안정)으로.
+    # 모의 앱키로 주문 + 실전 앱키로 조회를 '둘 다' 쓰는 이상적 구성. 없으면 kis_app_key로.
+    kis_real_app_key: str = ""
+    kis_real_app_secret: str = ""
     kis_account: str = ""
-    kis_paper: bool = True               # True=모의투자 도메인
+    kis_paper: bool = True               # True=모의투자 도메인(주문)
     # 시세/일봉/배당은 조회 전용이라 실전 도메인이 완전(예탁원 배당 등은 모의도메인 미제공).
     # 이 앱은 KIS를 조회로만 쓰므로(매매=토스) 기본 True=실전 도메인 조회. 모의 앱키만
     # 있으면 False로. True면 kis_paper와 무관하게 조회를 실전 도메인으로.

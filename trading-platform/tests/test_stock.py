@@ -25,6 +25,26 @@ def test_kis_disabled_without_keys():
     assert KISClient().enabled is False
 
 
+def test_kis_dual_key_creds(monkeypatch):
+    # 실전 조회키 + 모의 주문키 '둘 다' — 도메인별로 맞는 앱키를 쓴다.
+    from collector.stock import kis as k
+    monkeypatch.setattr(k.settings, "kis_app_key", "PAPERKEY")
+    monkeypatch.setattr(k.settings, "kis_app_secret", "ps")
+    monkeypatch.setattr(k.settings, "kis_real_app_key", "REALKEY")
+    monkeypatch.setattr(k.settings, "kis_real_app_secret", "rs")
+    monkeypatch.setattr(k.settings, "kis_paper", True)
+    c = k.KISClient()
+    assert c._has_real and c.base == k._REAL          # 시세는 실전 도메인
+    assert c.order_base == k._PAPER                    # 주문은 모의 도메인
+    assert c._creds_for(k._REAL) == ("REALKEY", "rs")     # 실전 도메인 → 실전키
+    assert c._creds_for(k._PAPER) == ("PAPERKEY", "ps")   # 모의 도메인 → 주문키
+    # 실전키 없으면 모든 도메인에서 주문키 사용(단일 키 모드)
+    monkeypatch.setattr(k.settings, "kis_real_app_key", "")
+    c2 = k.KISClient()
+    assert not c2._has_real
+    assert c2._creds_for(k._REAL) == ("PAPERKEY", "ps")
+
+
 def test_parse_balance():
     # 순자산(nass_amt)=총자산, 예수금(dnca_tot_amt)=현금
     payload = {"output2": [{"dnca_tot_amt": "4980000", "nass_amt": "10120000",
