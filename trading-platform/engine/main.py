@@ -106,12 +106,35 @@ async def _trade_assets(redis: aioredis.Redis,
         try:
             async with httpx.AsyncClient(timeout=15) as c:
                 bal = await kis.fetch_balance(c)
-            if bal.get("total_eval") is not None:
-                return bal["total_eval"], bal.get("cash")
+                total, cash = bal.get("total_eval"), bal.get("cash")
+                # 미장 리허설이 켜져 있으면 해외(USD) 평가·예수금을 환율 환산해 합산.
+                if settings.us_auto_enabled and total is not None:
+                    try:
+                        ob = await kis.fetch_overseas_balance(c)
+                        fx = await _fx_rate(redis)
+                        if fx and ob.get("eval"):
+                            total += ob["eval"] * fx
+                            if cash is not None and ob.get("cash"):
+                                cash += ob["cash"] * fx
+                    except Exception:
+                        pass                          # 해외잔고 실패 → 국내만(무회귀)
+            if total is not None:
+                return total, cash
         except Exception as exc:
             logger.warning("[DATA_ERROR] KIS 모의잔고 조회 실패: %s", exc)
         return None, None
     return await _assets(redis)
+
+
+async def _fx_rate(redis: aioredis.Redis) -> float | None:
+    """USD/KRW 환율(fx:usdkrw). 없으면 None."""
+    raw = await redis.get(FX_USDKRW_KEY)
+    if not raw:
+        return None
+    try:
+        return float(json.loads(raw).get("rate") or 0) or None
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
 
 
 async def _update_risk(redis: aioredis.Redis, sender: TelegramSender,

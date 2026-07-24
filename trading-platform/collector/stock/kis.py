@@ -367,6 +367,31 @@ class KISClient:
         r.raise_for_status()
         return parse_balance(self._check_rt(r.json(), "잔고조회"))
 
+    async def fetch_overseas_balance(self, client: httpx.AsyncClient,
+                                     exchange: str = "NASD",
+                                     currency: str = "USD") -> dict:
+        """해외(미국) 잔고 요약 → {eval, cash}(외화, 보통 USD). 모의 tr_id VTTS3012R.
+
+        미장 리허설 리스크 실드·사이징에 US 계좌를 반영하기 위함(호출부에서 환율 환산).
+        output 필드는 KIS 문서 기준·방어적 파싱 — Pi 검증(다르면 rt_cd/필드 확인).
+        """
+        if "-" not in (settings.kis_account or ""):
+            raise RuntimeError("KIS_ACCOUNT 미설정/형식 오류(예: 12345678-01)")
+        cano, prdt = settings.kis_account.split("-", 1)
+        tr_id = "VTTS3012R" if settings.kis_paper else "TTTS3012R"
+        token = await self._token_value(client, self.order_base)
+        params = {
+            "CANO": cano.strip(), "ACNT_PRDT_CD": prdt.strip(),
+            "OVRS_EXCG_CD": exchange, "TR_CRCY_CD": currency,
+            "CTX_AREA_FK200": "", "CTX_AREA_NK200": "",
+        }
+        await self._throttle()
+        r = await client.get(
+            f"{self.order_base}/uapi/overseas-stock/v1/trading/inquire-balance",
+            headers=self._headers(token, tr_id, self.order_base), params=params)
+        r.raise_for_status()
+        return parse_overseas_balance(self._check_rt(r.json(), "해외잔고"))
+
     async def place_overseas_order(self, client: httpx.AsyncClient, *, code: str,
                                    side: str, qty: int, price: float,
                                    exchange: str = "NASD") -> dict:
@@ -528,6 +553,38 @@ def parse_stability_ratio(output) -> dict:
     """안정성비율(FHKST66430600) → {debt_ratio(부채비율), period}. 필드: lblt_rate."""
     r = _fin_latest(output)
     return {"debt_ratio": _f(r.get("lblt_rate")), "period": r.get("stac_yymm")}
+
+
+def parse_overseas_balance(payload: dict) -> dict:
+    """해외잔고 응답 → {eval(평가액,외화), cash(예수금,외화)}. 방어적 필드 매칭.
+
+    output2(요약)에서 평가금액합계·외화예수금을 여러 후보 필드로 시도(문서 편차 대비).
+    값 없으면 None → 호출부는 국내 잔고만으로 폴백(무회귀).
+    """
+    if not isinstance(payload, dict):
+        return {"eval": None, "cash": None}
+    out2 = payload.get("output2")
+    if isinstance(out2, list):
+        row = out2[0] if out2 else {}
+    elif isinstance(out2, dict):
+        row = out2
+    else:
+        row = {}
+
+    def _n(*keys: str) -> float | None:
+        for k in keys:
+            v = row.get(k)
+            if v not in (None, ""):
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    continue
+        return None
+
+    ev = _n("evlu_amt_smtl_amt", "tot_evlu_amt", "ovrs_tot_evlu_amt",
+            "frcr_evlu_tota", "tot_asst_amt")
+    cash = _n("frcr_dncl_amt_2", "frcr_dncl_amt1", "frcr_dncl_amt", "dncl_amt")
+    return {"eval": ev, "cash": cash}
 
 
 def parse_balance(payload: dict) -> dict:

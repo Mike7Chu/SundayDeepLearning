@@ -6,6 +6,7 @@ from collector.stock.kis import (
     load_watchlist,
     parse_balance,
     parse_growth_ratio,
+    parse_overseas_balance,
     parse_overseas_daily,
     parse_overseas_price,
     parse_stability_ratio,
@@ -94,3 +95,13 @@ def test_parse_finance_ratios():
     # 빈/딕셔너리 입력 방어
     assert parse_growth_ratio([])["rev_yoy"] is None
     assert parse_stability_ratio({"lblt_rate": "100"})["debt_ratio"] == 100.0
+
+
+def test_parse_overseas_balance():
+    payload = {"output2": [{"evlu_amt_smtl_amt": "12000.50", "frcr_dncl_amt_2": "3000"}]}
+    b = parse_overseas_balance(payload)
+    assert b["eval"] == 12000.50 and b["cash"] == 3000.0
+    # 후보 필드 폴백(문서 편차)
+    alt = parse_overseas_balance({"output2": {"tot_asst_amt": "5000"}})
+    assert alt["eval"] == 5000.0
+    assert parse_overseas_balance({}) == {"eval": None, "cash": None}
