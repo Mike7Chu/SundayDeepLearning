@@ -126,6 +126,8 @@ class SecClient:
                                      cik: int) -> dict | None:
         r = await client.get(_FACTS_URL.format(cik=cik), headers=_headers(),
                              timeout=25)
+        if r.status_code == 404:
+            return None          # ETF·리츠 등은 XBRL 재무 없음 — 정상(에러 아님)
         r.raise_for_status()
         return parse_quarterly_net_income(r.json())
 
@@ -133,5 +135,7 @@ class SecClient:
                                    cik: int) -> dict | None:
         r = await client.get(_SUBS_URL.format(cik=cik), headers=_headers(),
                              timeout=20)
+        if r.status_code == 404:
+            return None
         r.raise_for_status()
         return find_us_earnings_flash(r.json())
