@@ -7,10 +7,34 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from api.redis_client import get_redis
+from api.services.cost_model import cost_drag_pct
 from api.services.journal import _quote, record_trade, review
+from api.services.stats import summarize
 from shared.redis_keys import JOURNAL_KEY
 
 router = APIRouter()
+
+
+@router.get("/stats")
+async def trade_stats() -> dict:
+    """매매 성적표 — 실현 왕복손익 집계(승률·손익비·MDD) + gross vs net(비용 차감).
+
+    net이 gross보다 얼마나 깎이는지로 '비용 함정'을 드러낸다(초단타일수록 큼).
+    cost_drag = 왕복 1회 본전 비용%(이만큼은 벌어야 본전).
+    """
+    redis = get_redis()
+    entries = []
+    for raw in await redis.lrange(JOURNAL_KEY, 0, -1):
+        try:
+            e = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if e.get("code") and e.get("price") and e.get("qty"):
+            entries.append(e)
+    s = summarize(entries)
+    s["cost_drag_kr"] = cost_drag_pct(kr=True)
+    s["cost_drag_us"] = cost_drag_pct(kr=False)
+    return s
 
 
 class JournalIn(BaseModel):

@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     alert_cooldown_sec: float = 21600.0      # 보유 손절/익절 알림 종목당 최소 간격(스팸 억제, 6h)
     auto_retry_sec: float = 1800.0           # 자동매수 '실패' 후 재시도 대기(성공은 쿨다운 7일)
     entry_chase_band_pct: float = 4.0        # 추천가 대비 이 %내면 현재가 매수, 초과면 눌림목 대기(추격 방지)
+    # 매매 비용(성적 순손익 계산 — 모의가 실전을 속이지 않게). 단위 %.
+    kr_sell_tax_pct: float = 0.18            # 국내 증권거래세+농특세(매도만)
+    us_sell_fee_pct: float = 0.001           # 미국 SEC/TAF 수수료(매도만, 미미)
+    brokerage_pct: float = 0.015             # 위탁수수료(매수·매도 양방향, 온라인 대략)
+    slippage_pct: float = 0.10               # 슬리피지 추정(양방향) — 초단타일수록 치명적
 
     # 전체 시장 스크리너: 유니버스 펀더멘털 수집(배치·느린 주기, KIS 레이트리밋 대비)
     market_scan_interval_sec: float = 1800.0  # 유니버스 1바퀴 목표 주기(KIS 펀더멘털·수급 감지)
