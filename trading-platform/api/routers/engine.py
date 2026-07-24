@@ -94,6 +94,8 @@ async def engine_state() -> dict:
             "paper": settings.kis_paper,
             "us_enabled": settings.us_auto_enabled,
             "kis_trading": settings.kis_trading_enabled,
+            "day_trade": settings.day_trade_enabled,
+            "scalp": settings.scalp_experiment,      # 초단타 실험(모의 전용)
         },
         "enabled": bool(risk),
     }

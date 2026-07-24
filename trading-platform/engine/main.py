@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime, timedelta
 
 import httpx
 import redis.asyncio as aioredis
@@ -37,8 +38,10 @@ from engine.risk import evaluate_risk
 from engine.screener import final_score, quant_filter
 from engine.telegram_cmd import command_loop
 from notifier.telegram import TelegramSender
+from engine.intraday import add_tick, intraday_signal, krx_intraday
 from shared.redis_keys import (
     ASSET_HIST_KEY,
+    DAY_POS_KEY,
     ENGINE_ALERTS_KEY,
     ENGINE_TRAIL_KEY,
     ENGINE_AUTO_KEY,
@@ -58,6 +61,7 @@ from shared.redis_keys import (
     TOSS_ACCOUNT_KEY,
     TOSS_HOLDINGS_KEY,
     fwd_scores_key,
+    stock_intraday_key,
     stock_ohlcv_key,
 )
 from shared.settings import settings
@@ -694,6 +698,98 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
                           f"손절 ${b.get('stop') or 0:,.2f} · 목표 ${b.get('target') or 0:,.2f}")
 
 
+async def _day_trade_loop(redis: aioredis.Redis, kis, toss: TossClient,
+                          sender: TelegramSender) -> None:
+    """데이 스윙(분~시간) — 장중 분봉 신호 진입 + 익절/손절/장마감 청산. 옵트인(기본 OFF).
+
+    scalp_experiment면 더 빠른 주기로 같은 로직(초단타 실험 — 실전 금지·모의 전용).
+    거래가 잦아 비용에 민감 → 성적표 net(비용 차감)으로만 판단할 것.
+    """
+    scalp = settings.scalp_experiment
+    if not (settings.auto_trade_enabled and (settings.day_trade_enabled or scalp)):
+        return
+    if scalp and not settings.kis_paper:
+        logger.warning("[scalp] 초단타 실험은 모의(KIS_PAPER=true) 전용 — 비활성")
+        return
+    interval = settings.scalp_interval_sec if scalp else settings.day_trade_interval_sec
+    tag = "scalp" if scalp else "day"
+    logger.info("[%s] 데이%s 루프 시작(주기 %.0fs)", tag,
+                "(초단타 실험)" if scalp else " 스윙", interval)
+    while True:
+        try:
+            now = datetime.utcnow() + timedelta(hours=9)   # KST
+            state = krx_intraday(now)
+            if state != "closed":
+                await _day_cycle(redis, kis, toss, sender, state, scalp, tag)
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] %s 루프 실패: %s", tag, exc)
+        await asyncio.sleep(interval)
+
+
+async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
+                     sender: TelegramSender, state: str, scalp: bool,
+                     tag: str) -> None:
+    """분봉 갱신 + (진입가능 구간) 신호 진입 + 보유 데이포지션 익절/손절/장마감 청산."""
+    watch = await effective_watchlist(redis)
+    codes = [w["code"] for w in watch if is_kr_code(w["code"])][:41]
+    names = {w["code"]: w.get("name", "") for w in watch}
+    pos = await _json_get(redis, DAY_POS_KEY)
+    broker = settings.auto_trade_broker
+    budget = settings.kis_max_order_krw if broker == "kis" else settings.toss_max_order_krw
+    icon = "⚡초단타" if scalp else "📈데이"
+    changed = False
+    for code in codes:
+        live = await _live_price(redis, code)
+        if not live or live <= 0:
+            continue
+        key = stock_intraday_key(code)
+        raw = await redis.get(key)
+        try:
+            bars = json.loads(raw) if raw else []
+        except (json.JSONDecodeError, TypeError):
+            bars = []
+        bars = add_tick(bars, live, time.time(), settings.intraday_bar_sec)
+        await redis.set(key, json.dumps(bars), ex=3600)
+
+        if code in pos:                                    # 보유 데이포지션 → 청산 판정
+            p = pos[code]
+            entry = p.get("entry") or live
+            ret = (live / entry - 1) * 100
+            reason = None
+            if state == "flatten":
+                reason = "장마감 정리"
+            elif ret >= settings.day_trade_take_pct:
+                reason = f"익절 +{ret:.1f}%"
+            elif ret <= -settings.day_trade_stop_pct:
+                reason = f"손절 {ret:.1f}%"
+            if reason:
+                ok, msg = await place_gated_order(
+                    redis, side="SELL", code=code, qty=p.get("qty") or 1,
+                    price=live, broker=broker, kis=kis, toss=toss)
+                if ok:
+                    pos.pop(code, None)
+                    changed = True
+                    await sender.send(f"{icon} 청산 {names.get(code, code)}({code}) "
+                                      f"{p.get('qty')}주 @{live:,.0f}원 · {reason}\n{msg}")
+        elif state == "entry" and len(pos) < settings.day_max_positions:
+            sig = intraday_signal(bars)
+            if sig.get("action") != "buy":
+                continue
+            qty = int(budget // live)
+            if qty < 1:
+                continue
+            ok, msg = await place_gated_order(
+                redis, side="BUY", code=code, qty=qty, price=live,
+                broker=broker, kis=kis, toss=toss)
+            if ok:
+                pos[code] = {"entry": live, "qty": qty, "ts": time.time()}
+                changed = True
+                await sender.send(f"{icon} 진입 {names.get(code, code)}({code}) "
+                                  f"{qty}주 @{live:,.0f}원 · {sig.get('reason')}\n{msg}")
+    if changed:
+        await redis.set(DAY_POS_KEY, json.dumps(pos, ensure_ascii=False))
+
+
 async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
     """빛의기둥(수급 포착) — 관심+보유 종목의 최신 일봉 검사, 종목당 하루 1회 알림.
 
@@ -750,6 +846,7 @@ async def run() -> None:
         await asyncio.gather(
             _cycle_loop(redis, sender, toss, kis),
             _guard_loop(redis, sender),       # 목표/손절 실시간 감시(20초)
+            _day_trade_loop(redis, kis, toss, sender),   # 데이 스윙/초단타(옵트인)
             command_loop(redis, toss, kis),   # 텔레그램 주문지시(확인 회신 필수)
         )
     finally:

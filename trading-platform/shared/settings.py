@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     us_sell_fee_pct: float = 0.001           # 미국 SEC/TAF 수수료(매도만, 미미)
     brokerage_pct: float = 0.015             # 위탁수수료(매수·매도 양방향, 온라인 대략)
     slippage_pct: float = 0.10               # 슬리피지 추정(양방향) — 초단타일수록 치명적
+    # 데이 스윙(Phase B) — 분~시간 보유. 기본 OFF(옵트인). 거래 잦아 net으로 검증 필수.
+    day_trade_enabled: bool = False
+    day_trade_interval_sec: float = 45.0     # 데이 루프 주기
+    intraday_bar_sec: int = 60               # 분봉 버킷(초)
+    day_max_positions: int = 3               # 동시 데이 포지션 상한
+    day_trade_take_pct: float = 1.5          # 데이 익절 목표(%)
+    day_trade_stop_pct: float = 1.0          # 데이 손절(%)
+    # 초단타 실험(Phase C) — 실전 영구 금지·모의 전용. 기본 OFF.
+    scalp_experiment: bool = False
+    scalp_interval_sec: float = 10.0
 
     # 전체 시장 스크리너: 유니버스 펀더멘털 수집(배치·느린 주기, KIS 레이트리밋 대비)
     market_scan_interval_sec: float = 1800.0  # 유니버스 1바퀴 목표 주기(KIS 펀더멘털·수급 감지)

@@ -103,3 +103,11 @@ def fwd_scores_key(date: str) -> str:
 def stock_ohlcv_key(code: str) -> str:
     """종목 일봉 시계열. value=json[{date, close, high, low, volume}] (오래된→최신)."""
     return f"stock:ohlcv:{code}"
+
+
+def stock_intraday_key(code: str) -> str:
+    """장중 분봉 시계열(데이 트레이딩). value=json[{t,o,h,l,c,v}] (오래된→최신)."""
+    return f"stock:intraday:{code}"
+
+
+DAY_POS_KEY = "engine:day_positions"     # 데이 포지션 스냅샷 {code:{entry,qty,ts,peak,scalp}}
