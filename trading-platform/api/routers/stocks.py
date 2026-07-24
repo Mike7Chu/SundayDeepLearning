@@ -73,13 +73,13 @@ async def stocks_all() -> dict:
         rows.sort(key=lambda r: r.get("change_pct") or 0, reverse=True)
         slim = [{k: r.get(k) for k in _COLS if r.get(k) is not None} for r in rows]
         return {"rows": slim, "total": len(slim)}
-    return await get_or_compute("stocks_all", 20, _build)
+    return await get_or_swr("stocks_all", 20, _build)   # 만료돼도 즉시 반환+백그라운드 갱신
 
 
 @router.get("/stocks/value")
 async def stocks_value(limit: int = 200) -> dict:
     """가치투자 스크리너(마법공식 랭킹). 전체 시장 수집분(stock:market) 기준, 상위 limit."""
-    return await get_or_compute(
+    return await get_or_swr(
         f"stocks_value:{limit}", 30,
         lambda: value_screener(get_redis(), limit=limit))
 
@@ -190,8 +190,8 @@ async def stocks_score(limit: int = 200) -> dict:
 
     전체 시장 스코어링(3,600+종목)은 Pi에서 수 초 — 30초 캐시로 화면 지연 방지.
     """
-    return await get_or_compute(f"stocks_score:{limit}", 30,
-                                lambda: _score_build(limit))
+    return await get_or_swr(f"stocks_score:{limit}", 30,
+                            lambda: _score_build(limit))
 
 
 async def _score_build(limit: int) -> dict:
@@ -239,7 +239,7 @@ async def stocks_signals() -> dict:
 @router.get("/stocks/dividend")
 async def stocks_dividend(monthly_budget: float = 0.0) -> dict:
     """배당수익률 랭킹 + (예산 지정 시) 정기 적립(DRIP) 제안. (전체 스캔 → 30초 캐시)"""
-    return await get_or_compute(
+    return await get_or_swr(
         f"stocks_dividend:{monthly_budget}", 30,
         lambda: dividend_view(get_redis(), monthly_budget))
 

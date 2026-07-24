@@ -22,7 +22,7 @@ async def load_quotes(redis: aioredis.Redis) -> list[dict]:
     3,600+종목 HGETALL+파싱은 Pi에서 수백 ms~수 초 — 여러 엔드포인트(전체종목·
     살까말까·저평가·배당)가 각자 스캔하지 않게 12초 공유 캐시(시세 스윕 주기보다 짧음).
     """
-    from api.services.cache import get_or_compute
+    from api.services.cache import get_or_swr
 
     async def _scan() -> list[dict]:
         merged: dict[str, dict] = {}
@@ -36,7 +36,8 @@ async def load_quotes(redis: aioredis.Redis) -> list[dict]:
                 if q.get("code"):
                     merged[q["code"]] = q
         return list(merged.values())
-    return await get_or_compute("load_quotes", 12, _scan)
+    # SWR: 만료돼도 즉시 stale 반환+백그라운드 갱신(요청 경로에서 3,600행 스캔 제거)
+    return await get_or_swr("load_quotes", 12, _scan)
 
 
 def _roe(eps: float | None, bps: float | None) -> float | None:
