@@ -4,7 +4,14 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # RDB 스냅샷 + 볼륨 = 재배포·재부팅해도 데이터 유지(포워드 로그·매매일지·자산
+    # 히스토리 등 '시간이 쌓여야 의미 있는' 데이터가 매 빌드마다 초기화되던 문제 해결).
+    # save 300 10 / 60 10000 = 5분내 10건 or 1분내 1만건 변경 시 dump.rdb 저장(+종료 시 저장).
+    # AOF 대신 RDB — SD카드 쓰기 마모를 줄이면서 재배포 생존 목적엔 충분(하드 크래시 시 마지막 몇 분만 손실).
+    command: ["redis-server", "--dir", "/data",
+              "--save", "300", "10", "--save", "60", "10000", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
     mem_limit: 256m
 
   collector:
@@ -77,3 +84,7 @@ services:
     depends_on:
       - redis
     mem_limit: 256m
+
+# Redis 영속 데이터(dump.rdb) — 재배포·재부팅해도 유지. 지우려면 `docker volume rm`.
+volumes:
+  redis-data:
