@@ -14,7 +14,7 @@ import httpx
 import redis.asyncio as aioredis
 
 from api.services.stock_signal import candle_trading_value, pillar_guide, pillar_precheck
-from collector.news.dart import DartClient, DartQuotaExceeded
+from collector.news.dart import DartClient, DartQuotaExceeded, ttm_fundamentals
 from collector.news.sec import SecClient
 from collector.stock.kis import (
     KISClient,
@@ -391,6 +391,23 @@ async def stock_history_loop(redis: aioredis.Redis,
                     if qg:
                         fields["ni_growth_q_pct"] = qg["growth"]
                         fields["ni_growth_q_label"] = qg["label"]
+                        # TTM(최근 4분기) EPS·ROE·PER — KIS 연간값의 '작년 말 고정' 극복.
+                        # 추가 DART 호출 없이 방금 받은 연간(fin)·분기(qg) payload로 계산.
+                        src = (await redis.hget(STOCK_QUOTE_KEY, code) if is_watch
+                               else await redis.hget(STOCK_MARKET_KEY, code))
+                        try:
+                            q0 = json.loads(src) if src else {}
+                        except (json.JSONDecodeError, TypeError):
+                            q0 = {}
+                        ttm = ttm_fundamentals(
+                            fin.get("ni"), qg.get("ni_cum"), qg.get("ni_prev_cum"),
+                            qg.get("equity") or fin.get("equity"),
+                            q0.get("market_cap"), q0.get("price"))
+                        for tk in ("eps_ttm", "roe_ttm", "per_ttm", "bps_ttm"):
+                            if ttm.get(tk) is not None:
+                                fields[tk] = ttm[tk]
+                        if ttm:
+                            fields["fin_period"] = qg["label"]   # 예 "2026.2Q" — 신선도 표시
                     if is_watch:              # FCF는 무거워 관심·보유만(온디맨드는 상세에서)
                         try:
                             fcf = await dart.fetch_fcf(dclient, corp,

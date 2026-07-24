@@ -54,8 +54,13 @@ def _earnings_yield(eps: float | None, price: float | None, per: float | None) -
 
 
 def _metrics(q: dict) -> dict:
-    eps, bps, price, per = q.get("eps"), q.get("bps"), q.get("price"), q.get("per")
-    roe = _roe(eps, bps)
+    # TTM(최근 4분기, DART 분기 반영) 우선 — 없으면 KIS 연간값 폴백.
+    # KIS eps/bps/per는 '직전 사업보고서(작년 말)' 고정이라 올해 실적이 안 잡힌다.
+    price = q.get("price")
+    eps = q.get("eps_ttm") if q.get("eps_ttm") is not None else q.get("eps")
+    bps = q.get("bps_ttm") if q.get("bps_ttm") is not None else q.get("bps")
+    per = q.get("per_ttm") if q.get("per_ttm") is not None else q.get("per")
+    roe = q.get("roe_ttm") if q.get("roe_ttm") is not None else _roe(eps, bps)
     ey = _earnings_yield(eps, price, per)
     quality = sum([
         eps is not None and eps > 0,          # 흑자
@@ -65,7 +70,8 @@ def _metrics(q: dict) -> dict:
     return {
         "code": q.get("code"), "name": q.get("name"), "price": price,
         "per": per, "pbr": q.get("pbr"), "roe": roe, "earnings_yield": ey,
-        "quality": quality,
+        "quality": quality, "ttm": q.get("eps_ttm") is not None,   # TTM 반영 여부
+        "fin_period": q.get("fin_period"),    # 반영 분기(예 "2026.2Q") — 신선도 표시
         # 최신 분기 실적(정기보고서 기준) — 화면에 '어느 분기 수치'인지 함께 표시
         "ni_growth_q_pct": q.get("ni_growth_q_pct"),
         "ni_growth_q_label": q.get("ni_growth_q_label"),

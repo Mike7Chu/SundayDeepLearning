@@ -39,6 +39,7 @@ class StockData(BaseModel):
     op_growth_pct: float | None = None     # 영업이익 YoY %(DART)
     debt_ratio: float | None = None        # 부채비율 %(부채총계/자본총계) — 100↓ 우량
     fcf_eok: float | None = None           # 잉여현금흐름 억원(영업CF−CAPEX)
+    fin_period: str | None = None          # PER/EPS/BPS 반영 분기(예 "2026.2Q") — TTM 신선도
     score: float | None = None        # 투자 매력도 0~100
     verdict: str | None = None        # 판정
     margin_pct: float | None = None   # 안전마진 %
@@ -57,10 +58,12 @@ def from_quote(quote: dict, news: list[str] | None = None) -> StockData:
         name=quote.get("name", ""),
         price=quote.get("price"),
         change_pct=quote.get("change_pct"),
-        per=quote.get("per"),
+        # TTM(최근 4분기, DART 분기 반영) 우선 — KIS 연간(작년 말) 고정값 극복.
+        per=quote.get("per_ttm") if quote.get("per_ttm") is not None else quote.get("per"),
         pbr=quote.get("pbr"),
-        eps=quote.get("eps"),
-        bps=quote.get("bps"),
+        eps=quote.get("eps_ttm") if quote.get("eps_ttm") is not None else quote.get("eps"),
+        bps=quote.get("bps_ttm") if quote.get("bps_ttm") is not None else quote.get("bps"),
+        fin_period=quote.get("fin_period"),
         market_cap=quote.get("market_cap"),
         high_52w=quote.get("high_52w"),
         low_52w=quote.get("low_52w"),
@@ -140,9 +143,9 @@ def format_for_prompt(d: StockData) -> str:
         f"종목: {d.name or '?'} ({d.code})",
         _fmt("현재가", d.price, "원"),
         _fmt("전일대비", d.change_pct, "%"),
-        _fmt("PER", d.per),
+        _fmt(f"PER({d.fin_period}·TTM)" if d.fin_period else "PER", d.per),
         _fmt("PBR", d.pbr),
-        _fmt("EPS", d.eps, "원"),
+        _fmt(f"EPS({d.fin_period}·TTM)" if d.fin_period else "EPS", d.eps, "원"),
         _fmt("BPS", d.bps, "원"),
         _fmt("시가총액", d.market_cap, "억원"),
         _fmt("52주최고", d.high_52w, "원"),

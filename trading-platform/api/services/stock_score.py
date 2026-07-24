@@ -33,12 +33,24 @@ def margin_of_safety(price: float | None, eps: float | None, bps: float | None) 
     return round((g - price) / g * 100, 1)
 
 
+def _ttm_vals(q: dict) -> tuple:
+    """(eps, bps, per, roe) — TTM(최근 4분기, DART 분기 반영) 우선, 없으면 KIS 연간 폴백.
+
+    KIS eps/bps/per는 직전 사업보고서(작년 말) 고정 → 올해 실적이 반영되도록 TTM 우선.
+    """
+    eps = q.get("eps_ttm") if q.get("eps_ttm") is not None else q.get("eps")
+    bps = q.get("bps_ttm") if q.get("bps_ttm") is not None else q.get("bps")
+    per = q.get("per_ttm") if q.get("per_ttm") is not None else q.get("per")
+    roe = q.get("roe_ttm") if q.get("roe_ttm") is not None else (
+        (eps / bps * 100) if (eps and bps) else None)
+    return eps, bps, per, roe
+
+
 def _value_axis(q: dict) -> tuple[float, list[str]]:
-    """가치 30점: 이익수익률·ROE·PBR·안전마진 (트레일링 기준 — 성장 축이 보완)."""
-    price, per, pbr = q.get("price"), q.get("per"), q.get("pbr")
-    eps, bps = q.get("eps"), q.get("bps")
+    """가치 30점: 이익수익률·ROE·PBR·안전마진 (TTM 우선, 성장 축이 보완)."""
+    price, pbr = q.get("price"), q.get("pbr")
+    eps, bps, per, roe = _ttm_vals(q)
     ey = (eps / price * 100) if (eps and price) else (100 / per if (per and per > 0) else None)
-    roe = (eps / bps * 100) if (eps and bps) else None
     mos = margin_of_safety(price, eps, bps)
     s_ey = _clamp(ey / 12) if ey is not None else 0.0          # EY 12%+ 만점
     s_roe = _clamp(roe / 15) if roe is not None else 0.0       # ROE 15%+ 만점
@@ -56,10 +68,9 @@ def _value_axis(q: dict) -> tuple[float, list[str]]:
 
 
 def _quality_axis(q: dict) -> tuple[float, list[str]]:
-    """품질 20점: 흑자·ROE·PBR·PER·안전마진 체크리스트."""
-    price, per, pbr = q.get("price"), q.get("per"), q.get("pbr")
-    eps, bps = q.get("eps"), q.get("bps")
-    roe = (eps / bps * 100) if (eps and bps) else None
+    """품질 20점: 흑자·ROE·PBR·PER·안전마진 체크리스트 (TTM 우선)."""
+    price, pbr = q.get("price"), q.get("pbr")
+    eps, bps, per, roe = _ttm_vals(q)
     mos = margin_of_safety(price, eps, bps)
     checks = [
         (eps is not None and eps > 0, "흑자"),

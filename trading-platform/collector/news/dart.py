@@ -157,11 +157,15 @@ def parse_financials(payload: dict) -> dict:
     반환 {debt_ratio, ni_yoy, rev_yoy, op_yoy} — 각 미상은 None.
     부채비율 = 부채총계/자본총계 ×100 (100 미만이면 무차입 우량 신호).
     """
-    out = {"debt_ratio": None, "ni_yoy": None, "rev_yoy": None, "op_yoy": None}
+    out = {"debt_ratio": None, "ni_yoy": None, "rev_yoy": None, "op_yoy": None,
+           "equity": None, "ni": None, "ni_prev": None}
     if not isinstance(payload, dict) or payload.get("status") != "000":
         return out
     rows = payload.get("list") or []
     debt, equity = _acct(rows, "부채총계"), _acct(rows, "자본총계")
+    out["equity"] = equity                             # 자본총계(원) — ROE·BPS 분모
+    out["ni"] = _acct(rows, "당기순이익", "thstrm_amount")       # 당기(연간=연NI/분기=YTD누적)
+    out["ni_prev"] = _acct(rows, "당기순이익", "frmtrm_amount")  # 전년 동기(분기면 전년 YTD)
     if debt is not None and equity and equity > 0:
         out["debt_ratio"] = round(debt / equity * 100, 1)
 
@@ -175,6 +179,43 @@ def parse_financials(payload: dict) -> dict:
     out["ni_yoy"] = _yoy("당기순이익")
     out["rev_yoy"] = _yoy("매출액")
     out["op_yoy"] = _yoy("영업이익")
+    return out
+
+
+def ttm_fundamentals(annual_ni: float | None, q_cum_ni: float | None,
+                     q_prev_cum_ni: float | None, equity: float | None,
+                     market_cap_eok: float | None,
+                     price: float | None) -> dict:
+    """최근 4개 분기(TTM) 기준 EPS·ROE·PER·BPS 계산(순수 함수).
+
+    KIS 시세의 EPS/BPS는 '직전 사업보고서(연간)' 기준이라 올해 분기 실적이 반영
+    안 됨. DART 분기 누적으로 TTM 순이익을 이어붙여 '현재' 밸류에이션을 만든다:
+
+        TTM 순이익 = 작년 연간 − 작년 동기 누적 + 올해 동기 누적
+        발행주식수 = 시가총액(원) / 현재가
+        EPS_ttm = TTM순이익/주식수,  ROE_ttm = TTM순이익/자본총계×100
+        PER_ttm = 현재가/EPS_ttm,    BPS_ttm = 자본총계/주식수
+
+    분기 데이터가 없으면(미공시) TTM 대신 연간값으로 폴백하도록 빈 dict 반환.
+    반환 {eps_ttm, roe_ttm, per_ttm, bps_ttm, ni_ttm_eok} — 계산 가능한 것만.
+    """
+    if not (annual_ni is not None and q_cum_ni is not None
+            and q_prev_cum_ni is not None):
+        return {}
+    ttm_ni = annual_ni - q_prev_cum_ni + q_cum_ni      # 원
+    out: dict = {"ni_ttm_eok": round(ttm_ni / 1e8, 1)}
+    shares = None
+    if market_cap_eok and price and price > 0:
+        shares = market_cap_eok * 1e8 / price          # 시총(억원→원)/현재가
+    if shares and shares > 0:
+        eps = ttm_ni / shares
+        out["eps_ttm"] = round(eps, 1)
+        if eps > 0 and price:
+            out["per_ttm"] = round(price / eps, 2)     # 적자면 PER 무의미 → 생략
+        if equity and equity > 0:
+            out["bps_ttm"] = round(equity / shares, 1)
+    if equity and equity > 0:
+        out["roe_ttm"] = round(ttm_ni / equity * 100, 1)
     return out
 
 
@@ -360,9 +401,13 @@ class DartClient:
                       "bsns_year": str(y), "reprt_code": reprt}
             r = await client.get(_FNLTT_URL, params=params, timeout=5)
             r.raise_for_status()
-            g = parse_net_income_growth(r.json())
+            payload = r.json()
+            g = parse_net_income_growth(payload)
             if g is not None:
-                return {"growth": g, "label": label}
+                fin = parse_financials(payload)   # 같은 payload에서 raw 금액(TTM 계산용)
+                return {"growth": g, "label": label,
+                        "ni_cum": fin.get("ni"), "ni_prev_cum": fin.get("ni_prev"),
+                        "equity": fin.get("equity")}
         return None
 
     async def fetch_flash_figures(self, client: httpx.AsyncClient,
