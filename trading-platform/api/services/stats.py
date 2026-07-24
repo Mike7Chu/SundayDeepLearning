@@ -74,7 +74,10 @@ def summarize(entries: list[dict]) -> dict:
         cum += r["net"]
         peak = max(peak, cum)
         mdd = min(mdd, cum - peak)
-    return {"n": n, "win_rate": round(len(wins) / n * 100, 1),
-            "gross": gross, "net": net, "cost": cost,
+    # 기대값(1회당 net 기대수익 %) = 승률×평균이익 + 패률×평균손실. 양수면 '엣지 있음'.
+    wr = len(wins) / n
+    exp_pct = round(wr * (avg_win or 0) + (1 - wr) * (avg_loss or 0), 2)
+    return {"n": n, "win_rate": round(wr * 100, 1),
+            "gross": gross, "net": net, "cost": cost, "expectancy_pct": exp_pct,
             "avg_win_pct": avg_win, "avg_loss_pct": avg_loss, "payoff": payoff,
             "mdd": round(mdd, 2), "open": max(0, open_lots)}

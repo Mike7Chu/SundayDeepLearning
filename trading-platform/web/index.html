@@ -954,7 +954,11 @@ function statsCardHTML(s){
   const drag=s?`왕복 본전비용 ~${numC(s.cost_drag_kr,2)}%/회(국내)·${numC(s.cost_drag_us,2)}%(미국)`:'';
   if(!s||!s.n) return `<div class="card"><h3>📊 매매 성적표</h3>
     <div class="num">매수→매도 '완료' 매매가 쌓이면 승률·손익비·비용차감 순손익이 표시돼요. 지금은 ${drag} — 이만큼은 벌어야 본전입니다.</div></div>`;
+  const edge=s.expectancy_pct;
   return `<div class="card"><h3>📊 매매 성적표 <span class="badge">${s.n}건 실현 · gross vs net</span></h3>
+    <div class="row" style="margin-bottom:4px"><span>1회당 기대값(net) <b class="${edge>0?'pos':'neg'}">${edge>0?'+':''}${numC(edge,2)}%</b>
+      <span class="badge ${edge>0?'pos':'sell'}">${edge>0?'엣지 있음 ✅':'엣지 없음 ❌'}</span></span>
+      <span class="num">${s.n<20?'표본 부족(20건+ 필요)':'표본 충분'}</span></div>
     <div class="row"><span>승률 <b>${numC(s.win_rate,0)}%</b></span>
       <span>손익비 <b>${s.payoff!=null?numC(s.payoff,2):'–'}</b></span>
       <span>MDD <b class="neg">${won(s.mdd)}</b></span></div>
