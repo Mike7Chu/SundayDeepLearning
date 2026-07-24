@@ -154,6 +154,20 @@ async def _closes(redis: aioredis.Redis, code: str) -> list:
         return []
 
 
+async def _auto_cooldown(redis: aioredis.Redis, code: str, now: float) -> bool:
+    """자동매수 재시도 억제 판정. 직전 주문이 성공이면 7일 잠금(중복매수 금지),
+    실패면 auto_retry_sec(짧게)만 대기 — '장시작전' 같은 일시 거부가 7일 잠기지 않게."""
+    raw = await redis.hget(ENGINE_AUTO_KEY, code)
+    if not raw:
+        return False
+    try:
+        rec = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    cd = settings.auto_trade_cooldown_sec if rec.get("ok") else settings.auto_retry_sec
+    return now - (rec.get("ts") or 0) < cd
+
+
 async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
                     sender: TelegramSender, risk: dict, rows: list[dict]) -> None:
     """자동매수(옵트인): 필터 통과 신규 종목을 추천 매수가에 지정가 주문.
@@ -176,13 +190,8 @@ async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
         code, entry = r["code"], r.get("entry")
         if not entry or code in held or r.get("trend_ok") is False:
             continue
-        raw = await redis.hget(ENGINE_AUTO_KEY, code)
-        if raw:
-            try:
-                if now - (json.loads(raw).get("ts") or 0) < settings.auto_trade_cooldown_sec:
-                    continue                     # 쿨다운 내 재매수 금지
-            except (json.JSONDecodeError, TypeError):
-                pass
+        if await _auto_cooldown(redis, code, now):   # 성공=7일 잠금 / 실패=짧게 재시도
+            continue
         # 수급 확인 게이트: 외인·기관이 '분산(순매도)' 중인 종목은 자동매수 보류.
         # (스마트머니가 파는데 규칙만 믿고 사지 않기 — 매수는 확인, 매도는 항상 허용 원칙과 일관.)
         if code.isdigit() and toss.enabled:
@@ -603,13 +612,8 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
         qty = b.get("qty")
         if not entry or not qty or qty < 1 or code in held or code.isdigit():
             continue
-        raw = await redis.hget(ENGINE_AUTO_KEY, code)
-        if raw:
-            try:
-                if now - (json.loads(raw).get("ts") or 0) < settings.auto_trade_cooldown_sec:
-                    continue
-            except (json.JSONDecodeError, TypeError):
-                pass
+        if await _auto_cooldown(redis, code, now):   # 성공=7일 잠금 / 실패=짧게 재시도
+            continue
         ok, msg = await place_gated_order(redis, side="BUY", code=code,
                                           qty=qty, price=entry, broker="kis",
                                           kis=kis, toss=None)
