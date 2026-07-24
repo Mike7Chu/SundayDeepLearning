@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     # 초단타 실험(Phase C) — 실전 영구 금지·모의 전용. 기본 OFF.
     scalp_experiment: bool = False
     scalp_interval_sec: float = 10.0
+    # 클로드 스윙 결정 에이전트 — 하루 N회 클로드가 최종 BUY/SELL/HOLD 판정(완전 위임).
+    # 기본 OFF·모의 전용(agent_live_enabled=true라야 실계좌 주문). 매수=후보 목록/매도=보유만.
+    agent_enabled: bool = False
+    agent_times: str = "09:40,14:30"         # 판정 시각(KST, HH:MM 콤마 구분)
+    agent_live_enabled: bool = False         # true라야 실계좌 주문(기본 모의 전용 잠금)
+    agent_max_buys: int = 3                  # 1회 실행당 신규 매수 상한
+    agent_check_interval_sec: float = 300.0  # 스케줄 확인 주기(초)
 
     # 전체 시장 스크리너: 유니버스 펀더멘털 수집(배치·느린 주기, KIS 레이트리밋 대비)
     market_scan_interval_sec: float = 1800.0  # 유니버스 1바퀴 목표 주기(KIS 펀더멘털·수급 감지)

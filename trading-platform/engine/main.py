@@ -39,7 +39,10 @@ from engine.screener import final_score, quant_filter
 from engine.telegram_cmd import command_loop
 from notifier.telegram import TelegramSender
 from engine.intraday import add_tick, intraday_signal, krx_intraday
+from engine.agent import build_context, due_slots, parse_slots
 from shared.redis_keys import (
+    AGENT_DONE_KEY,
+    AGENT_LAST_KEY,
     ASSET_HIST_KEY,
     DAY_POS_KEY,
     ENGINE_ALERTS_KEY,
@@ -847,6 +850,163 @@ async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
         logger.info("[pillar] %s %.0f억 x%.1f", code, lp["value_eok"], lp["surge_x"])
 
 
+# ── 클로드 스윙 결정 에이전트(완전 위임 · 게이트는 집행 안전벽) ──────────────
+async def _agent_buy(redis: aioredis.Redis, kis, row: dict, risk: dict,
+                     fx: float | None, now: float) -> tuple:
+    """에이전트 매수 1건 — 하이브리드 진입가 + 한도 내 수량으로 게이트 주문.
+
+    수량·가격·한도는 엔진이 산정(안전). 반환 (ok|None, msg, note). None=스킵(쿨다운·과확장·수량0).
+    """
+    code, entry = row["code"], row.get("entry")
+    if not entry:
+        return None, "", ""
+    if await _auto_cooldown(redis, code, now):
+        return None, "쿨다운", ""
+    live = await _live_price(redis, code) or row.get("price")
+    dec = entry_decision(entry, live, settings.entry_chase_band_pct)
+    if dec is None:
+        logger.info("[agent] %s 과확장(현재 %s>추천 %.2f) — 눌림목 대기", code, live, entry)
+        return None, "과확장", ""
+    order_price, note = dec
+    max_order = settings.kis_max_order_krw
+    budget = min(risk.get("per_stock_cap") or max_order, max_order)
+    if code.isdigit():                                   # 국내(원)
+        qty = int(budget // order_price)
+    elif fx:                                             # 미국(USD, 한도 원화 환산)
+        qty = int((budget / fx) // order_price)
+    else:
+        return None, "환율 미확보", ""
+    if qty < 1:
+        return None, "한도내 1주 불가", ""
+    ok, msg = await place_gated_order(redis, side="BUY", code=code, qty=qty,
+                                      price=order_price, broker="kis", kis=kis, toss=None)
+    await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
+        {"ts": now, "ok": ok, "qty": qty, "price": order_price, "broker": "agent"},
+        ensure_ascii=False))
+    cur = "$" if not code.isdigit() else ""
+    return ok, msg, f"{qty:g}주 @{cur}{order_price:g}({note})"
+
+
+async def _agent_sell(redis: aioredis.Redis, kis, code: str, hold: dict,
+                      want_qty) -> tuple:
+    """에이전트 매도 1건 — 보유 수량 내에서 실시간가 지정가 게이트 주문.
+
+    모의(KIS_PAPER)에선 보유 스냅샷이 토스 실계좌 기준이라, 모의계좌에 없는 종목은
+    KIS가 rt_cd로 거부(무해). 반환 (ok|None, msg, note).
+    """
+    held_qty = hold.get("quantity") or 0
+    if held_qty < 1:
+        return None, "미보유", ""
+    qty = min(int(want_qty), int(held_qty)) if want_qty else int(held_qty)
+    if qty < 1:
+        return None, "수량0", ""
+    live = await _live_price(redis, code) or hold.get("last_price") or hold.get("price")
+    if not live or live <= 0:
+        return None, "시세 없음", ""
+    ok, msg = await place_gated_order(redis, side="SELL", code=code, qty=qty,
+                                      price=live, broker="kis", kis=kis, toss=None)
+    cur = "$" if not code.isdigit() else ""
+    return ok, msg, f"{qty:g}주 @{cur}{live:g}"
+
+
+async def _agent_run(redis: aioredis.Redis, kis, toss: TossClient,
+                     sender: TelegramSender, slot: str) -> None:
+    """스윙 결정 1회 — 플랜(후보/매도점검)+보유+리스크를 클로드에게 넘겨 최종 판정·집행.
+
+    안전: 매수는 후보 목록 안 종목만, 매도는 보유 종목만(환각·임의주문 차단).
+    실계좌 주문은 agent_live_enabled=true라야 — 기본 모의 전용.
+    """
+    if not settings.kis_paper and not settings.agent_live_enabled:
+        logger.warning("[agent] 실계좌 모드 — agent_live_enabled=false라 스킵(모의 전용)")
+        return
+    plan = await _json_get(redis, ENGINE_PLAN_KEY)
+    risk = await _json_get(redis, ENGINE_RISK_KEY)
+    hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
+    holdings = hold.get("holdings", [])
+    if not (plan.get("buys") or holdings):
+        logger.info("[agent/%s] 후보·보유 모두 없음 — 스킵", slot)
+        return
+    asset, _cash = await _trade_assets(redis, kis)
+    ctx = build_context(plan, holdings, risk, asset, risk.get("cash_pct"),
+                        plan.get("style") or "")
+    from research.analyst import Analyst
+    result = await Analyst().decide(ctx)
+    decisions = result.get("decisions", [])
+    mv = result.get("market_view", "")
+    logger.info("[agent/%s] 결정 %d건 · 시장뷰: %s", slot, len(decisions), mv[:80])
+
+    buy_rows = {b["code"]: b for b in (plan.get("buys") or []) if b.get("code")}
+    held = {h.get("symbol"): h for h in holdings if h.get("symbol")}
+    fx = await _fx_rate(redis)
+    now = time.time()
+    acted: list[str] = []
+    buys_done = 0
+    for d in decisions:
+        act, code = d["action"], d["code"]
+        reason = (d.get("reason") or "")[:70]
+        if act == "BUY":
+            if buys_done >= settings.agent_max_buys:
+                continue
+            row = buy_rows.get(code)
+            if not row:                                  # 후보 밖 매수 = 환각 → 차단
+                logger.info("[agent] BUY %s 후보 목록 밖 — 무시", code)
+                continue
+            if code in held:
+                continue
+            if risk.get("buy_lock") and not _paper_auto():
+                continue
+            ok, msg, note = await _agent_buy(redis, kis, row, risk, fx, now)
+            if ok is None:
+                continue
+            acted.append(f"🟢 매수 {'✅' if ok else '🚫'} {row.get('name')}({code}) "
+                         f"{note} — {reason}\n   {msg}")
+            if ok:
+                buys_done += 1
+        elif act == "SELL":
+            h = held.get(code)
+            if not h:
+                logger.info("[agent] SELL %s 미보유 — 무시", code)
+                continue
+            ok, msg, note = await _agent_sell(redis, kis, code, h, d.get("qty"))
+            if ok is None:
+                continue
+            acted.append(f"🔴 매도 {'✅' if ok else '🚫'} {h.get('name') or code}({code}) "
+                         f"{note} — {reason}\n   {msg}")
+        # HOLD → 행동 없음
+
+    await redis.set(AGENT_LAST_KEY, json.dumps(
+        {"slot": slot, "ts": now, "market_view": mv, "n": len(decisions),
+         "acted": len(acted), "paper": settings.kis_paper}, ensure_ascii=False))
+    tag = "·모의" if settings.kis_paper else "·실계좌"
+    body = "\n".join(acted) if acted else "관망 — 신규 매매 없음(확신 부족/현금 보유)"
+    await sender.send(f"🤖 스윙 에이전트 판정({slot}{tag}) — 완전위임\n"
+                      f"📊 {mv or '시장뷰 없음'}\n\n{body}")
+
+
+async def _agent_loop(redis: aioredis.Redis, kis, toss: TossClient,
+                      sender: TelegramSender) -> None:
+    """하루 N회(agent_times, KST) 클로드 스윙 결정 실행. 기본 OFF(agent_enabled)."""
+    if not settings.agent_enabled:
+        return
+    slots = parse_slots(settings.agent_times)
+    if not slots:
+        logger.warning("[agent] agent_times 파싱 실패(%s) — 비활성", settings.agent_times)
+        return
+    logger.info("[agent] 스윙 결정 에이전트 시작 — 하루 %d회 %s(KST)%s",
+                len(slots), slots, " ·모의" if settings.kis_paper else " ·실계좌")
+    while True:
+        try:
+            now = datetime.utcnow() + timedelta(hours=9)          # KST
+            today, now_hm = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
+            fired = await _json_get(redis, AGENT_DONE_KEY)
+            for slot in due_slots(now_hm, slots, fired, today):
+                await redis.hset(AGENT_DONE_KEY, slot, today)      # 먼저 마킹(중복 방지)
+                await _agent_run(redis, kis, toss, sender, slot)
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] agent 루프 실패: %s", exc)
+        await asyncio.sleep(settings.agent_check_interval_sec)
+
+
 async def run() -> None:
     from collector.stock.kis import KISClient
 
@@ -865,6 +1025,7 @@ async def run() -> None:
             _cycle_loop(redis, sender, toss, kis),
             _guard_loop(redis, sender),       # 목표/손절 실시간 감시(20초)
             _day_trade_loop(redis, kis, toss, sender),   # 데이 스윙/초단타(옵트인)
+            _agent_loop(redis, kis, toss, sender),        # 클로드 스윙 결정(하루 N회·옵트인)
             command_loop(redis, toss, kis),   # 텔레그램 주문지시(확인 회신 필수)
         )
     finally:

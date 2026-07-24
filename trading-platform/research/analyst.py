@@ -214,6 +214,50 @@ class Analyst:
         return {"enabled": True, "mode": mode, "model": self.model,
                 "ts": time.time(), "report": report.strip()}
 
+    async def decide(self, context: str) -> dict:
+        """스윙 결정 에이전트: 후보/보유 컨텍스트 → 최종 BUY/SELL/HOLD(JSON).
+
+        완전 위임이되 안전 규율: **매수는 후보 목록 안 종목만, 매도는 보유 종목만.**
+        수량·가격·한도는 엔진이 집행하므로 여기선 '무엇을 할지'만 판단. 웹검색으로
+        최신 실적·촉매를 반영. 파싱은 engine.agent.parse_decisions(순수).
+        반환 {market_view, decisions:[{action,code,conviction,reason}], mode, ts}.
+        """
+        from engine.agent import parse_decisions   # 순수 파서(순환 import 방지 지연)
+        mode = self.mode
+        if mode is None:
+            return {"enabled": False, "market_view": "", "decisions": [],
+                    "mode": None, "ts": time.time()}
+        prompt = (
+            "당신은 이 계좌를 운용하는 스윙 트레이더입니다. 아래는 정량필터를 통과한 "
+            "'매수 후보'와 현재 '보유 종목'입니다. 오늘의 최종 매매를 결정하세요.\n"
+            "[철칙 — 위반 금지]\n"
+            "① 매수(BUY)는 반드시 '[매수 후보]' 목록에 있는 code만. 목록에 없는 종목은 절대 매수 금지.\n"
+            "② 매도(SELL)는 반드시 '[보유 종목]'에 있는 code만.\n"
+            "③ 확신이 낮으면 HOLD 하거나 아무것도 사지 마세요(현금 보유도 전략). 종목 수보다 질.\n"
+            "④ 수량·가격·한도는 시스템(엔진)이 안전하게 산정하니 당신은 '무엇을 할지'만 정하세요.\n"
+            "[판단 기준] TTM(최근 4분기) 밸류에이션·스윙 점수·추세·손익·쏠림·리스크실드 상태를 "
+            "종합. 웹검색이 가능하면 각 후보/보유의 **최근 분기 실적·4주 내 촉매(수주·가이던스·"
+            "규제·업황)** 를 확인해 반영하세요(불가하면 제공 데이터만, 추측 금지).\n"
+            "[출력 — 오직 JSON 하나. 앞뒤 설명 금지]\n"
+            '{"market_view":"오늘 시장 한 줄","decisions":['
+            '{"action":"BUY|SELL|HOLD","code":"종목코드","conviction":0-100,"reason":"한 줄 근거"}]}\n'
+            "매수/매도할 게 없으면 decisions를 빈 배열로 두세요.\n\n"
+            f"{context}"
+        )
+        try:
+            if mode == "api":
+                report = await self._via_api(prompt)
+            else:
+                report = await self._via_cli(
+                    prompt, extra_args=("--allowedTools", "WebSearch"),
+                    timeout=_COACH_CLI_TIMEOUT)
+        except Exception as exc:
+            logger.warning("[agent] 결정 실패(mode=%s): %s", mode, exc)
+            return {"enabled": True, "market_view": f"결정 실패: {exc}",
+                    "decisions": [], "mode": mode, "ts": time.time()}
+        parsed = parse_decisions(report)
+        return {"enabled": True, "mode": mode, "ts": time.time(), **parsed}
+
     async def _via_api(self, prompt: str) -> str:
         # 지연 import: 키 있는 환경에서만 anthropic 필요
         from anthropic import AsyncAnthropic

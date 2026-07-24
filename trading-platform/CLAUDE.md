@@ -77,7 +77,17 @@
   ①단일 종목 비중(30%↑ 쏠림 플래그) ②섹터 집중(큐레이션 매핑+이름 키워드 추정, 50%↑ 쏠림) ③보유 종목
   **일간수익률 상관**(Pearson, 봉 20+ 필요, |r|≥0.7 '동조'=분산 효과 약함) ④HHI(0~1)로 종합 등급(낮음/보통/높음).
   포트폴리오 탭에 리스크 카드(등급 배지·비중 상위·섹터 배분 바·동조 쌍·플래그). 판단 보조(면책).
-- ⏭️ **다음(로드맵)**: KIS 해외 재무(미국 살까말까/저평가).
+- ✅ **클로드 스윙 결정 에이전트(완전 위임)**: `engine/agent.py`(순수: `parse_slots`·`due_slots`·
+  `parse_decisions`·`build_context`) + `research.analyst.decide()` + `engine/main._agent_loop`.
+  하루 N회(`AGENT_TIMES` KST)에 엔진 플랜(정량필터 통과 후보/매도점검)+보유+리스크를 클로드에게
+  넘겨 **최종 BUY/SELL/HOLD(JSON)** 판정 → 기존 게이트(한도·쿨다운·리스크실드·하이브리드 진입)가
+  집행. **안전 철칙: 매수는 후보 목록 안 종목만, 매도는 보유만**(환각·임의주문 차단). 웹검색+TTM
+  펀더멘탈 반영. 게이트: `AGENT_ENABLED`, 기본 **모의 전용**(`AGENT_LIVE_ENABLED=true`라야 실계좌).
+  결과 텔레그램+매매일지(place_gated_order 자동기록). `GET /engine` auto.agent 노출.
+- ✅ **펀더멘탈 TTM 신선화**: KIS EPS/BPS(연간 고정) 대신 DART 분기 누적으로 TTM EPS·ROE·PER·BPS
+  계산(`dart.ttm_fundamentals`, 추가 호출 0) → 스크리너·점수·리서치·모달이 '2026.2Q TTM' 우선.
+- ✅ **상세 모달 TradingView 차트**: 📊 버튼 → 고급차트 임베드(KR=KRX:코드/US=티커). 리서치 웹검색 ON.
+- ⏭️ **다음(로드맵)**: KIS 해외 재무(미국 살까말까/저평가) · KIS 모의 종목별 보유(에이전트 매도 정밀화).
 
 전체 계획은 승인된 플랜(`~/.claude/plans/toasty-wobbling-truffle.md`), 진행 기록은 `docs/PROGRESS.md`.
 

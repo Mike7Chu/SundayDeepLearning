@@ -111,3 +111,5 @@ def stock_intraday_key(code: str) -> str:
 
 
 DAY_POS_KEY = "engine:day_positions"     # 데이 포지션 스냅샷 {code:{entry,qty,ts,peak,scalp}}
+AGENT_DONE_KEY = "engine:agent:done"     # 슬롯별 마지막 실행일 {slot: 'YYYY-MM-DD'}(중복 방지)
+AGENT_LAST_KEY = "engine:agent:last"     # 최근 에이전트 실행 요약(대시보드/상태용)

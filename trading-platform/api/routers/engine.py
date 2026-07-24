@@ -96,6 +96,9 @@ async def engine_state() -> dict:
             "kis_trading": settings.kis_trading_enabled,
             "day_trade": settings.day_trade_enabled,
             "scalp": settings.scalp_experiment,      # 초단타 실험(모의 전용)
+            "agent": settings.agent_enabled,         # 클로드 스윙 결정 에이전트(하루 N회)
+            "agent_times": settings.agent_times if settings.agent_enabled else None,
+            "agent_live": settings.agent_live_enabled,
         },
         "enabled": bool(risk),
     }
