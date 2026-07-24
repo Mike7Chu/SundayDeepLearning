@@ -154,6 +154,17 @@ async def _closes(redis: aioredis.Redis, code: str) -> list:
         return []
 
 
+async def _prev_failed(redis: aioredis.Redis, code: str) -> bool:
+    """직전 자동주문이 '거부(ok=False)'였나 — 반복 거부 텔레그램 스팸 억제용."""
+    raw = await redis.hget(ENGINE_AUTO_KEY, code)
+    if not raw:
+        return False
+    try:
+        return json.loads(raw).get("ok") is False
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+
 async def _auto_cooldown(redis: aioredis.Redis, code: str, now: float) -> bool:
     """자동매수 재시도 억제 판정. 직전 주문이 성공이면 7일 잠금(중복매수 금지),
     실패면 auto_retry_sec(짧게)만 대기 — '장시작전' 같은 일시 거부가 7일 잠기지 않게."""
@@ -213,12 +224,17 @@ async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
         qty = int(budget // entry)
         if qty < 1:
             continue
+        prev_failed = await _prev_failed(redis, code)
         ok, msg = await place_gated_order(redis, side="BUY", code=code,
                                           qty=qty, price=entry, broker=broker,
                                           kis=kis, toss=toss)
         await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
             {"ts": now, "ok": ok, "qty": qty, "price": entry, "broker": broker},
             ensure_ascii=False))
+        if not (ok or not prev_failed):           # 반복 거부는 조용히(첫 거부·성공만 알림)
+            logger.info("[auto/%s] %s BUY x%d @%.0f → %s(반복거부 무알림)",
+                        broker, code, qty, entry, ok)
+            continue
         await sender.send(("🤖 자동매수 " + ("접수 ✅" if ok else "거부 🚫")) +
                           f"\n{r['name']}({code}) {qty}주 @{entry:,.0f}원 "
                           f"(최종 {r['final']:.0f}점)\n{msg}\n"
@@ -614,17 +630,20 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
             continue
         if await _auto_cooldown(redis, code, now):   # 성공=7일 잠금 / 실패=짧게 재시도
             continue
+        prev_failed = await _prev_failed(redis, code)
         ok, msg = await place_gated_order(redis, side="BUY", code=code,
                                           qty=qty, price=entry, broker="kis",
                                           kis=kis, toss=None)
         await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
             {"ts": now, "ok": ok, "qty": qty, "price": entry, "broker": "kis-us"},
             ensure_ascii=False))
+        logger.info("[auto/kis-us] %s BUY x%s @%.2f → %s", code, qty, entry, ok)
+        if not (ok or not prev_failed):           # 반복 거부는 조용히(첫 거부·성공만 알림)
+            continue
         await sender.send(("🌎 미장 자동매수 " + ("접수 ✅" if ok else "거부 🚫")) +
                           f"\n{b.get('name', '')}({code}) {qty:g}주 @${entry:,.2f} "
                           f"(스윙 {b.get('swing')}점)\n{msg}\n"
                           f"손절 ${b.get('stop') or 0:,.2f} · 목표 ${b.get('target') or 0:,.2f}")
-        logger.info("[auto/kis-us] %s BUY x%s @%.2f → %s", code, qty, entry, ok)
 
 
 async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
