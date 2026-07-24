@@ -327,7 +327,10 @@ class KISClient:
             "PDNO": code.upper(),
             "ORD_QTY": str(int(qty)),
             "OVRS_ORD_UNPR": f"{price:.2f}",           # 미국 지정가(소수 2자리)
-            "ORD_SVR_DVSN": "0",
+            "CTAC_TLNO": "",                           # 연락처(공란 허용)
+            "MGCO_APTM_ODNO": "",                      # 운용사지정주문번호(공란)
+            "SLL_TYPE": "" if side.upper() == "BUY" else "00",  # 매수 공란·매도 00
+            "ORD_SVR_DVSN_CD": "0",                    # (오타 수정: _CD) 주문서버구분
             "ORD_DVSN": "00",                          # 00=지정가
         }
         await self._throttle()
