@@ -666,6 +666,8 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
     if risk.get("buy_lock") and not _paper_auto():   # 모의는 실계좌 잠금 우회
         return
     now = time.time()
+    fx = await _fx_rate(redis)                        # USD→KRW (주문 한도 원화 환산용)
+    max_order = settings.kis_max_order_krw
     for b in us_buys[:2]:                            # 상위 2개만(과도한 자동주문 억제)
         code, entry = b["code"], b.get("entry")
         qty = b.get("qty")
@@ -680,7 +682,22 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
                         code, b.get("price"), entry)
             continue
         order_price, note = dec
-        if order_price > entry:                      # 진입가 상향 시 예산 유지(수량 재산정)
+        # 주문 한도(원)에 맞춰 수량 축소 — 국내 _auto_buy와 동일 규율. 미장은 고가주가
+        # 많아 고정수량이면 1주도 10만원 한도를 넘어 place_gated_order가 전량 거부하던 버그.
+        if fx:
+            budget_krw = min(risk.get("per_stock_cap") or max_order, max_order)
+            qty_cap = int((budget_krw / fx) // order_price)
+            if qty_cap < 1:                          # 1주도 한도 초과 → 조용히 스킵(첫 회만 로그)
+                if not await _prev_failed(redis, code):
+                    logger.info("[auto/kis-us] %s 1주 $%.2f≈%.0f원 > 한도 %.0f원 — 스킵"
+                                "(KIS_MAX_ORDER_KRW 상향 필요)", code, order_price,
+                                order_price * fx, max_order)
+                await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
+                    {"ts": now, "ok": False, "qty": 0, "price": order_price,
+                     "broker": "kis-us", "reason": "한도초과"}, ensure_ascii=False))
+                continue
+            qty = min(qty, qty_cap)                   # 한도 내 최대 수량
+        elif order_price > entry:                    # FX 미확보 시 기존 예산 유지 로직
             qty = int(qty * entry // order_price) or qty
         prev_failed = await _prev_failed(redis, code)
         ok, msg = await place_gated_order(redis, side="BUY", code=code,
@@ -689,7 +706,8 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
         await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
             {"ts": now, "ok": ok, "qty": qty, "price": order_price, "broker": "kis-us"},
             ensure_ascii=False))
-        logger.info("[auto/kis-us] %s BUY x%s @%.2f → %s", code, qty, order_price, ok)
+        logger.info("[auto/kis-us] %s BUY x%s @%.2f → %s | %s", code, qty,
+                    order_price, ok, msg)            # 거부 사유(msg)까지 남겨 진단 가능
         if not (ok or not prev_failed):           # 반복 거부는 조용히(첫 거부·성공만 알림)
             continue
         await sender.send(("🌎 미장 자동매수 " + ("접수 ✅" if ok else "거부 🚫")) +
