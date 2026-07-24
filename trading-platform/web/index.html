@@ -949,8 +949,24 @@ async function renderResearch(){
     ${list||'<div class="empty">아직 리포트 없음 — 종목 상세에서 🧠 AI 분석</div>'}`;
   $("metaInfo").textContent=`리서치 ${rows.length}건`;
 }
+function statsCardHTML(s){
+  const drag=s?`왕복 본전비용 ~${numC(s.cost_drag_kr,2)}%/회(국내)·${numC(s.cost_drag_us,2)}%(미국)`:'';
+  if(!s||!s.n) return `<div class="card"><h3>📊 매매 성적표</h3>
+    <div class="num">매수→매도 '완료' 매매가 쌓이면 승률·손익비·비용차감 순손익이 표시돼요. 지금은 ${drag} — 이만큼은 벌어야 본전입니다.</div></div>`;
+  return `<div class="card"><h3>📊 매매 성적표 <span class="badge">${s.n}건 실현 · gross vs net</span></h3>
+    <div class="row"><span>승률 <b>${numC(s.win_rate,0)}%</b></span>
+      <span>손익비 <b>${s.payoff!=null?numC(s.payoff,2):'–'}</b></span>
+      <span>MDD <b class="neg">${won(s.mdd)}</b></span></div>
+    <div class="row" style="margin-top:6px"><span>총손익 <b class="${s.gross>=0?'pos':'neg'}">${won(s.gross)}</b></span>
+      <span>→ 비용차감 <b class="${s.net>=0?'pos':'neg'}">${won(s.net)}</b></span>
+      <span class="num">(비용 ${won(s.cost)})</span></div>
+    <div class="num" style="margin-top:6px">💸 ${drag}<br>
+      <b class="sell">⚠️ 모의엔 이 비용이 없어요 — <u>net</u>이 실전 예상치. 거래가 잦을수록(초단타) 비용이 수익을 갉아먹습니다.</b></div></div>`;
+}
+
 async function renderJournal(){
   const j=await jget("/journal"); const rows=j.rows||[];
+  let statsCard=""; try{ statsCard=statsCardHTML(await jget("/stats")); }catch(e){}
   const hit=j.hit_rate!=null?`<span class="badge ${j.hit_rate>=50?'pos':'sell'}">AI 판단 부합률 ${numC(j.hit_rate,0)}% (${j.judged}건)</span>`:'<span class="num">복기할 매수 기록이 쌓이면 부합률 표시</span>';
   const form=`<div class="card"><h3>매매 일지 <span class="badge">기록 → 복기 → 개선</span>
       <span class="badge" title="매수/매도한 이유·그때 AI 점수·수급을 남겨두면, 나중에 결과와 대조해 '내 판단이 맞았나'를 복기할 수 있어요. 감정 매매를 줄이는 루프예요">?</span></h3>
@@ -978,7 +994,7 @@ async function renderJournal(){
         <span>결과 ${ret} ${ok} <a class="clk num" onclick="delJournal('${r.id}')">✕</a></span></div>
       <div class="num" style="margin-top:4px">${when} · 🧠 ${jt}${r.note?` · "<span style="color:var(--text)">${escH(r.note)}</span>"`:''}</div></div>`;
   }).join("");
-  $("journalBox").innerHTML=form+(list||'<div class="empty">아직 기록이 없어요 — 매매하면 여기서 복기해요</div>');
+  $("journalBox").innerHTML=statsCard+form+(list||'<div class="empty">아직 기록이 없어요 — 매매하면 여기서 복기해요</div>');
   $("metaInfo").textContent=`매매일지 ${rows.length}건`;
 }
 async function addJournal(){
