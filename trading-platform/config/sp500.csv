@@ -1,0 +1,500 @@
+code,name
+MMM,3M
+AOS,A. O. Smith
+ABT,Abbott Laboratories
+ABBV,AbbVie
+ACN,Accenture
+ADBE,Adobe
+AMD,AMD
+AES,AES
+AFL,Aflac
+A,Agilent
+APD,Air Products
+ABNB,Airbnb
+AKAM,Akamai
+ALB,Albemarle
+ARE,Alexandria Real Estate
+ALGN,Align Technology
+ALLE,Allegion
+LNT,Alliant Energy
+ALL,Allstate
+GOOGL,알파벳(구글) A
+GOOG,알파벳(구글) C
+MO,Altria
+AMZN,아마존
+AMCR,Amcor
+AEE,Ameren
+AEP,American Electric Power
+AXP,아메리칸익스프레스
+AIG,AIG
+AMT,American Tower
+AWK,American Water Works
+AMP,Ameriprise
+AME,Ametek
+AMGN,암젠
+APH,Amphenol
+ADI,Analog Devices
+AON,Aon
+APA,APA
+APO,Apollo Global
+AAPL,애플
+AMAT,어플라이드머티리얼즈
+APP,AppLovin
+APTV,Aptiv
+ACGL,Arch Capital
+ADM,Archer Daniels Midland
+ARES,Ares Management
+ANET,아리스타네트웍스
+AJG,Arthur J Gallagher
+AIZ,Assurant
+T,AT&T
+ATO,Atmos Energy
+ADSK,오토데스크
+ADP,ADP
+AZO,AutoZone
+AVB,AvalonBay
+AVY,Avery Dennison
+AXON,Axon Enterprise
+BKR,Baker Hughes
+BALL,Ball
+BAC,뱅크오브아메리카
+BAX,Baxter
+BDX,Becton Dickinson
+BBY,Best Buy
+TECH,Bio-Techne
+BIIB,바이오젠
+BLK,블랙록
+BX,블랙스톤
+XYZ,Block
+BNY,BNY Mellon
+BA,보잉
+BKNG,부킹홀딩스
+BSX,Boston Scientific
+BMY,브리스톨마이어스
+AVGO,브로드컴
+BR,Broadridge
+BRO,Brown & Brown
+BLDR,Builders FirstSource
+BG,Bunge
+BXP,BXP
+CHRW,CH Robinson
+CDNS,케이던스
+CPT,Camden Property
+COF,캐피탈원
+CAH,Cardinal Health
+CCL,카니발
+CARR,Carrier Global
+CVNA,카바나
+CASY,Casey's
+CAT,캐터필러
+CBOE,Cboe
+CBRE,CBRE
+CDW,CDW
+COR,Cencora
+CNC,Centene
+CNP,CenterPoint
+CF,CF Industries
+CRL,Charles River
+SCHW,찰스슈왑
+CHTR,Charter Communications
+CVX,셰브론
+CMG,치폴레
+CB,Chubb
+CHD,Church & Dwight
+CIEN,Ciena
+CI,Cigna
+CINF,Cincinnati Financial
+CTAS,Cintas
+CSCO,시스코
+C,씨티그룹
+CFG,Citizens Financial
+CLX,Clorox
+CME,CME Group
+CMS,CMS Energy
+KO,코카콜라
+CTSH,Cognizant
+COHR,Coherent
+COIN,코인베이스
+CL,콜게이트
+CMCSA,컴캐스트
+FIX,Comfort Systems
+COP,코노코필립스
+ED,Consolidated Edison
+STZ,Constellation Brands
+CEG,Constellation Energy
+COO,Cooper Companies
+CPRT,Copart
+GLW,코닝
+CPAY,Corpay
+CTVA,Corteva
+CSGP,CoStar
+COST,코스트코
+CRH,CRH
+CRWD,크라우드스트라이크
+CCI,Crown Castle
+CSX,CSX
+CMI,커민스
+CVS,CVS Health
+DHR,다나허
+DRI,Darden
+DDOG,데이터독
+DVA,DaVita
+DECK,Deckers
+DE,디어(존디어)
+DELL,델
+DAL,델타항공
+DVN,Devon Energy
+DXCM,덱스콤
+FANG,Diamondback Energy
+DLR,Digital Realty
+DG,Dollar General
+DLTR,Dollar Tree
+D,Dominion Energy
+DPZ,도미노피자
+DASH,도어대시
+DOV,Dover
+DOW,다우
+DHI,DR Horton
+DTE,DTE Energy
+DUK,Duke Energy
+DD,듀폰
+ETN,이튼
+EBAY,이베이
+ECHO,EchoStar
+ECL,에콜랩
+EIX,Edison International
+EW,에드워즈라이프사이언스
+EA,일렉트로닉아츠
+ELV,Elevance Health
+EME,Emcor
+EMR,에머슨
+ETR,Entergy
+EOG,EOG Resources
+EQT,EQT
+EFX,Equifax
+EQIX,에퀴닉스
+EQR,Equity Residential
+ERIE,Erie Indemnity
+ESS,Essex Property
+EL,에스티로더
+EG,Everest Group
+EVRG,Evergy
+ES,Eversource
+EXC,Exelon
+EXE,Expand Energy
+EXPE,익스피디아
+EXPD,Expeditors
+EXR,Extra Space Storage
+XOM,엑슨모빌
+FFIV,F5
+FDS,FactSet
+FICO,Fair Isaac
+FAST,Fastenal
+FRT,Federal Realty
+FDX,페덱스
+FIS,Fidelity National
+FITB,Fifth Third
+FSLR,퍼스트솔라
+FE,FirstEnergy
+FISV,Fiserv
+FLEX,Flex
+F,포드
+FTNT,포티넷
+FTV,Fortive
+FOXA,폭스 A
+FOX,폭스 B
+BEN,Franklin Resources
+FCX,프리포트맥모란
+GRMN,가민
+IT,가트너
+GE,GE에어로스페이스
+GEHC,GE헬스케어
+GEV,GE버노바
+GEN,Gen Digital
+GNRC,Generac
+GD,제너럴다이내믹스
+GIS,General Mills
+GM,GM(제너럴모터스)
+GPC,Genuine Parts
+GILD,길리어드
+GPN,Global Payments
+GL,Globe Life
+GDDY,GoDaddy
+GS,골드만삭스
+HAL,할리버튼
+HIG,Hartford
+HAS,해즈브로
+HCA,HCA Healthcare
+DOC,Healthpeak
+HSIC,Henry Schein
+HSY,허쉬
+HPE,HPE
+HLT,힐튼
+HD,홈디포
+HON,하니웰
+HRL,Hormel
+HST,Host Hotels
+HWM,Howmet Aerospace
+HPQ,HP
+HUBB,Hubbell
+HUM,휴마나
+HBAN,Huntington Bancshares
+HII,Huntington Ingalls
+IBM,IBM
+IEX,IDEX
+IDXX,Idexx
+ITW,Illinois Tool Works
+INCY,Incyte
+IR,Ingersoll Rand
+PODD,Insulet
+INTC,인텔
+IBKR,인터랙티브브로커스
+ICE,Intercontinental Exchange
+IFF,Intl Flavors
+IP,International Paper
+INTU,인튜이트
+ISRG,인튜이티브서지컬
+IVZ,Invesco
+INVH,Invitation Homes
+IQV,IQVIA
+IRM,Iron Mountain
+JBHT,JB Hunt
+JBL,Jabil
+JKHY,Jack Henry
+J,Jacobs
+JNJ,존슨앤존슨
+JCI,Johnson Controls
+JPM,JP모건
+KVUE,켄뷰
+KDP,Keurig Dr Pepper
+KEY,KeyCorp
+KEYS,Keysight
+KMB,킴벌리클라크
+KIM,Kimco Realty
+KMI,Kinder Morgan
+KKR,KKR
+KLAC,KLA
+KHC,크래프트하인즈
+KR,크로거
+LHX,L3Harris
+LH,Labcorp
+LRCX,램리서치
+LVS,라스베가스샌즈
+LDOS,Leidos
+LEN,레나
+LII,Lennox
+LLY,일라이릴리
+LIN,린데
+LYV,Live Nation
+LMT,록히드마틴
+L,Loews
+LOW,로우스
+LULU,룰루레몬
+LITE,Lumentum
+LYB,LyondellBasell
+MTB,M&T Bank
+MPC,마라톤페트롤리엄
+MAR,메리어트
+MRSH,Marsh McLennan
+MLM,Martin Marietta
+MRVL,마벨
+MAS,Masco
+MA,마스터카드
+MKC,McCormick
+MCD,맥도날드
+MCK,맥케슨
+MDT,메드트로닉
+MRK,머크
+META,메타
+MET,메트라이프
+MTD,Mettler Toledo
+MGM,MGM리조트
+MCHP,마이크로칩
+MU,마이크론
+MSFT,마이크로소프트
+MAA,Mid-America Apartment
+MRNA,모더나
+TAP,Molson Coors
+MDLZ,몬델리즈
+MPWR,모놀리식파워
+MNST,몬스터베버리지
+MCO,무디스
+MS,모건스탠리
+MOS,Mosaic
+MSI,모토로라솔루션
+MSCI,MSCI
+NDAQ,나스닥
+NTAP,NetApp
+NFLX,넷플릭스
+NEM,뉴몬트
+NWSA,뉴스코프 A
+NWS,뉴스코프 B
+NEE,넥스트에라에너지
+NKE,나이키
+NI,NiSource
+NDSN,Nordson
+NSC,노퍽서던
+NTRS,Northern Trust
+NOC,노스럽그러먼
+NCLH,Norwegian Cruise
+NRG,NRG Energy
+NUE,Nucor
+NVDA,엔비디아
+NVR,NVR
+NXPI,NXP반도체
+ORLY,오라일리
+OXY,옥시덴탈
+ODFL,Old Dominion
+OMC,Omnicom
+ON,온세미컨덕터
+OKE,Oneok
+ORCL,오라클
+OTIS,오티스
+PCAR,팩카
+PKG,Packaging Corp
+PLTR,팔란티어
+PANW,팔로알토네트웍스
+PSKY,Paramount Skydance
+PH,Parker Hannifin
+PAYX,Paychex
+PYPL,페이팔
+PNR,Pentair
+PEP,펩시코
+PFE,화이자
+PCG,PG&E
+PM,필립모리스
+PSX,필립스66
+PNW,Pinnacle West
+PNC,PNC Financial
+PPG,PPG
+PPL,PPL
+PFG,Principal Financial
+PG,P&G
+PGR,프로그레시브
+PLD,프로로지스
+PRU,Prudential
+PEG,Public Service Enterprise
+PTC,PTC
+PSA,Public Storage
+PHM,PulteGroup
+PWR,Quanta Services
+QCOM,퀄컴
+DGX,Quest Diagnostics
+Q,Qnity Electronics
+RL,랄프로렌
+RJF,Raymond James
+RTX,RTX
+O,리얼티인컴
+REG,Regency Centers
+REGN,리제네론
+RF,Regions Financial
+RSG,Republic Services
+RMD,레스메드
+RVTY,Revvity
+HOOD,로빈후드
+ROK,Rockwell Automation
+ROL,Rollins
+ROP,Roper
+ROST,로스스토어스
+RCL,Royal Caribbean
+SPGI,S&P글로벌
+CRM,세일즈포스
+SNDK,Sandisk
+SBAC,SBA Communications
+SLB,슐럼버거
+STX,씨게이트
+SRE,Sempra
+NOW,서비스나우
+SHW,셔윈윌리엄스
+SPG,Simon Property
+SWKS,Skyworks
+SJM,JM Smucker
+SW,Smurfit Westrock
+SNA,Snap-on
+SOLV,Solventum
+SO,Southern Company
+LUV,사우스웨스트항공
+SWK,Stanley Black & Decker
+SBUX,스타벅스
+STT,State Street
+STLD,Steel Dynamics
+STE,Steris
+SYK,스트라이커
+SMCI,슈퍼마이크로
+SYF,Synchrony Financial
+SNPS,시놉시스
+SYY,Sysco
+TMUS,T모바일
+TROW,T Rowe Price
+TTWO,Take-Two
+TPR,Tapestry
+TRGP,Targa Resources
+TGT,타겟
+TEL,TE Connectivity
+TDY,Teledyne
+TER,Teradyne
+TSLA,테슬라
+TXN,텍사스인스트루먼트
+TPL,Texas Pacific Land
+TXT,Textron
+TMO,써모피셔
+TJX,TJX
+TKO,TKO Group
+TTD,트레이드데스크
+TSCO,Tractor Supply
+TT,Trane Technologies
+TDG,TransDigm
+TRV,Travelers
+TRMB,Trimble
+TFC,Truist
+TYL,Tyler Technologies
+TSN,타이슨푸드
+USB,US뱅코프
+UBER,우버
+UDR,UDR
+ULTA,울타뷰티
+UNP,유니온퍼시픽
+UAL,유나이티드항공
+UPS,UPS
+URI,United Rentals
+UNH,유나이티드헬스
+UHS,Universal Health
+VLO,발레로
+VEEV,비바시스템즈
+VTR,Ventas
+VLTO,Veralto
+VRSN,베리사인
+VRSK,Verisk
+VZ,버라이즌
+VRTX,버텍스
+VRT,버티브
+VTRS,Viatris
+VICI,Vici Properties
+V,비자
+VST,Vistra
+VMC,Vulcan Materials
+WRB,WR Berkley
+GWW,WW Grainger
+WAB,Wabtec
+WMT,월마트
+DIS,디즈니
+WBD,워너브라더스디스커버리
+WM,Waste Management
+WAT,Waters
+WEC,WEC Energy
+WFC,웰스파고
+WELL,Welltower
+WST,West Pharmaceutical
+WDC,웨스턴디지털
+WY,Weyerhaeuser
+WSM,Williams-Sonoma
+WMB,Williams
+WTW,Willis Towers Watson
+WDAY,워크데이
+WYNN,윈리조트
+XEL,Xcel Energy
+XYL,Xylem
+YUM,얌브랜즈
+ZBRA,Zebra
+ZBH,Zimmer Biomet
+ZTS,조에티스

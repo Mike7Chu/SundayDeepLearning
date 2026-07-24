@@ -5,12 +5,15 @@
 """
 from __future__ import annotations
 
+import csv
 from functools import lru_cache
 from pathlib import Path
 
 import yaml
 
-_US = Path(__file__).resolve().parent.parent.parent / "config" / "us_stocks.yaml"
+_CFG = Path(__file__).resolve().parent.parent.parent / "config"
+_US = _CFG / "us_stocks.yaml"
+_SP500 = _CFG / "sp500.csv"
 
 
 def parse_adr_map(s: str) -> list[dict]:
@@ -77,17 +80,41 @@ def parse_exchange_override(s: str) -> dict:
     return out
 
 
-@lru_cache(maxsize=1)
-def load_us_universe() -> list[dict]:
-    """[{code, name, market:"US"}] — 파일 없거나 손상이면 빈 리스트(안전)."""
+def _load_sp500() -> list[dict]:
+    """S&P 500 번들(config/sp500.csv) → [{code, name}]. 없으면 빈 리스트."""
+    out: list[dict] = []
     try:
-        items = yaml.safe_load(_US.read_text()).get("us_stocks", [])
+        with _SP500.open(newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                code = str(row.get("code", "")).strip().upper()
+                if code and "." not in code:      # 점 티커(BRK.B 등)는 KIS 심볼 미지원
+                    out.append({"code": code, "name": (row.get("name") or "").strip()})
     except Exception:
         return []
+    return out
+
+
+@lru_cache(maxsize=1)
+def load_us_universe() -> list[dict]:
+    """[{code, name, market:"US"}] — 큐레이션 yaml(한글명 우선) ∪ S&P 500 병합.
+
+    yaml(빅테크·ETF·SPCX 등 한글명)을 먼저 넣고, S&P 500에서 중복 없는 종목을 추가.
+    파일 없거나 손상이면 가능한 소스만으로 구성(안전).
+    """
+    seen: set[str] = set()
     out: list[dict] = []
+    try:
+        items = (yaml.safe_load(_US.read_text()) or {}).get("us_stocks", [])
+    except Exception:
+        items = []
     for it in items or []:
         code = str((it or {}).get("code", "")).strip().upper()
-        if code:
+        if code and "." not in code and code not in seen:   # 점 티커는 KIS 심볼 미지원
+            seen.add(code)
             out.append({"code": code, "name": (it.get("name") or "").strip(),
                         "market": "US"})
+    for it in _load_sp500():                       # S&P 500 보강(yaml에 없는 종목만)
+        if it["code"] not in seen:
+            seen.add(it["code"])
+            out.append({"code": it["code"], "name": it["name"], "market": "US"})
     return out
