@@ -676,10 +676,34 @@ async function runCoach(btn){
   finally{ btn.disabled=false; btn.textContent="지금 점검"; }
 }
 
+function paperCardHTML(pp){
+  if(!pp||!pp.enabled) return "";
+  const hs=(pp.holdings||[]).filter(h=>h.quantity>0);
+  const tag=pp.paper?'<span class="badge pos">모의(가짜 돈)</span>':'<span class="badge neg">실계좌</span>';
+  const rows=hs.length?hs.map(h=>{
+    const cur=h.currency==="USD"; const pcls=(h.pnl_pct||0)>=0?"pos":"neg";
+    return `<tr class="clk" onclick="openStock('${qesc(h.symbol)}','${qesc(h.name||'')}')">
+      <td>${escH(h.name||h.symbol)}<span class="num" style="opacity:.6"> ${escH(h.symbol)}</span></td>
+      <td class="num">${fmt(h.quantity)}</td>
+      <td class="num">${cur?money(h.price,"USD"):fmt(h.price)+"원"}</td>
+      <td class="num">${h.eval_krw!=null?won(h.eval_krw):"–"}</td>
+      <td class="num ${pcls}">${h.pnl_pct!=null?((h.pnl_pct>=0?"+":"")+numC(h.pnl_pct)+"%"):"–"}</td></tr>`;
+  }).join(""):`<tr><td colspan="5" class="empty" style="padding:14px">아직 매수한 종목이 없어요 — 에이전트/자동매매가 사면 여기 나타납니다.</td></tr>`;
+  return `<div class="card" style="margin-bottom:12px;border-left:3px solid var(--pos,#2e7d32)">
+    <h3>🤖 모의투자 잔고 (자동매매 계좌) ${tag}</h3>
+    <div class="arow" style="gap:16px;margin:4px 0 8px">
+      <div><span class="num">총 평가</span><br><b class="strong">${pp.total_eval!=null?won(pp.total_eval):"–"}</b></div>
+      <div><span class="num">현금</span><br><b>${pp.cash!=null?won(pp.cash):"–"}</b></div>
+      <div><span class="num">보유 종목</span><br><b>${hs.length}개</b></div>
+    </div>
+    <div class="scroll">${tableHTML(["종목","수량","현재가","평가액(원)","손익%"],rows)}</div>
+    <div class="num" style="opacity:.7;margin-top:4px">※ 토스 실계좌와 완전 별개. 클로드 에이전트·자동매매가 KIS 모의계좌로 사고판 결과예요.</div></div>`;
+}
 async function renderPortfolio(){
-  const pf=await jget("/portfolio");
+  const [pf,pp]=await Promise.all([jget("/portfolio"),jget("/paper").catch(()=>({}))]);
+  const paperCard=paperCardHTML(pp);
   if(!pf.enabled){
-    $("portfolioBox").innerHTML=`<div class="empty">토스증권 키가 필요합니다.
+    $("portfolioBox").innerHTML=paperCard+`<div class="empty" style="margin-top:10px">토스증권 키가 필요합니다(실계좌 연동).
       <br>.env 에 <b>TOSS_CLIENT_ID / TOSS_CLIENT_SECRET</b> 설정 후 재배포하면
       실보유·평가액·수익률이 채워집니다. (발급: developers.tossinvest.com)</div>`;
     return;
@@ -694,6 +718,7 @@ async function renderPortfolio(){
   const syncBar=`<div class="helpbar" style="margin:0 0 12px;${syncBad?'border-color:rgba(255,77,94,.35);background:rgba(255,77,94,.08)':''}">
     ${syncBad?'⚠️':'🔄'} 토스 잔고 <b>${ago(pf.ts)}</b> 동기화됨${syncBad?' — 추가매수/매도가 아직 안 보이면 잠시 후 새로고침하세요. 계속 안 맞으면 collector·토스 연동 확인이 필요해요.':' · 화면을 열면 최신 잔고를 다시 불러옵니다.'}</div>`;
   $("portfolioBox").innerHTML=`
+    ${paperCard}
     ${syncBar}
     <div class="grid" style="margin-bottom:12px">
       ${kpi("총 평가액", won(pf.total_eval))}

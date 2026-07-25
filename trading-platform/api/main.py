@@ -36,6 +36,7 @@ async def _cache_warmer() -> None:
         ("살까말까·레이더", lambda: stocks.stocks_radar(12)),
         ("배당금", lambda: stocks.stocks_dividend(0.0)),
         ("내종목", lambda: portfolio.portfolio()),
+        ("모의투자잔고", lambda: portfolio.paper_account()),
     ]
     while True:
         for label, fn in warmers:

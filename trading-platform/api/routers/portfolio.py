@@ -7,13 +7,15 @@
 from __future__ import annotations
 
 import json
+import time as _time
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from api.redis_client import get_redis
-from api.services.cache import get_or_compute
+from api.services.cache import get_or_compute, get_or_swr
+from collector.stock.kis import KISClient
 from collector.stock.toss import TossClient, TossError, live_overlay
 from api.services.portfolio_risk import assess_risk
 from engine.plan import exit_plan
@@ -32,6 +34,51 @@ from shared.settings import settings
 router = APIRouter()
 
 _toss = TossClient()
+_kis = KISClient()
+
+
+@router.get("/paper")
+async def paper_account() -> dict:
+    """모의투자(KIS) 잔고현황 — 총평가·현금·보유종목. 자동매매(에이전트)가 실제로 사고판
+    결과를 여기서 본다. 토스 실계좌와 완전 별개. 실전 모드(KIS_PAPER=false)면 실계좌 KIS.
+
+    15초 SWR 캐시(KIS 잔고 네트워크를 요청 경로에서 제거). 미국 보유는 환율로 원화 환산.
+    """
+    if not _kis.enabled:
+        return {"enabled": False, "paper": settings.kis_paper, "holdings": []}
+
+    async def _build() -> dict:
+        redis = get_redis()
+        fx = None
+        fxraw = await redis.get(FX_USDKRW_KEY)
+        if fxraw:
+            try:
+                fx = json.loads(fxraw).get("rate")
+            except (json.JSONDecodeError, TypeError):
+                fx = None
+        out: dict = {"enabled": True, "paper": settings.kis_paper,
+                     "holdings": [], "ts": _time.time(), "fx": fx}
+        async with httpx.AsyncClient(timeout=15) as c:
+            bal = await _kis.fetch_balance(c)
+            total, cash = bal.get("total_eval"), bal.get("cash")
+            positions = await _kis.fetch_positions(c)
+            if settings.us_auto_enabled:            # 미국 평가·예수금 원화 환산 합산
+                try:
+                    ob = await _kis.fetch_overseas_balance(c)
+                    if fx and ob.get("eval"):
+                        total = (total or 0) + ob["eval"] * fx
+                    if fx and ob.get("cash") and cash is not None:
+                        cash += ob["cash"] * fx
+                except Exception:
+                    pass
+        for h in positions:                          # 종목별 평가액(원) 보강
+            q, p = h.get("quantity") or 0, h.get("price") or 0
+            rate = fx if (h.get("currency") == "USD" and fx) else 1
+            h["eval_krw"] = round(q * p * rate) if p else None
+        out.update({"total_eval": total, "cash": cash, "holdings": positions})
+        return out
+
+    return await get_or_swr("paper_account", 15, _build)
 
 
 async def _resync_holdings(redis) -> None:

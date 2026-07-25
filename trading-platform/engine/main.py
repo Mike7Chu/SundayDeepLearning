@@ -61,6 +61,7 @@ from shared.redis_keys import (
     ENGINE_RISK_KEY,
     FWD_DONE_KEY,
     FX_USDKRW_KEY,
+    KIS_ASSET_KEY,
     COACH_KEY,
     COACH_WD_KEY,
     RESEARCH_HB_KEY,
@@ -138,10 +139,17 @@ async def _trade_assets(redis: aioredis.Redis,
                                 cash += ob["cash"] * fx
                     except Exception:
                         pass                          # 해외잔고 실패 → 국내만(무회귀)
-            if total is not None:
+            if total is not None:                     # 정상 조회 → 캐시(일시 실패 대비)
+                await redis.set(KIS_ASSET_KEY, json.dumps(
+                    {"total": total, "cash": cash, "ts": time.time()}))
                 return total, cash
         except Exception as exc:
             logger.warning("[DATA_ERROR] KIS 모의잔고 조회 실패: %s", exc)
+        cached = await _json_get(redis, KIS_ASSET_KEY)   # 일시 실패 → 마지막 정상값 유지
+        if cached.get("total") is not None:
+            logger.info("[risk] KIS 잔고 일시 조회 실패 — 캐시값 사용(%s원)",
+                        f"{cached['total']:,.0f}")
+            return cached.get("total"), cached.get("cash")
         return None, None
     return await _assets(redis)
 
@@ -177,10 +185,17 @@ async def _update_risk(redis: aioredis.Redis, sender: TelegramSender,
     prev = await _json_get(redis, ENGINE_RISK_KEY)
     risk_out = {**risk, "total_asset": total, "peak_asset": peak, "ts": time.time()}
     await redis.set(ENGINE_RISK_KEY, json.dumps(risk_out, ensure_ascii=False))
+    # 모의모드에서 '자산 데이터 없음'(일시 조회 실패)은 실제 위험이 아니고, 주문도
+    # paper 우회로 계속 나가므로 🛑 알람을 보내지 않는다(노이즈). 실계좌·실제 MDD만 알림.
+    no_asset = total is None or (total or 0) <= 0
+    quiet = _paper_auto() and no_asset
     if risk["buy_lock"] and not prev.get("buy_lock"):
-        await sender.send("🛑 리스크 실드 발동 — 자동 매수 잠금\n"
-                          + "\n".join(risk["reasons"]))
-        logger.warning("BUY_LOCK 발동: %s", risk["reasons"])
+        if quiet:
+            logger.info("[risk] 모의 — 자산 조회 일시 실패(알람 생략, 주문은 paper 우회로 계속)")
+        else:
+            await sender.send("🛑 리스크 실드 발동 — 자동 매수 잠금\n"
+                              + "\n".join(risk["reasons"]))
+            logger.warning("BUY_LOCK 발동: %s", risk["reasons"])
     elif not risk["buy_lock"] and prev.get("buy_lock"):
         await sender.send("✅ 리스크 실드 해제 — 매수 허용 범위 복귀")
     return risk_out
