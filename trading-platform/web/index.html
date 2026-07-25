@@ -1233,24 +1233,30 @@ function mChartKR(e,code){
     <div id="lwc" style="height:360px;width:100%"></div>
     <div class="num" style="opacity:.7;margin-top:4px">※ 국내는 TradingView 실시간이 로그인을 요구해, 우리가 수집한 일봉으로 그려요(종가선 + 20일 이동평균).</div>`;
   loadLWC(async()=>{
-    let d; try{ d=await jget(`/stocks/${encodeURIComponent(code)}/candles?limit=180`); }
-    catch(err){ const el=$("lwc"); if(el) el.innerHTML='<div class="empty">차트 데이터 실패</div>'; return; }
-    const cs=(d.candles||[]).filter(c=>c.close&&c.time);
     const el=$("lwc"); if(!el) return;
-    if(cs.length<5){ el.innerHTML='<div class="empty">일봉 데이터 부족 — 잠시 후 다시 열어보세요</div>'; return; }
+    if(!window.LightweightCharts){ el.innerHTML='<div class="empty">차트 라이브러리 로드 실패(네트워크 차단?)</div>'; return; }
+    let d; try{ d=await jget(`/stocks/${encodeURIComponent(code)}/candles?limit=180`); }
+    catch(err){ el.innerHTML='<div class="empty">차트 데이터 실패: '+escH(err.message||'')+'</div>'; return; }
+    const cs=(d.candles||[]).filter(c=>c.close&&c.time);
+    if(cs.length<5){ el.innerHTML=`<div class="empty">일봉 데이터 부족(${cs.length}개) — 이 종목은 아직 일봉 수집 전이에요. 관심종목에 담으면 채워집니다.</div>`; return; }
     const dark=(document.documentElement.dataset.theme||"dark")!=="light";
     el.innerHTML="";
-    const chart=LightweightCharts.createChart(el,{autoSize:true,height:360,
-      layout:{background:{color:"transparent"},textColor:dark?"#cbd5e1":"#334155"},
-      grid:{vertLines:{color:dark?"#1e293b":"#eef2f7"},horzLines:{color:dark?"#1e293b":"#eef2f7"}},
-      rightPriceScale:{borderVisible:false},timeScale:{borderVisible:false}});
-    const area=chart.addAreaSeries({lineColor:"#2563eb",topColor:"rgba(37,99,235,.35)",
-      bottomColor:"rgba(37,99,235,.02)",lineWidth:2,priceLineVisible:false});
-    area.setData(cs.map(c=>({time:c.time,value:+c.close})));
-    const closes=cs.map(c=>+c.close),sma=[];         // 20일 이동평균
-    for(let i=19;i<cs.length;i++){let s=0;for(let j=i-19;j<=i;j++)s+=closes[j];sma.push({time:cs[i].time,value:s/20});}
-    if(sma.length){const l=chart.addLineSeries({color:"#f59e0b",lineWidth:1,priceLineVisible:false,lastValueVisible:false});l.setData(sma);}
-    chart.timeScale().fitContent();
+    try{
+      const w=el.clientWidth||el.offsetWidth||520;
+      const chart=LightweightCharts.createChart(el,{width:w,height:360,
+        layout:{background:{color:"transparent"},textColor:dark?"#cbd5e1":"#334155"},
+        grid:{vertLines:{color:dark?"#1e293b":"#eef2f7"},horzLines:{color:dark?"#1e293b":"#eef2f7"}},
+        rightPriceScale:{borderVisible:false},timeScale:{borderVisible:false}});
+      const area=chart.addAreaSeries({lineColor:"#2563eb",topColor:"rgba(37,99,235,.35)",
+        bottomColor:"rgba(37,99,235,.02)",lineWidth:2,priceLineVisible:false});
+      area.setData(cs.map(c=>({time:c.time,value:+c.close})));
+      const closes=cs.map(c=>+c.close),sma=[];         // 20일 이동평균
+      for(let i=19;i<cs.length;i++){let s=0;for(let j=i-19;j<=i;j++)s+=closes[j];sma.push({time:cs[i].time,value:s/20});}
+      if(sma.length){const l=chart.addLineSeries({color:"#f59e0b",lineWidth:1,priceLineVisible:false,lastValueVisible:false});l.setData(sma);}
+      chart.timeScale().fitContent();
+      el._ro=new ResizeObserver(()=>{try{chart.applyOptions({width:el.clientWidth});}catch(e){}});
+      el._ro.observe(el);
+    }catch(err){ el.innerHTML='<div class="empty">차트 렌더 실패: '+escH(err.message||err)+'</div>'; }
   });
 }
 // Lightweight Charts(TradingView 무료 라이브러리) 지연 로드 — 자체 호스팅이라 CSP 제약 없음.

@@ -274,15 +274,46 @@ async def stock_candles(code: str, limit: int = 180) -> dict:
             candles = []
     if len(candles) < 20:
         candles = await _ondemand_candles(redis, code)
-    out = []
+    seen: dict[str, dict] = {}
     for c in candles[-int(limit):]:
         if not isinstance(c, dict) or not c.get("close"):
             continue
-        d = str(c.get("date", ""))[:8]
-        t = f"{d[:4]}-{d[4:6]}-{d[6:8]}" if len(d) == 8 and d.isdigit() else d
-        out.append({"time": t, "close": c.get("close"), "high": c.get("high"),
-                    "low": c.get("low"), "open": c.get("open"), "volume": c.get("volume")})
+        t = _norm_day(c.get("date"))
+        if not t:
+            continue
+        seen[t] = {"time": t, "close": c.get("close"), "high": c.get("high"),
+                   "low": c.get("low"), "open": c.get("open"), "volume": c.get("volume")}
+    out = sorted(seen.values(), key=lambda r: r["time"])   # 오름차순·time 유일(차트 요구)
     return {"code": code, "candles": out}
+
+
+def _norm_day(v) -> str:
+    """일봉 날짜를 'YYYY-MM-DD'로 정규화(수집 소스별 형식 편차 흡수).
+
+    허용: '20260724'(8자리) · '2026-07-24' · '2026/07/24' · 유닉스 타임스탬프(초/밀리초).
+    Lightweight Charts는 time이 어긋나거나 중복이면 조용히 렌더 실패 → 여기서 표준화.
+    """
+    if v is None:
+        return ""
+    s = str(v).strip()
+    if not s:
+        return ""
+    if "-" in s or "/" in s:                          # 이미 구분자 있음 → 앞 10자
+        return s.replace("/", "-")[:10]
+    if s.isdigit():
+        if len(s) == 8:                               # YYYYMMDD
+            return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+        if len(s) >= 12:                              # ms 타임스탬프
+            try:
+                return _dt.date.fromtimestamp(int(s) / 1000).isoformat()
+            except (ValueError, OSError, OverflowError):
+                return ""
+        if len(s) >= 9:                               # s 타임스탬프
+            try:
+                return _dt.date.fromtimestamp(int(s)).isoformat()
+            except (ValueError, OSError, OverflowError):
+                return ""
+    return ""
 
 
 _toss = TossClient()
