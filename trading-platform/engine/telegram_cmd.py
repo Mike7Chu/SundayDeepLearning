@@ -23,7 +23,7 @@ import redis.asyncio as aioredis
 
 from collector.stock.toss import TossClient
 from engine.orders import cancel_gated_order, place_gated_order
-from notifier.telegram import TelegramSender
+from notifier.telegram import TelegramSender, dashboard_buttons
 from shared.redis_keys import (
     COACH_NOTE_KEY,
     COACH_REQ_KEY,
@@ -102,6 +102,30 @@ async def _jget(redis: aioredis.Redis, key: str) -> dict:
         return {}
 
 
+def _dash_btn(path: str = ""):
+    return dashboard_buttons(path)
+
+
+async def _execute_pending(redis: aioredis.Redis, toss: TossClient, kis,
+                           n: str) -> str:
+    """대기 주문 n을 실행(텍스트 '확인 N'·인라인 버튼 공용). 결과 메시지 반환."""
+    raw = await redis.hget(TG_PENDING_KEY, n)
+    await redis.hdel(TG_PENDING_KEY, n)
+    if not raw:
+        return "대기 중인 주문이 없어요(이미 처리됐거나 번호 오류)"
+    try:
+        o = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return "주문 정보 손상 — 다시 시도"
+    if time.time() - (o.get("ts") or 0) > _PENDING_TTL:
+        return "⏰ 확인 시간 초과(2분) — 다시 주문해 주세요"
+    ok, msg = await place_gated_order(redis, side=o["side"], code=o["code"],
+                                      qty=o["qty"], price=o["price"],
+                                      broker=o.get("broker") or settings.auto_trade_broker,
+                                      kis=kis, toss=toss)
+    return ("✅ " if ok else "🚫 ") + msg
+
+
 async def _cur_price(redis: aioredis.Redis, code: str) -> float | None:
     raw = (await redis.hget(STOCK_QUOTE_KEY, code)
            or await redis.hget(STOCK_MARKET_KEY, code))
@@ -146,7 +170,7 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
                 lines.append(f"{i}. {s.get('name') or s['code']} — {s['action']}: "
                              f"{' · '.join(s.get('reasons', []))}")
         lines.append("※ 판단 보조 — 최종 결정과 주문은 직접(매수 예: 토스매수 코드 수량 가격)")
-        await sender.send("\n".join(lines))
+        await sender.send("\n".join(lines), buttons=_dash_btn())
     elif cmd == "note_add":
         old = await redis.get(COACH_NOTE_KEY)
         merged = (old + "\n\n" if old else "") + p["text"]
@@ -187,7 +211,8 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
                  f"{(r.get('pnl_pct') or 0):+.1f}%" for r in rows[:10]]
         await sender.send(
             f"💼 보유 {len(rows)}종목 · 평가 {h.get('total_eval', 0):,.0f}원\n"
-            f"매수여력 {a.get('buying_power') or 0:,.0f}원\n" + "\n".join(lines))
+            f"매수여력 {a.get('buying_power') or 0:,.0f}원\n" + "\n".join(lines),
+            buttons=_dash_btn())
     elif cmd == "상태":
         r = await _jget(redis, ENGINE_RISK_KEY)
         hb = await redis.get(RESEARCH_HB_KEY)
@@ -232,29 +257,34 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
         await sender.send(
             f"⚠️ 실주문 확인 필요 [{broker_kr}]\n{side_kr} {p['code']} {p['qty']:g}주 "
             f"@{px} (예상 {est})\n"
-            f"→ 2분 내 '확인 {n}' 회신 시 실행")
+            f"→ 아래 버튼을 누르거나 2분 내 '확인 {n}' 회신",
+            buttons=[[{"text": "✅ 확인 주문", "cb": f"cf:{n}"},
+                      {"text": "❌ 취소", "cb": f"dr:{n}"}]])
     elif cmd == "confirm":
-        raw = await redis.hget(TG_PENDING_KEY, p["n"])
-        await redis.hdel(TG_PENDING_KEY, p["n"])
-        if not raw:
-            await sender.send("대기 중인 주문이 없어요(번호 확인)")
-            return
-        try:
-            o = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            await sender.send("주문 정보 손상 — 다시 시도")
-            return
-        if time.time() - (o.get("ts") or 0) > _PENDING_TTL:
-            await sender.send("⏰ 확인 시간 초과(2분) — 다시 주문해 주세요")
-            return
-        ok, msg = await place_gated_order(redis, side=o["side"], code=o["code"],
-                                          qty=o["qty"], price=o["price"],
-                                          broker=o.get("broker") or settings.auto_trade_broker,
-                                          kis=kis, toss=toss)
-        await sender.send(("✅ " if ok else "🚫 ") + msg)
+        await sender.send(await _execute_pending(redis, toss, kis, p["n"]))
     elif cmd == "cancel":
         ok, msg = await cancel_gated_order(redis, toss, p["order_id"])
         await sender.send(("✅ " if ok else "🚫 ") + msg)
+
+
+async def _handle_callback(redis: aioredis.Redis, toss: TossClient, kis,
+                           sender: TelegramSender, cq: dict) -> None:
+    """인라인 버튼 콜백 처리 — 주문 확인(cf:N)/취소(dr:N). 스피너 종료 필수."""
+    data = cq.get("data", "")
+    cid = cq.get("id", "")
+    msg_id = ((cq.get("message") or {}).get("message_id"))
+    if data.startswith("cf:"):
+        result = await _execute_pending(redis, toss, kis, data[3:])
+        await sender.answer_callback(cid, "처리 완료")
+        await sender.clear_buttons(msg_id)
+        await sender.send(result)
+    elif data.startswith("dr:"):
+        await redis.hdel(TG_PENDING_KEY, data[3:])
+        await sender.answer_callback(cid, "취소됨")
+        await sender.clear_buttons(msg_id)
+        await sender.send("❌ 주문을 취소했어요.")
+    else:
+        await sender.answer_callback(cid)
 
 
 async def command_loop(redis: aioredis.Redis, toss: TossClient, kis=None) -> None:
@@ -274,6 +304,13 @@ async def command_loop(redis: aioredis.Redis, toss: TossClient, kis=None) -> Non
                 updates = r.json().get("result", [])
             for u in updates:
                 await redis.set(TG_OFFSET_KEY, u["update_id"])
+                cq = u.get("callback_query")
+                if cq:                                   # 인라인 버튼 클릭(주문 확인/취소)
+                    chat = str(((cq.get("message") or {}).get("chat") or {}).get("id", ""))
+                    if chat != str(sender.chat_id):
+                        continue
+                    await _handle_callback(redis, toss, kis, sender, cq)
+                    continue
                 msg = u.get("message") or {}
                 chat = str((msg.get("chat") or {}).get("id", ""))
                 text = msg.get("text", "")

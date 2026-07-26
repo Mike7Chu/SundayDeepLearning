@@ -17,7 +17,7 @@ from api.services.stock_signal import signals_for
 from api.services.stock_value import value_screener
 from briefing.compose import compose_brief, has_content
 from collector.stock.kis import load_watchlist
-from notifier.telegram import TelegramSender
+from notifier.telegram import TelegramSender, dashboard_buttons
 from shared.redis_keys import (
     AGENT_LAST_KEY,
     ENGINE_PLAN_KEY,
@@ -114,7 +114,7 @@ async def run_once(redis: aioredis.Redis, sender: TelegramSender) -> bool:
                         market=ex["market"], plan=ex["plan"], risk=ex["risk"],
                         agent=ex["agent"], stats=ex["stats"], us=ex["us"],
                         radar=ex["radar"])
-    await sender.send(msg)
+    await sender.send_long(msg, buttons=dashboard_buttons())   # 길이 안전 + 열기 버튼
     logger.info("브리핑 발송(telegram=%s, %d종목)", sender.enabled, len(quotes))
     return True
 

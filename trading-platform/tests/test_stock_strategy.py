@@ -117,3 +117,15 @@ def test_compose_brief():
 
 def test_has_content_empty():
     assert not has_content([], [{"magic_rank": None}], [], [{"yield_pct": None}])
+
+
+def test_telegram_keyboard():
+    from notifier.telegram import build_keyboard
+    kb = build_keyboard([[{"text": "✅", "cb": "cf:1"}, {"text": "❌", "cb": "dr:1"}]])
+    assert kb == {"inline_keyboard": [[{"text": "✅", "callback_data": "cf:1"},
+                                       {"text": "❌", "callback_data": "dr:1"}]]}
+    # URL 버튼 + 빈 스펙
+    assert build_keyboard([[{"text": "열기", "url": "http://x"}]]) == {
+        "inline_keyboard": [[{"text": "열기", "url": "http://x"}]]}
+    assert build_keyboard(None) is None
+    assert build_keyboard([[]]) is None      # 빈 행만 → None

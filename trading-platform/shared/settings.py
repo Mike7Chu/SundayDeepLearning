@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # 텔레그램 (브리핑/알림 발송)
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    dashboard_url: str = ""      # 대시보드 주소(예 http://100.x.x.x:8090) — 텔레그램 '열기' 버튼용
 
     # 자산 목표(원) — 홈 대시보드 진행률 바
     target_asset_krw: float = 10_000_000_000  # 100억

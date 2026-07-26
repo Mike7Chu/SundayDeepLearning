@@ -37,7 +37,7 @@ from engine.plan import (
 from engine.risk import evaluate_risk
 from engine.screener import final_score, quant_filter
 from engine.telegram_cmd import command_loop
-from notifier.telegram import TelegramSender
+from notifier.telegram import TelegramSender, dashboard_buttons
 from engine.intraday import add_tick, intraday_signal, krx_intraday
 from engine.agent import (
     build_context,
@@ -1016,7 +1016,8 @@ async def _agent_run(redis: aioredis.Redis, kis,
     tag = "·모의" if settings.kis_paper else "·실계좌"
     body = "\n".join(acted) if acted else "관망 — 신규 매매 없음(확신 부족/현금 보유)"
     await sender.send(f"🤖 스윙 에이전트 판정({slot}{tag}) — 완전위임\n"
-                      f"📊 {mv or '시장뷰 없음'}\n\n{body}")
+                      f"📊 {mv or '시장뷰 없음'}\n\n{body}",
+                      buttons=dashboard_buttons())
 
 
 async def _agent_loop(redis: aioredis.Redis, kis,
