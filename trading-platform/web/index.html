@@ -1228,35 +1228,62 @@ function mChart(code,cur){
     hide_volume:false,studies:["STD;SMA"]});
   cont.appendChild(s);
 }
+// 보조지표 — 클라이언트 계산(종가/거래량 배열). 룩어헤드 없음.
+function _smaArr(a,p){const o=Array(a.length).fill(null);let s=0;for(let i=0;i<a.length;i++){s+=a[i];if(i>=p)s-=a[i-p];if(i>=p-1)o[i]=s/p;}return o;}
+function _emaArr(a,p){const o=Array(a.length).fill(null),k=2/(p+1);let pr=null;for(let i=0;i<a.length;i++){const v=a[i];if(v==null){o[i]=pr;continue;}pr=(pr==null)?v:v*k+pr*(1-k);o[i]=pr;}return o;}
+function _rsiArr(a,p){const o=Array(a.length).fill(null);let g=0,l=0;for(let i=1;i<a.length;i++){const d=a[i]-a[i-1],u=d>0?d:0,dn=d<0?-d:0;if(i<=p){g+=u;l+=dn;if(i===p){g/=p;l/=p;o[i]=(l===0)?100:100-100/(1+g/l);}}else{g=(g*(p-1)+u)/p;l=(l*(p-1)+dn)/p;o[i]=(l===0)?100:100-100/(1+g/l);}}return o;}
+function _bbArr(a,p,k){const m=_smaArr(a,p),up=Array(a.length).fill(null),lo=Array(a.length).fill(null);for(let i=p-1;i<a.length;i++){let s=0;for(let j=i-p+1;j<=i;j++){const dd=a[j]-m[i];s+=dd*dd;}const sd=Math.sqrt(s/p);up[i]=m[i]+k*sd;lo[i]=m[i]-k*sd;}return{up,lo,mid:m};}
+function _macdArr(a){const ef=_emaArr(a,12),es=_emaArr(a,26),macd=a.map((_,i)=>(ef[i]!=null&&es[i]!=null)?ef[i]-es[i]:null),sig=_emaArr(macd,9),hist=macd.map((v,i)=>(v!=null&&sig[i]!=null)?v-sig[i]:null);return{macd,sig,hist};}
+function _pair(T,arr){const o=[];for(let i=0;i<T.length;i++)if(arr[i]!=null&&isFinite(arr[i]))o.push({time:T[i],value:arr[i]});return o;}
+function _syncTS(charts){let s=false;charts.forEach(src=>{src.timeScale().subscribeVisibleLogicalRangeChange(r=>{if(s||!r)return;s=true;charts.forEach(t=>{if(t!==src){try{t.timeScale().setVisibleLogicalRange(r);}catch(e){}}});s=false;});});}
 function mChartKR(e,code){
-  e.innerHTML=`<div class="num" style="margin:6px 0">국내 일봉 차트(우리 수집 데이터) · <b>${escH(code)}</b></div>
-    <div id="lwc" style="height:360px;width:100%"></div>
-    <div class="num" style="opacity:.7;margin-top:4px">※ 국내는 TradingView 실시간이 로그인을 요구해, 우리가 수집한 일봉으로 그려요(종가선 + 20일 이동평균).</div>`;
+  e.innerHTML=`<div class="num" style="margin:6px 0">국내 일봉 + 보조지표 · <b>${escH(code)}</b></div>
+    <div id="lwcP" style="height:260px;width:100%"></div>
+    <div class="num" style="margin:3px 0 0"><b style="color:#2563eb">━종가</b> · <b style="color:#f59e0b">━SMA20</b> · <b style="color:#a855f7">━SMA60</b> · <span style="color:#94a3b8">┈볼린저(20,2σ)</span> · 거래량(하단)</div>
+    <div id="lwcR" style="height:100px;width:100%;margin-top:8px"></div>
+    <div class="num" style="margin-top:1px">RSI(14) · 70 과매수 / 30 과매도</div>
+    <div id="lwcM" style="height:110px;width:100%;margin-top:8px"></div>
+    <div class="num" style="margin-top:1px">MACD(12,26,9) · 막대=히스토그램 <b style="color:#2563eb">━MACD</b> <b style="color:#f59e0b">━시그널</b></div>
+    <div class="num" style="opacity:.7;margin-top:5px">※ 우리가 수집한 일봉으로 직접 계산(국내 실시간은 TradingView 로그인 필요). 국내 일봉엔 시가가 없어 종가 기준.</div>`;
   loadLWC(async()=>{
-    const el=$("lwc"); if(!el) return;
-    if(!window.LightweightCharts){ el.innerHTML='<div class="empty">차트 라이브러리 로드 실패(네트워크 차단?)</div>'; return; }
-    let d; try{ d=await jget(`/stocks/${encodeURIComponent(code)}/candles?limit=180`); }
-    catch(err){ el.innerHTML='<div class="empty">차트 데이터 실패: '+escH(err.message||'')+'</div>'; return; }
+    const P=$("lwcP"); if(!P) return;
+    if(!window.LightweightCharts){ P.innerHTML='<div class="empty">차트 라이브러리 로드 실패(네트워크 차단?)</div>'; return; }
+    let d; try{ d=await jget(`/stocks/${encodeURIComponent(code)}/candles?limit=250`); }
+    catch(err){ P.innerHTML='<div class="empty">차트 데이터 실패: '+escH(err.message||'')+'</div>'; return; }
     const cs=(d.candles||[]).filter(c=>c.close&&c.time);
-    if(cs.length<5){ el.innerHTML=`<div class="empty">일봉 데이터 부족(${cs.length}개) — 이 종목은 아직 일봉 수집 전이에요. 관심종목에 담으면 채워집니다.</div>`; return; }
+    if(cs.length<20){ P.innerHTML=`<div class="empty">일봉 데이터 부족(${cs.length}개) — 관심종목에 담으면 채워집니다.</div>`; return; }
     const dark=(document.documentElement.dataset.theme||"dark")!=="light";
-    el.innerHTML="";
+    const T=cs.map(c=>c.time), C=cs.map(c=>+c.close), V=cs.map(c=>+(c.volume||0));
+    const gl=dark?"#1e293b":"#eef2f7", tx=dark?"#cbd5e1":"#334155";
+    const common=w=>({width:w,layout:{background:{color:"transparent"},textColor:tx},grid:{vertLines:{color:gl},horzLines:{color:gl}},rightPriceScale:{borderVisible:false},timeScale:{borderVisible:false},crosshair:{mode:0}});
     try{
-      const w=el.clientWidth||el.offsetWidth||520;
-      const chart=LightweightCharts.createChart(el,{width:w,height:360,
-        layout:{background:{color:"transparent"},textColor:dark?"#cbd5e1":"#334155"},
-        grid:{vertLines:{color:dark?"#1e293b":"#eef2f7"},horzLines:{color:dark?"#1e293b":"#eef2f7"}},
-        rightPriceScale:{borderVisible:false},timeScale:{borderVisible:false}});
-      const area=chart.addAreaSeries({lineColor:"#2563eb",topColor:"rgba(37,99,235,.35)",
-        bottomColor:"rgba(37,99,235,.02)",lineWidth:2,priceLineVisible:false});
-      area.setData(cs.map(c=>({time:c.time,value:+c.close})));
-      const closes=cs.map(c=>+c.close),sma=[];         // 20일 이동평균
-      for(let i=19;i<cs.length;i++){let s=0;for(let j=i-19;j<=i;j++)s+=closes[j];sma.push({time:cs[i].time,value:s/20});}
-      if(sma.length){const l=chart.addLineSeries({color:"#f59e0b",lineWidth:1,priceLineVisible:false,lastValueVisible:false});l.setData(sma);}
-      chart.timeScale().fitContent();
-      el._ro=new ResizeObserver(()=>{try{chart.applyOptions({width:el.clientWidth});}catch(e){}});
-      el._ro.observe(el);
-    }catch(err){ el.innerHTML='<div class="empty">차트 렌더 실패: '+escH(err.message||err)+'</div>'; }
+      P.innerHTML=""; const w=P.clientWidth||520;
+      const cP=LightweightCharts.createChart(P,Object.assign(common(w),{height:260}));
+      const bb=_bbArr(C,20,2);
+      const bu=cP.addLineSeries({color:"#94a3b8",lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false}); bu.setData(_pair(T,bb.up));
+      const bl=cP.addLineSeries({color:"#94a3b8",lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false}); bl.setData(_pair(T,bb.lo));
+      const vol=cP.addHistogramSeries({priceScaleId:"vol",priceFormat:{type:"volume"}});
+      cP.priceScale("vol").applyOptions({scaleMargins:{top:0.82,bottom:0}});
+      vol.setData(cs.map((c,i)=>({time:c.time,value:V[i],color:(i>0&&C[i]>=C[i-1])?"rgba(34,197,94,.35)":"rgba(239,68,68,.35)"})));
+      const price=cP.addLineSeries({color:"#2563eb",lineWidth:2,priceLineVisible:false}); price.setData(_pair(T,C));
+      const s20=cP.addLineSeries({color:"#f59e0b",lineWidth:1,priceLineVisible:false,lastValueVisible:false}); s20.setData(_pair(T,_smaArr(C,20)));
+      const s60=cP.addLineSeries({color:"#a855f7",lineWidth:1,priceLineVisible:false,lastValueVisible:false}); s60.setData(_pair(T,_smaArr(C,60)));
+      cP.timeScale().fitContent();
+      const R=$("lwcR"); R.innerHTML=""; const cR=LightweightCharts.createChart(R,Object.assign(common(w),{height:100}));
+      const rsiS=cR.addLineSeries({color:"#0ea5e9",lineWidth:1,priceLineVisible:false}); rsiS.setData(_pair(T,_rsiArr(C,14)));
+      rsiS.createPriceLine({price:70,color:"#ef4444",lineWidth:1,lineStyle:2,axisLabelVisible:true,title:"70"});
+      rsiS.createPriceLine({price:30,color:"#22c55e",lineWidth:1,lineStyle:2,axisLabelVisible:true,title:"30"});
+      cR.timeScale().fitContent();
+      const M=$("lwcM"); M.innerHTML=""; const cM=LightweightCharts.createChart(M,Object.assign(common(w),{height:110}));
+      const mm=_macdArr(C);
+      const mh=cM.addHistogramSeries({priceLineVisible:false,lastValueVisible:false});
+      mh.setData(_pair(T,mm.hist).map(p=>({time:p.time,value:p.value,color:p.value>=0?"rgba(34,197,94,.5)":"rgba(239,68,68,.5)"})));
+      const ml=cM.addLineSeries({color:"#2563eb",lineWidth:1,priceLineVisible:false,lastValueVisible:false}); ml.setData(_pair(T,mm.macd));
+      const sg=cM.addLineSeries({color:"#f59e0b",lineWidth:1,priceLineVisible:false,lastValueVisible:false}); sg.setData(_pair(T,mm.sig));
+      cM.timeScale().fitContent();
+      _syncTS([cP,cR,cM]);
+      const ro=new ResizeObserver(()=>{const ww=P.clientWidth;[cP,cR,cM].forEach(c=>{try{c.applyOptions({width:ww});}catch(e){}});}); ro.observe(P);
+    }catch(err){ P.innerHTML='<div class="empty">차트 렌더 실패: '+escH(err.message||err)+'</div>'; }
   });
 }
 // Lightweight Charts(TradingView 무료 라이브러리) 지연 로드 — 자체 호스팅이라 CSP 제약 없음.
@@ -1267,7 +1294,7 @@ function loadLWC(cb){
   const s=document.createElement("script");
   s.src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js";
   s.onload=()=>{ const q=window._lwcQ||[]; window._lwcQ=null; q.forEach(f=>{try{f();}catch(e){}}); };
-  s.onerror=()=>{ window._lwcQ=null; const el=$("lwc"); if(el) el.innerHTML='<div class="empty">차트 라이브러리 로드 실패(네트워크)</div>'; };
+  s.onerror=()=>{ const q=window._lwcQ||[]; window._lwcQ=null; q.forEach(f=>{try{f();}catch(e){}}); };  // 콜백이 window.LightweightCharts 없음을 감지해 안내
   document.head.appendChild(s);
 }
 async function addWatchModal(code,name){
