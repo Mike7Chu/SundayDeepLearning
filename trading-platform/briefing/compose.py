@@ -59,6 +59,40 @@ def _market_section(market: dict) -> list[str]:
     return out
 
 
+def _us_section(us: dict) -> list[str]:
+    """미장 간밤 동향 — 우리가 수집한 미국 유니버스의 등락 상위/하위."""
+    if not us:
+        return []
+    g, l = us.get("gainers") or [], us.get("losers") or []
+    if not (g or l):
+        return []
+    def _row(q):
+        return f"{q.get('name') or q.get('code')} {q.get('change_pct', 0):+.1f}%"
+    out = ["\n[🌎 미장 간밤 동향]"]
+    if g:
+        out.append("▲ " + " · ".join(_row(q) for q in g))
+    if l:
+        out.append("▼ " + " · ".join(_row(q) for q in l))
+    return out
+
+
+def _radar_section(radar: dict) -> list[str]:
+    """발굴 레이더 — 급등 전조(거래대금·신고가·강도·실적·추세) 상위."""
+    rows = (radar or {}).get("rows") or []
+    if not rows:
+        return []
+    out = ["\n[🚀 발굴 레이더(급등 전조)]"]
+    note = (radar.get("regime") or {}).get("note")
+    if note:
+        out.append(f"· 환경: {note}")
+    for r in rows[:4]:
+        sig = " · ".join((r.get("signals") or [])[:2])
+        out.append(f"· {r.get('name') or r.get('code')} {r.get('change_pct', 0):+.1f}% "
+                   f"(레이더 {r.get('radar')}){(' — ' + sig) if sig else ''}")
+    out.append("  ※ 예측이 아니라 '지금 깨어나는' 종목 · 되돌림 주의")
+    return out
+
+
 def _plan_section(plan: dict) -> list[str]:
     if not plan:
         return []
@@ -130,14 +164,17 @@ def compose_brief(quotes: list[dict], value_rows: list[dict],
                   drip: list[dict] | None = None, *,
                   market: dict | None = None, plan: dict | None = None,
                   risk: dict | None = None, agent: dict | None = None,
-                  stats: dict | None = None) -> str:
+                  stats: dict | None = None, us: dict | None = None,
+                  radar: dict | None = None) -> str:
     """수집 데이터 → 한국어 일일 브리핑. 데이터 없는 섹션은 생략.
 
-    앞쪽(시장·플랜·자동매매·성적)이 '행동'에 가까운 정보, 뒤쪽이 참고 목록.
+    앞쪽(시장·미장·플랜·레이더·자동매매·성적)이 '행동'에 가까운 정보, 뒤쪽이 참고 목록.
     """
     lines: list[str] = ["📊 오늘의 주식 브리핑"]
     lines += _market_section(market or {})
+    lines += _us_section(us or {})
     lines += _plan_section(plan or {})
+    lines += _radar_section(radar or {})
     lines += _auto_section(risk or {}, agent or {})
     lines += _stats_section(stats or {})
 

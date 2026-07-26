@@ -24,6 +24,7 @@ from shared.redis_keys import (
     ENGINE_RISK_KEY,
     JOURNAL_KEY,
     MARKET_INDICATORS_KEY,
+    STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
 )
 from shared.settings import settings
@@ -73,12 +74,32 @@ async def _extras(redis: aioredis.Redis) -> dict:
             continue
     entries = [{"code": j.get("code"), "side": j.get("side"), "price": j.get("price"),
                 "qty": j.get("qty"), "ts": j.get("ts")} for j in journal]
+    # 미장 간밤 동향 — 수집된 미국 유니버스(stock:market)의 등락 상·하위
+    us = []
+    for v in (await redis.hgetall(STOCK_MARKET_KEY)).values():
+        try:
+            q = json.loads(v)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if q.get("currency") == "USD" and q.get("change_pct") is not None and q.get("price"):
+            us.append(q)
+    us.sort(key=lambda q: q.get("change_pct") or 0, reverse=True)
+    us_movers = {"gainers": us[:3], "losers": us[-3:][::-1]} if us else {}
+    # 발굴 레이더 — 무겁지만 하루 1회이므로 직접 계산(Toss 캔들 온디맨드)
+    try:
+        from api.routers.stocks import _radar_build
+        radar = await _radar_build(8)
+    except Exception as exc:
+        logger.info("레이더 계산 생략: %s", exc)
+        radar = {}
     return {
         "market": await _jget(redis, MARKET_INDICATORS_KEY),
         "plan": await _jget(redis, ENGINE_PLAN_KEY),
         "risk": await _jget(redis, ENGINE_RISK_KEY),
         "agent": await _jget(redis, AGENT_LAST_KEY),
         "stats": summarize(entries) if entries else {},
+        "us": us_movers,
+        "radar": radar,
     }
 
 
@@ -91,7 +112,8 @@ async def run_once(redis: aioredis.Redis, sender: TelegramSender) -> bool:
         return False
     msg = compose_brief(quotes, value_rows, signal_rows, div_rows, drip,
                         market=ex["market"], plan=ex["plan"], risk=ex["risk"],
-                        agent=ex["agent"], stats=ex["stats"])
+                        agent=ex["agent"], stats=ex["stats"], us=ex["us"],
+                        radar=ex["radar"])
     await sender.send(msg)
     logger.info("브리핑 발송(telegram=%s, %d종목)", sender.enabled, len(quotes))
     return True
