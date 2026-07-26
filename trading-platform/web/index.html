@@ -1303,13 +1303,49 @@ async function addWatchModal(code,name){
   if(r.ok||r.status===409){ openStock(code,name); }
   else{ const e=await r.json().catch(()=>({})); alert("추가 실패: "+(e.detail||r.status)); }
 }
-async function mBacktest(code){
-  const e=$("mExtra"); e.innerHTML='<div class="empty">백테스트 중…</div>';
-  try{ const out=await Promise.all(["sma","rsi","momentum"].map(s=>jget(`/stocks/backtest/${code}?strategy=${s}`)));
-    const body=out.map(d=>`<tr><td>${d.strategy||"–"}</td><td class="strong ${(d.total_return_pct||0)>=0?'pos':'neg'}">${numC(d.total_return_pct)}</td>
-      <td class="num">${numC(d.buy_hold_pct)}</td><td class="num">${d.win_rate_pct??"–"}</td><td class="neg">${numC(d.max_drawdown_pct)}</td></tr>`).join("");
-    e.innerHTML=`<div class="num" style="margin:6px 0">수수료 미반영 · 룰 검증용</div>`+tableHTML(["전략","전략수익%","매수후보유%","승률%","MDD%"],body);
-  }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
+async function mBacktest(code,strat){
+  strat=strat||"strategy";
+  const e=$("mExtra"); if(!e) return;
+  e.innerHTML='<div class="empty">백테스트 중… (비용 반영)</div>';
+  try{
+    const d=await jget(`/stocks/backtest/${encodeURIComponent(code)}?strategy=${strat}`);
+    if(d.error){ e.innerHTML=btTabs(code,strat)+`<div class="empty" style="margin-top:8px">${escH(d.error)}</div>`; return; }
+    e.innerHTML=btCard(code,d);
+  }catch(err){ e.innerHTML=`<div class="empty">실패: ${escH(err.message||'')}</div>`; }
+}
+function btTabs(code,cur){
+  return `<div class="arow" style="margin-bottom:6px">`+[["strategy","우리 전략"],["sma","SMA크로스"],["rsi","RSI"],["momentum","모멘텀"]]
+    .map(([s,l])=>`<button class="btn ${cur===s?'buy':''}" onclick="mBacktest('${qesc(code)}','${s}')">${l}</button>`).join(" ")+`</div>`;
+}
+function btCard(code,d){
+  const tabs=btTabs(code,d.strategy);
+  if(!d.trades){ return tabs+`<div class="empty" style="margin-top:8px">${escH(d.verdict||'이 기간엔 진입 신호 없음')} · 단순보유 ${numC(d.buy_hold_pct)}%</div>`; }
+  const V=(d.verdict||""); const edge=V.includes("엣지 있음");
+  const badge=`<span class="badge ${edge?'pos':(V.includes('없음')?'sell':'')}">${escH(V)}</span>`;
+  const pc=v=>((v||0)>=0?'pos':'neg');
+  const vs=(d.net_return_pct||0)-(d.buy_hold_pct||0);
+  const kv=(k,v,cls="")=>`<div style="min-width:82px"><div class="num">${k}</div><b class="${cls}">${v}</b></div>`;
+  return `${tabs}
+   <div class="card">
+     <div style="margin-bottom:8px">${badge}</div>
+     <div class="arow" style="gap:16px;flex-wrap:wrap">
+       ${kv("전략수익 net",numC(d.net_return_pct)+"%",pc(d.net_return_pct)+" strong")}
+       ${kv("단순보유",numC(d.buy_hold_pct)+"%",pc(d.buy_hold_pct))}
+       ${kv("초과수익",(vs>=0?"+":"")+numC(vs)+"%",pc(vs))}
+       ${kv("연환산 CAGR",d.cagr_pct!=null?numC(d.cagr_pct)+"%":"–",pc(d.cagr_pct))}
+     </div>
+     <div class="arow" style="gap:16px;flex-wrap:wrap;margin-top:10px">
+       ${kv("거래수",d.trades+"회")}
+       ${kv("승률",d.win_rate_pct+"%")}
+       ${kv("손익비",d.payoff!=null?d.payoff:"–")}
+       ${kv("1회 기대값",numC(d.expectancy_pct)+"%",pc(d.expectancy_pct))}
+       ${kv("최대낙폭",numC(d.max_drawdown_pct)+"%","neg")}
+       ${kv("시장노출",d.exposure_pct+"%")}
+       ${kv("평균보유",d.avg_hold_days+"일")}
+     </div>
+     <div class="num" style="margin-top:10px">gross ${numC(d.gross_return_pct)}% → <b>net ${numC(d.net_return_pct)}%</b> (왕복비용 ${numC(d.cost_drag_pct)}% 반영) · ${d.bars}봉 · 룩어헤드 없음
+       <br><b class="sell">과거 성과는 미래를 보장하지 않습니다.</b> ${d.strategy==="strategy"?"'우리 전략'은 상승추세 SMA20 눌림목 재돌파 진입 + 손절/목표(1:2)/추세이탈 청산을 시뮬레이션한 것.":"참고용 벤치마크 룰."}</div>
+   </div>`;
 }
 const escH=(s)=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
 async function mResearch(code, force){

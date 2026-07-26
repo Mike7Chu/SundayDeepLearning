@@ -245,16 +245,26 @@ async def stocks_dividend(monthly_budget: float = 0.0) -> dict:
 
 
 @router.get("/stocks/backtest/{code}")
-async def stocks_backtest(code: str, strategy: str = "sma") -> dict:
-    """저장된 일봉으로 전략 백테스트(sma|rsi|momentum). 룰 검증용(실매매 아님)."""
+async def stocks_backtest(code: str, strategy: str = "strategy") -> dict:
+    """저장된 일봉으로 전략 백테스트 — 비용(거래세·수수료·슬리피지) 반영 net.
+
+    strategy=strategy(우리 추세 눌림목·기본) | sma | rsi | momentum(참고 벤치마크).
+    """
     if strategy not in STRATEGIES:
         raise HTTPException(400, f"전략은 {', '.join(STRATEGIES)} 중 하나")
-    raw = await get_redis().get(stock_ohlcv_key(code))
-    if not raw:
-        raise HTTPException(404, "일봉 없음 — 수집 대기(KIS 키 필요)")
-    candles = _json.loads(raw)
-    closes = [c["close"] for c in candles if isinstance(c, dict) and c.get("close")]
-    return {"code": code, **backtest(closes, strategy)}
+    code = code if code.isdigit() else code.upper()
+    redis = get_redis()
+    raw = await redis.get(stock_ohlcv_key(code))
+    candles = []
+    if raw:
+        try:
+            candles = _json.loads(raw)
+        except (ValueError, TypeError):
+            candles = []
+    if len(candles) < 30:                        # 미수집·부족 → 온디맨드 보강
+        candles = await _ondemand_candles(redis, code) or candles
+    candles = [c for c in candles if isinstance(c, dict) and c.get("close")]
+    return {"code": code, **backtest(candles, strategy, kr=code.isdigit())}
 
 
 @router.get("/stocks/{code}/candles")
