@@ -11,13 +11,21 @@ import logging
 
 import redis.asyncio as aioredis
 
+from api.services.stats import summarize
 from api.services.stock_dividend import dividend_view
 from api.services.stock_signal import signals_for
 from api.services.stock_value import value_screener
 from briefing.compose import compose_brief, has_content
 from collector.stock.kis import load_watchlist
 from notifier.telegram import TelegramSender
-from shared.redis_keys import STOCK_QUOTE_KEY
+from shared.redis_keys import (
+    AGENT_LAST_KEY,
+    ENGINE_PLAN_KEY,
+    ENGINE_RISK_KEY,
+    JOURNAL_KEY,
+    MARKET_INDICATORS_KEY,
+    STOCK_QUOTE_KEY,
+)
 from shared.settings import settings
 
 logging.basicConfig(
@@ -45,12 +53,45 @@ async def gather(redis: aioredis.Redis) -> tuple[list, list, list, list, list]:
     return quotes, value_rows, signal_rows, div.get("rows", []), div.get("drip", [])
 
 
+async def _jget(redis: aioredis.Redis, key: str) -> dict:
+    raw = await redis.get(key)
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+async def _extras(redis: aioredis.Redis) -> dict:
+    """행동에 가까운 섹션(시장·플랜·자동매매·성적)을 엔진/시장 스냅샷에서 모은다."""
+    journal = []
+    for raw in await redis.lrange(JOURNAL_KEY, 0, -1):
+        try:
+            journal.append(json.loads(raw))
+        except (json.JSONDecodeError, TypeError):
+            continue
+    entries = [{"code": j.get("code"), "side": j.get("side"), "price": j.get("price"),
+                "qty": j.get("qty"), "ts": j.get("ts")} for j in journal]
+    return {
+        "market": await _jget(redis, MARKET_INDICATORS_KEY),
+        "plan": await _jget(redis, ENGINE_PLAN_KEY),
+        "risk": await _jget(redis, ENGINE_RISK_KEY),
+        "agent": await _jget(redis, AGENT_LAST_KEY),
+        "stats": summarize(entries) if entries else {},
+    }
+
+
 async def run_once(redis: aioredis.Redis, sender: TelegramSender) -> bool:
     quotes, value_rows, signal_rows, div_rows, drip = await gather(redis)
-    if not has_content(quotes, value_rows, signal_rows, div_rows):
+    ex = await _extras(redis)
+    has_plan = bool((ex["plan"].get("buys") or ex["plan"].get("sells")))
+    if not (has_content(quotes, value_rows, signal_rows, div_rows) or has_plan):
         logger.info("브리핑 생략 — 데이터 없음(KIS 키/수집 대기)")
         return False
-    msg = compose_brief(quotes, value_rows, signal_rows, div_rows, drip)
+    msg = compose_brief(quotes, value_rows, signal_rows, div_rows, drip,
+                        market=ex["market"], plan=ex["plan"], risk=ex["risk"],
+                        agent=ex["agent"], stats=ex["stats"])
     await sender.send(msg)
     logger.info("브리핑 발송(telegram=%s, %d종목)", sender.enabled, len(quotes))
     return True

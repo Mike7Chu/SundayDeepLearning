@@ -1,4 +1,8 @@
-"""브리핑 문구 조립 (순수 함수 — 테스트 용이)."""
+"""브리핑 문구 조립 (순수 함수 — 테스트 용이).
+
+단순 나열을 넘어 '오늘 뭘 할까'가 보이도록: 시장 온도 → 매매 플랜(진입/손절/목표) →
+자동매매(모의) 계좌·성적 → 관심종목·가치·배당 순. 모든 입력은 dict(수집은 main.py).
+"""
 from __future__ import annotations
 
 
@@ -8,11 +12,134 @@ def _arrow(pct) -> str:
     return f"{'🔺' if pct >= 0 else '🔻'}{pct:+.2f}%"
 
 
+def _won(v) -> str:
+    """원화 축약: 1억 이상 'N.N억', 1만 이상 'N,NNN만', 그 외 원."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "–"
+    if abs(v) >= 1e8:
+        return f"{v/1e8:.2f}억"
+    if abs(v) >= 1e4:
+        return f"{v/1e4:,.0f}만원"
+    return f"{v:,.0f}원"
+
+
+def _px(v, currency=None) -> str:
+    if v is None:
+        return "?"
+    return f"${v:,.2f}" if currency == "USD" else f"{v:,.0f}"
+
+
+def _market_section(market: dict) -> list[str]:
+    if not market:
+        return []
+    out = []
+    idx = []
+    for key, label in (("kospi", "코스피"), ("kosdaq", "코스닥")):
+        m = market.get(key) or {}
+        if m.get("price") is not None:
+            idx.append(f"{label} {m['price']:,.2f} {_arrow(m.get('change_pct'))}")
+    inv = (market.get("investor") or {}).get("kospi") or {}
+    line2 = ""
+    if inv.get("foreigner") is not None or inv.get("institution") is not None:
+        f, i = inv.get("foreigner"), inv.get("institution")
+        parts = []
+        if f is not None:
+            parts.append(f"외국인 {f:+,.0f}억")
+        if i is not None:
+            parts.append(f"기관 {i:+,.0f}억")
+        line2 = " · ".join(parts) + " (코스피 순매수)"
+    if idx or line2:
+        out.append("\n[시장 온도]")
+        if idx:
+            out.append("· " + " · ".join(idx))
+        if line2:
+            out.append("· " + line2)
+    return out
+
+
+def _plan_section(plan: dict) -> list[str]:
+    if not plan:
+        return []
+    buys, sells = plan.get("buys") or [], plan.get("sells") or []
+    if not (buys or sells):
+        return []
+    style = plan.get("style")
+    out = [f"\n[🎯 오늘의 매매 플랜{(' — ' + style) if style else ''}]"]
+    if buys:
+        out.append("🟢 매수 후보")
+        for b in buys[:4]:
+            cur = b.get("currency")
+            head = (f"· {b.get('name','')}({b.get('code','')}) "
+                    f"진입 {_px(b.get('entry'), cur)} → 목표 {_px(b.get('target'), cur)} / "
+                    f"손절 {_px(b.get('stop'), cur)}")
+            sw = b.get("swing")
+            if sw is not None:
+                head += f" (스윙 {sw:g})"
+            out.append(head)
+            rs = " · ".join((b.get("reasons") or [])[:3])
+            if rs:
+                out.append(f"   ↳ {rs}")
+    if sells:
+        out.append("🔴 매도 점검(보유 중 위험신호)")
+        for s in sells[:4]:
+            rs = " · ".join((s.get("reasons") or [])[:2])
+            out.append(f"· {s.get('name','')}({s.get('code','')}) "
+                       f"{s.get('pnl_pct','?')}% · {s.get('action','')}"
+                       f"{(' — ' + rs) if rs else ''}")
+    return out
+
+
+def _auto_section(risk: dict, agent: dict) -> list[str]:
+    out = ["\n[🤖 자동매매(모의) 계좌]"]
+    total = (risk or {}).get("total_asset")
+    if total:
+        out.append(f"· 계좌 평가 {_won(total)}")
+    if agent and agent.get("ts"):
+        mv = agent.get("market_view") or ""
+        acted, n = agent.get("acted", 0), agent.get("n", 0)
+        did = f"매매 {acted}건 실행" if acted else "관망(신규 매매 없음)"
+        slot = agent.get("slot", "")
+        out.append(f"· 직전 판정({slot}): {did} · 검토 {n}건")
+        if mv:
+            out.append(f"   ↳ 시장뷰: {mv}")
+    return out if len(out) > 1 else []
+
+
+def _stats_section(stats: dict) -> list[str]:
+    if not stats or not stats.get("n"):
+        return []
+    n = stats["n"]
+    exp = stats.get("expectancy_pct")
+    wr = stats.get("win_rate")
+    net = stats.get("net")
+    tail = " · 표본 부족(20회+ 권장)" if n < 20 else ""
+    out = ["\n[📈 매매 성적(순손익 기준)]"]
+    if exp is not None:
+        edge = "엣지 있음 ✅" if exp > 0 else "엣지 없음 ⚠️"
+        out.append(f"· 승률 {wr}% · 1회 기대값 {exp:+.2f}% {edge} · "
+                   f"순손익 {_won(net)} ({n}회){tail}")
+    else:
+        out.append(f"· {n}회 체결{tail}")
+    return out
+
+
 def compose_brief(quotes: list[dict], value_rows: list[dict],
                   signal_rows: list[dict], dividend_rows: list[dict],
-                  drip: list[dict] | None = None) -> str:
-    """수집 데이터 → 한국어 일일 브리핑. 데이터 없는 섹션은 생략."""
+                  drip: list[dict] | None = None, *,
+                  market: dict | None = None, plan: dict | None = None,
+                  risk: dict | None = None, agent: dict | None = None,
+                  stats: dict | None = None) -> str:
+    """수집 데이터 → 한국어 일일 브리핑. 데이터 없는 섹션은 생략.
+
+    앞쪽(시장·플랜·자동매매·성적)이 '행동'에 가까운 정보, 뒤쪽이 참고 목록.
+    """
     lines: list[str] = ["📊 오늘의 주식 브리핑"]
+    lines += _market_section(market or {})
+    lines += _plan_section(plan or {})
+    lines += _auto_section(risk or {}, agent or {})
+    lines += _stats_section(stats or {})
 
     if quotes:
         movers = sorted(quotes, key=lambda q: abs(q.get("change_pct") or 0), reverse=True)[:5]
@@ -33,7 +160,9 @@ def compose_brief(quotes: list[dict], value_rows: list[dict],
     if top_value:
         lines.append("\n[가치 스크리너 상위(마법공식)]")
         for v in top_value:
-            lines.append(f"· {v.get('name','')} PER {v.get('per')} PBR {v.get('pbr')} ROE {v.get('roe')}%")
+            tag = f" [{v['fin_period']} TTM]" if v.get("fin_period") else ""
+            lines.append(f"· {v.get('name','')} PER {v.get('per')} PBR {v.get('pbr')} "
+                         f"ROE {v.get('roe')}%{tag}")
 
     top_div = [d for d in dividend_rows if d.get("yield_pct")][:3]
     if top_div:
