@@ -23,7 +23,13 @@ import redis.asyncio as aioredis
 
 from collector.stock.toss import TossClient
 from engine.orders import cancel_gated_order, place_gated_order
-from notifier.telegram import TelegramSender, dashboard_buttons
+from notifier.telegram import (
+    QUICK_KEYS,
+    TelegramSender,
+    dashboard_buttons,
+    esc,
+    stock_buttons,
+)
 from shared.redis_keys import (
     COACH_NOTE_KEY,
     COACH_REQ_KEY,
@@ -58,6 +64,11 @@ _HELP = ("명령: 잔고 · 상태 · 후보 · 플랜 · 점검 · 리포트 ·
 def parse_command(text: str) -> dict | None:
     """명령 문자열 → {cmd, ...} (순수 함수). 모르는 명령은 None."""
     t = (text or "").strip()
+    # 빠른명령 키보드 라벨(이모지 접두, 예 '🎯 플랜') → 뒤 단어로 정규화
+    if " " in t:
+        tail = t.rsplit(" ", 1)[-1]
+        if tail in ("잔고", "상태", "후보", "플랜", "점검", "도움말"):
+            t = tail
     if t in ("잔고", "상태", "후보", "플랜", "매매플랜", "도움말", "/start", "help"):
         return {"cmd": {"/start": "도움말", "help": "도움말",
                         "매매플랜": "플랜"}.get(t, t)}
@@ -145,7 +156,7 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
         return
     cmd = p["cmd"]
     if cmd == "도움말":
-        await sender.send(_HELP)
+        await sender.send(_HELP, reply_keyboard=QUICK_KEYS)   # 하단 상시 빠른명령 설치
     elif cmd == "플랜":
         p_ = await _jget(redis, ENGINE_PLAN_KEY)
         buys, sells = p_.get("buys") or [], p_.get("sells") or []
@@ -170,7 +181,9 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
                 lines.append(f"{i}. {s.get('name') or s['code']} — {s['action']}: "
                              f"{' · '.join(s.get('reasons', []))}")
         lines.append("※ 판단 보조 — 최종 결정과 주문은 직접(매수 예: 토스매수 코드 수량 가격)")
-        await sender.send("\n".join(lines), buttons=_dash_btn())
+        # 종목별 '🔎 상세' 버튼(대시보드가 해당 종목 모달을 연다) + 대시보드 열기
+        sbtn = stock_buttons([(b["code"], b.get("name")) for b in buys]) or []
+        await sender.send("\n".join(lines), buttons=(sbtn + (_dash_btn() or [])) or None)
     elif cmd == "note_add":
         old = await redis.get(COACH_NOTE_KEY)
         merged = (old + "\n\n" if old else "") + p["text"]
@@ -217,11 +230,12 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
         r = await _jget(redis, ENGINE_RISK_KEY)
         hb = await redis.get(RESEARCH_HB_KEY)
         await sender.send(
-            f"🛡️ 리스크 실드 {'🔒매수잠금' if r.get('buy_lock') else '✅정상'}\n"
-            f"MDD {r.get('mdd_pct')}% · 현금 {r.get('cash_pct')}% · "
+            f"🛡️ <b>리스크 실드</b> {'🔒 매수잠금' if r.get('buy_lock') else '✅ 정상'}\n"
+            f"MDD <b>{esc(r.get('mdd_pct'))}%</b> · 현금 <b>{esc(r.get('cash_pct'))}%</b> · "
             f"종목한도 {r.get('per_stock_cap') or 0:,.0f}원\n"
-            + " / ".join(r.get("reasons", []))
-            + f"\nAI 리서치(호스트): {'✅ 구동 중' if hb else '🚫 응답 없음 — 재시작 필요'}")
+            + esc(" / ".join(r.get("reasons", [])))
+            + f"\nAI 리서치(호스트): {'✅ 구동 중' if hb else '🚫 응답 없음 — 재시작 필요'}",
+            buttons=_dash_btn(), html=True)
     elif cmd == "후보":
         b = await _jget(redis, ENGINE_BUYLIST_KEY)
         rows = b.get("rows", [])[:5]
@@ -255,11 +269,11 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
         est = (f"{p['qty'] * price:,.0f}원" if kr
                else f"${p['qty'] * price:,.2f}")
         await sender.send(
-            f"⚠️ 실주문 확인 필요 [{broker_kr}]\n{side_kr} {p['code']} {p['qty']:g}주 "
-            f"@{px} (예상 {est})\n"
-            f"→ 아래 버튼을 누르거나 2분 내 '확인 {n}' 회신",
+            f"⚠️ <b>실주문 확인</b> [{esc(broker_kr)}]\n"
+            f"{side_kr} <code>{esc(p['code'])}</code> {p['qty']:g}주 @ <b>{esc(px)}</b>\n"
+            f"예상 금액 <b>{esc(est)}</b>\n→ 버튼을 누르거나 2분 내 '확인 {n}' 회신",
             buttons=[[{"text": "✅ 확인 주문", "cb": f"cf:{n}"},
-                      {"text": "❌ 취소", "cb": f"dr:{n}"}]])
+                      {"text": "❌ 취소", "cb": f"dr:{n}"}]], html=True)
     elif cmd == "confirm":
         await sender.send(await _execute_pending(redis, toss, kis, p["n"]))
     elif cmd == "cancel":

@@ -976,6 +976,7 @@ async def _agent_run(redis: aioredis.Redis, kis,
     fx = await _fx_rate(redis)
     now = time.time()
     acted: list[str] = []
+    touched: list[tuple] = []                            # (code, name) — 종목 상세 버튼용
     buys_done = 0
     for d in decisions:
         act, code = d["action"], d["code"]
@@ -996,6 +997,7 @@ async def _agent_run(redis: aioredis.Redis, kis,
                 continue
             acted.append(f"🟢 매수 {'✅' if ok else '🚫'} {row.get('name')}({code}) "
                          f"{note} — {reason}\n   {msg}")
+            touched.append((code, row.get("name")))
             if ok:
                 buys_done += 1
         elif act == "SELL":
@@ -1008,6 +1010,7 @@ async def _agent_run(redis: aioredis.Redis, kis,
                 continue
             acted.append(f"🔴 매도 {'✅' if ok else '🚫'} {h.get('name') or code}({code}) "
                          f"{note} — {reason}\n   {msg}")
+            touched.append((code, h.get("name") or code))
         # HOLD → 행동 없음
 
     await redis.set(AGENT_LAST_KEY, json.dumps(
@@ -1015,9 +1018,11 @@ async def _agent_run(redis: aioredis.Redis, kis,
          "acted": len(acted), "paper": settings.kis_paper}, ensure_ascii=False))
     tag = "·모의" if settings.kis_paper else "·실계좌"
     body = "\n".join(acted) if acted else "관망 — 신규 매매 없음(확신 부족/현금 보유)"
+    from notifier.telegram import stock_buttons
+    btns = (stock_buttons(touched) or []) + (dashboard_buttons() or [])  # 매매 종목 상세 + 대시보드
     await sender.send(f"🤖 스윙 에이전트 판정({slot}{tag}) — 완전위임\n"
                       f"📊 {mv or '시장뷰 없음'}\n\n{body}",
-                      buttons=dashboard_buttons())
+                      buttons=btns or None)
 
 
 async def _agent_loop(redis: aioredis.Redis, kis,

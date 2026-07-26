@@ -1319,6 +1319,11 @@ function init(){
     if(s&&s.classList.contains("open")&&!s.contains(e.target)&&e.target.id!=="moreBtn"&&!$("moreBtn").contains(e.target)) closeMore();
   });
   switchTab("home");
+  // 딥링크: ?stock=코드 (텔레그램 '🔎 상세' 버튼) → 해당 종목 모달 바로 열기
+  try{
+    const sc=new URLSearchParams(location.search).get("stock");
+    if(sc) setTimeout(()=>openStock(sc.toUpperCase(),""), 300);
+  }catch(e){}
   startStream();   // SSE 실시간 시세(관심∪보유) — 셀 단위 즉시 반영
   // 전체 데이터 정합: 활성 탭을 12초마다 자동 새로고침(설정 탭·입력 중은 건너뜀)
   setInterval(()=>{
