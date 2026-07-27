@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     agent_live_enabled: bool = False         # true라야 실계좌 주문(기본 모의 전용 잠금)
     agent_max_buys: int = 3                  # 1회 실행당 신규 매수 상한
     agent_check_interval_sec: float = 300.0  # 스케줄 확인 주기(초)
+    # 플랜 매수 후보를 국내·미국 각각 최소 확보(한쪽 슬롯이 빈손이 안 되게)
+    plan_kr_buys: int = 2                     # 플랜에 담을 국내 후보 수(스윙 상위)
+    plan_us_buys: int = 2                     # 플랜에 담을 미국 후보 수(스윙 상위)
 
     # 전체 시장 스크리너: 유니버스 펀더멘털 수집(배치·느린 주기, KIS 레이트리밋 대비)
     market_scan_interval_sec: float = 1800.0  # 유니버스 1바퀴 목표 주기(KIS 펀더멘털·수급 감지)

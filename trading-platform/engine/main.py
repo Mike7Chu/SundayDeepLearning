@@ -645,6 +645,11 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
                          "entry": lv.get("entry"), "stop": lv.get("stop"),
                          "target": lv.get("target"), "qty": qty})
     buys.sort(key=lambda b: b["swing"], reverse=True)
+    # 국내·미국 각각 스윙 상위 N개 확보 → 국장/미장 슬롯이 각자 매매할 후보를 갖게 한다.
+    # (전엔 swing 순 상위 3만 담아 미국 모멘텀주가 독식 → 국장 슬롯이 늘 빈손이었음.)
+    kr_b = [b for b in buys if b.get("currency") != "USD"][:settings.plan_kr_buys]
+    us_b = [b for b in buys if b.get("currency") == "USD"][:settings.plan_us_buys]
+    plan_buys = sorted(kr_b + us_b, key=lambda b: b["swing"], reverse=True)
 
     sells: list[dict] = []
     for h in holdings:
@@ -667,10 +672,10 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
 
     await redis.set(ENGINE_PLAN_KEY, json.dumps(
         {"style": "실적+추세 스윙 · 중립 리스크 · 국내 전체+미국",
-         "buys": buys[:3], "sells": sells[:3], "ts": time.time()},
+         "buys": plan_buys, "sells": sells[:3], "ts": time.time()},
         ensure_ascii=False))
-    logger.info("[plan] 매수 후보 %d(검증 %d) · 매도 점검 %d",
-                min(3, len(buys)), len(buys), min(3, len(sells)))
+    logger.info("[plan] 매수 후보 %d(국내 %d·미국 %d, 검증 %d) · 매도 점검 %d",
+                len(plan_buys), len(kr_b), len(us_b), len(buys), min(3, len(sells)))
     # 미장 자동매매(옵트인): 스윙 상위 미국 후보를 KIS 해외(모의 지원)로 자동매수.
     # 국내=가치(2단계 필터), 미국=모멘텀(스윙) — 전략 분리 유지.
     if kis is not None and sender is not None:
