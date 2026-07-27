@@ -692,12 +692,16 @@ function paperCardHTML(pp){
   return `<div class="card" style="margin-bottom:12px;border-left:3px solid var(--pos,#2e7d32)">
     <h3>🤖 모의투자 잔고 (자동매매 계좌) ${tag}</h3>
     <div class="arow" style="gap:16px;margin:4px 0 8px">
-      <div><span class="num">총 평가</span><br><b class="strong">${pp.total_eval!=null?won(pp.total_eval):"–"}</b></div>
-      <div><span class="num">현금</span><br><b>${pp.cash!=null?won(pp.cash):"–"}</b></div>
-      <div><span class="num">보유 종목</span><br><b>${hs.length}개</b></div>
+      <div><span class="num">총 평가(원 환산)</span><br><b class="strong">${pp.total_eval!=null?won(pp.total_eval):"–"}</b></div>
+      <div><span class="num">보유 종목</span><br><b>${hs.length}개</b>${pp.fx?`<span class="num"> · 환율 ${numC(pp.fx,0)}</span>`:''}</div>
+    </div>
+    <div class="arow" style="gap:16px;margin:0 0 8px;flex-wrap:wrap">
+      <div><span class="num">🇰🇷 원화 예수금</span><br><b>${pp.krw_cash!=null?won(pp.krw_cash):"–"}</b></div>
+      <div><span class="num">🇺🇸 외화 예수금</span><br><b>${pp.usd_cash!=null?money(pp.usd_cash,"USD"):"–"}</b>${pp.usd_cash_krw!=null?`<span class="num"> ≈${won(pp.usd_cash_krw)}</span>`:''}</div>
     </div>
     <div class="scroll">${tableHTML(["종목","수량","현재가","평가액(원)","손익%"],rows)}</div>
-    <div class="num" style="opacity:.7;margin-top:4px">※ 토스 실계좌와 완전 별개. 클로드 에이전트·자동매매가 KIS 모의계좌로 사고판 결과예요.</div></div>`;
+    <div class="num" style="opacity:.7;margin-top:4px">※ 원화(국내)·외화(미국) 예수금은 <b>별도 통화 계좌</b>라 각자 표시해요. 총평가만 환율로 합산.
+      국장 매수는 원화 예수금, 미장 매수는 외화 예수금에서 나갑니다. 토스 실계좌와는 완전 별개.</div></div>`;
 }
 async function renderPortfolio(){
   const [pf,pp]=await Promise.all([jget("/portfolio"),jget("/paper").catch(()=>({}))]);

@@ -59,23 +59,36 @@ async def paper_account() -> dict:
         out: dict = {"enabled": True, "paper": settings.kis_paper,
                      "holdings": [], "ts": _time.time(), "fx": fx}
         async with httpx.AsyncClient(timeout=15) as c:
-            bal = await _kis.fetch_balance(c)
-            total, cash = bal.get("total_eval"), bal.get("cash")
+            bal = await _kis.fetch_balance(c)              # 국내(원화) 계좌
+            krw_eval, krw_cash = bal.get("total_eval"), bal.get("cash")
             positions = await _kis.fetch_positions(c)
-            if settings.us_auto_enabled:            # 미국 평가·예수금 원화 환산 합산
+            usd_eval = usd_cash = None
+            if settings.us_auto_enabled:                   # 해외(외화·USD) 계좌 — 별도 통화
                 try:
                     ob = await _kis.fetch_overseas_balance(c)
-                    if fx and ob.get("eval"):
-                        total = (total or 0) + ob["eval"] * fx
-                    if fx and ob.get("cash") and cash is not None:
-                        cash += ob["cash"] * fx
+                    usd_eval, usd_cash = ob.get("eval"), ob.get("cash")
                 except Exception:
                     pass
         for h in positions:                          # 종목별 평가액(원) 보강
             q, p = h.get("quantity") or 0, h.get("price") or 0
             rate = fx if (h.get("currency") == "USD" and fx) else 1
             h["eval_krw"] = round(q * p * rate) if p else None
-        out.update({"total_eval": total, "cash": cash, "holdings": positions})
+        # 환전은 '합산 표시'할 때만 적용 — 원화/외화 예수금은 각자 통화로 보존.
+        usd_eval_krw = round(usd_eval * fx) if (usd_eval and fx) else None
+        usd_cash_krw = round(usd_cash * fx) if (usd_cash and fx) else None
+        total_eval = None
+        if krw_eval is not None or usd_eval_krw is not None:
+            total_eval = (krw_eval or 0) + (usd_eval_krw or 0)
+        total_cash_krw = None
+        if krw_cash is not None or usd_cash_krw is not None:
+            total_cash_krw = (krw_cash or 0) + (usd_cash_krw or 0)
+        out.update({
+            "krw_eval": krw_eval, "krw_cash": krw_cash,        # 국내(원)
+            "usd_eval": usd_eval, "usd_cash": usd_cash,        # 미국(달러 원본)
+            "usd_eval_krw": usd_eval_krw, "usd_cash_krw": usd_cash_krw,  # 환산(원)
+            "total_eval": total_eval, "cash": total_cash_krw,  # 합산(원) · cash 하위호환
+            "total_cash_krw": total_cash_krw,
+            "holdings": positions})
         return out
 
     return await get_or_swr("paper_account", 15, _build)

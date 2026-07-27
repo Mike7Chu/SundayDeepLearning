@@ -128,11 +128,13 @@ async def _trade_assets(redis: aioredis.Redis,
             async with httpx.AsyncClient(timeout=15) as c:
                 bal = await kis.fetch_balance(c)
                 total, cash = bal.get("total_eval"), bal.get("cash")
+                krw_cash, usd_cash = cash, None       # 통화별 예수금(별도 풀)
                 # 미장 리허설이 켜져 있으면 해외(USD) 평가·예수금을 환율 환산해 합산.
                 if settings.us_auto_enabled and total is not None:
                     try:
                         ob = await kis.fetch_overseas_balance(c)
                         fx = await _fx_rate(redis)
+                        usd_cash = ob.get("cash")
                         if fx and ob.get("eval"):
                             total += ob["eval"] * fx
                             if cash is not None and ob.get("cash"):
@@ -141,7 +143,8 @@ async def _trade_assets(redis: aioredis.Redis,
                         pass                          # 해외잔고 실패 → 국내만(무회귀)
             if total is not None:                     # 정상 조회 → 캐시(일시 실패 대비)
                 await redis.set(KIS_ASSET_KEY, json.dumps(
-                    {"total": total, "cash": cash, "ts": time.time()}))
+                    {"total": total, "cash": cash, "krw_cash": krw_cash,
+                     "usd_cash": usd_cash, "ts": time.time()}))
                 return total, cash
         except Exception as exc:
             logger.warning("[DATA_ERROR] KIS 모의잔고 조회 실패: %s", exc)
@@ -163,6 +166,21 @@ async def _fx_rate(redis: aioredis.Redis) -> float | None:
         return float(json.loads(raw).get("rate") or 0) or None
     except (json.JSONDecodeError, TypeError, ValueError):
         return None
+
+
+async def _cap_by_cash(redis: aioredis.Redis, code: str, qty: int,
+                       order_price: float) -> int:
+    """예수금 통화 풀로 매수 수량 상한 — 국내=원화 예수금, 미국=외화(USD) 예수금.
+
+    한국장·미장은 별도 통화 계좌라 원화로 미국을, 외화로 국내를 살 수 없다(통합증거금
+    별도). 해당 통화 예수금이 양수로 확인될 때만 상한 적용 — 모르면(조회 실패) 미적용.
+    order_price 통화와 풀 통화가 일치(국내 원, 미국 달러)하므로 그대로 나눔.
+    """
+    a = await _json_get(redis, KIS_ASSET_KEY)
+    pool = a.get("krw_cash") if code.isdigit() else a.get("usd_cash")
+    if not pool or pool <= 0 or not order_price:
+        return qty                                    # 풀 미확인 → 기존 사이징 유지
+    return min(qty, int(pool // order_price))
 
 
 async def _update_risk(redis: aioredis.Redis, sender: TelegramSender,
@@ -288,6 +306,7 @@ async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
         order_price, note = dec
         budget = min(risk.get("per_stock_cap") or max_order, max_order)
         qty = int(budget // order_price)
+        qty = await _cap_by_cash(redis, code, qty, order_price)  # 원화 예수금 상한
         if qty < 1:
             continue
         prev_failed = await _prev_failed(redis, code)
@@ -728,6 +747,14 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
             qty = min(qty, qty_cap)                   # 한도 내 최대 수량
         elif order_price > entry:                    # FX 미확보 시 기존 예산 유지 로직
             qty = int(qty * entry // order_price) or qty
+        qty = await _cap_by_cash(redis, code, qty, order_price)  # 외화(USD) 예수금 상한
+        if qty < 1:                                   # 외화 예수금 부족 → 스킵
+            if not await _prev_failed(redis, code):
+                logger.info("[auto/kis-us] %s 외화 예수금 부족 — 스킵(미장은 USD 예수금 필요)", code)
+            await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
+                {"ts": now, "ok": False, "qty": 0, "price": order_price,
+                 "broker": "kis-us", "reason": "외화예수금부족"}, ensure_ascii=False))
+            continue
         prev_failed = await _prev_failed(redis, code)
         ok, msg = await place_gated_order(redis, side="BUY", code=code,
                                           qty=qty, price=order_price, broker="kis",
@@ -902,8 +929,9 @@ async def _agent_buy(redis: aioredis.Redis, kis, row: dict, risk: dict,
         qty = int((budget / fx) // order_price)
     else:
         return None, "환율 미확보", ""
+    qty = await _cap_by_cash(redis, code, qty, order_price)   # 통화별 예수금(원화/외화) 상한
     if qty < 1:
-        return None, "한도내 1주 불가", ""
+        return None, ("외화 예수금 부족" if not code.isdigit() else "예수금·한도 부족"), ""
     ok, msg = await place_gated_order(redis, side="BUY", code=code, qty=qty,
                                       price=order_price, broker="kis", kis=kis, toss=None)
     await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
