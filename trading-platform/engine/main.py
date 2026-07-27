@@ -23,7 +23,7 @@ from api.services.stock_radar import supply_demand
 from api.services.stock_score import compute_score
 from api.services.stock_signal import light_pillar, pillar_guide, trade_levels
 from api.services.stock_value import load_quotes
-from collector.stock.kis import effective_watchlist
+from collector.stock.kis import effective_watchlist, is_kr_code
 from collector.stock.toss import TossClient
 from engine.orders import place_gated_order
 from engine.plan import (
@@ -1044,7 +1044,7 @@ async def _agent_loop(redis: aioredis.Redis, kis,
         try:
             now = datetime.utcnow() + timedelta(hours=9)          # KST
             today, now_hm = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
-            fired = await _json_get(redis, AGENT_DONE_KEY)
+            fired = await redis.hgetall(AGENT_DONE_KEY)   # 해시 {slot: 날짜}(GET 아님)
             for slot in due_slots(now_hm, slots, fired, today):
                 await redis.hset(AGENT_DONE_KEY, slot, today)      # 먼저 마킹(중복 방지)
                 await _agent_run(redis, kis, sender, slot, now_hm)
