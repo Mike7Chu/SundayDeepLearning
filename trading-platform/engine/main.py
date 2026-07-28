@@ -797,6 +797,12 @@ async def _day_trade_loop(redis: aioredis.Redis, kis, toss: TossClient,
             state = krx_intraday(now)
             if state != "closed":
                 await _day_cycle(redis, kis, toss, sender, state, scalp, tag)
+            else:                                          # 장외에도 생존 하트비트(30분 1회)
+                nt = time.time()
+                if nt - _DAY_HB.get(tag + ":closed", 0) >= 1800:
+                    _DAY_HB[tag + ":closed"] = nt
+                    logger.info("[%s] 장 마감/장외 — 대기 중(국장 평일 09:05~15:15 KST에 진입)",
+                                tag)
         except Exception as exc:
             logger.warning("[DATA_ERROR] %s 루프 실패: %s", tag, exc)
         await asyncio.sleep(interval)
