@@ -83,6 +83,8 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("engine")
 
+_DAY_HB: dict[str, float] = {}   # 데이/초단타 하트비트 스로틀(tag → 마지막 로그 ts)
+
 
 async def _json_get(redis: aioredis.Redis, key: str) -> dict:
     raw = await redis.get(key)
@@ -812,10 +814,13 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
     budget = settings.kis_max_order_krw if broker == "kis" else settings.toss_max_order_krw
     icon = "⚡초단타" if scalp else "📈데이"
     changed = False
+    n_live = n_ready = n_buy = 0                            # 진단 카운터
+    miss = ""                                              # 대표 '미진입 사유'
     for code in codes:
         live = await _live_price(redis, code)
         if not live or live <= 0:
             continue
+        n_live += 1                                        # 실시간가 확보 종목
         key = stock_intraday_key(code)
         raw = await redis.get(key)
         try:
@@ -824,6 +829,8 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
             bars = []
         bars = add_tick(bars, live, time.time(), settings.intraday_bar_sec)
         await redis.set(key, json.dumps(bars), ex=3600)
+        if len([b for b in bars if b.get("c")]) > 20:      # 신호 평가 가능(분봉 21+)
+            n_ready += 1
 
         if code in pos:                                    # 보유 데이포지션 → 청산 판정
             p = pos[code]
@@ -848,7 +855,9 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
         elif state == "entry" and len(pos) < settings.day_max_positions:
             sig = intraday_signal(bars)
             if sig.get("action") != "buy":
+                miss = miss or sig.get("reason")           # 대표 사유(첫 종목)
                 continue
+            n_buy += 1                                     # 매수 신호 발생
             qty = int(budget // live)
             if qty < 1:
                 continue
@@ -862,6 +871,14 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
                                   f"{qty}주 @{live:,.0f}원 · {sig.get('reason')}\n{msg}")
     if changed:
         await redis.set(DAY_POS_KEY, json.dumps(pos, ensure_ascii=False))
+    # 진단 하트비트(≈5분 1회) — 왜 안 사는지 관찰 가능하게(라이브·분봉·신호·보유·사유)
+    now_t = time.time()
+    if now_t - _DAY_HB.get(tag, 0) >= 300:
+        _DAY_HB[tag] = now_t
+        logger.info("[%s] %s 하트비트 — 국내 %d종목 · 실시간가 %d · 분봉충분 %d · "
+                    "매수신호 %d · 보유 %d%s", tag, state, len(codes), n_live,
+                    n_ready, n_buy, len(pos),
+                    (" · 미진입:" + miss) if (miss and not n_buy) else "")
 
 
 async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
