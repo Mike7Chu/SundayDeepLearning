@@ -41,11 +41,16 @@ def ema(vals: list[float], n: int) -> float | None:
     return e
 
 
-def intraday_signal(bars: list[dict], fast: int = 5, slow: int = 20) -> dict:
+def intraday_signal(bars: list[dict], fast: int = 5, slow: int = 20,
+                    require_vsurge: bool = False) -> dict:
     """1분봉 → 장중 진입 신호(순수). {action:'buy'|'none', reason, ema_fast, ema_slow}.
 
-    조건(모두): EMA_fast>EMA_slow(상승 정배열) · 현재가>EMA_slow · 최근봉 양봉 ·
-    거래강도 급증(최근봉 v > 직전 5봉 평균). 하나라도 빠지면 none.
+    조건: EMA_fast>EMA_slow(상승 정배열) · 현재가>EMA_slow · 최근봉 양봉.
+    require_vsurge=True면 거래강도 급증(최근봉 v > 직전 5봉 평균)도 요구.
+
+    ⚠️ v는 '버킷 내 시세 갱신 횟수' 프록시라 폴링 주기가 고정이면 봉마다 거의 상수 →
+    vsurge가 사실상 항상 False가 되어 진입을 원천 봉쇄한다(실거래량 아님). 그래서 기본은
+    require_vsurge=False. 실거래량 피드가 붙기 전엔 이 필터를 켜지 말 것.
     """
     closes = [b["c"] for b in bars if b.get("c")]
     if len(closes) < slow + 1:
@@ -59,15 +64,17 @@ def intraday_signal(bars: list[dict], fast: int = 5, slow: int = 20) -> dict:
     vsurge = last.get("v", 0) > (sum(prev) / len(prev) if prev else 0)
     ef_r = round(ef, 2) if ef else None
     es_r = round(es, 2) if es else None
-    if up and green and vsurge:
+    ok = up and green and (vsurge or not require_vsurge)
+    if ok:
+        tail = "·거래강도↑" if require_vsurge else ""
         return {"action": "buy", "ema_fast": ef_r, "ema_slow": es_r,
-                "reason": f"EMA{fast}>{slow} 정배열·양봉·거래강도↑"}
+                "reason": f"EMA{fast}>{slow} 정배열·양봉{tail}"}
     miss = []
     if not up:
         miss.append("정배열 아님")
     if not green:
         miss.append("음봉")
-    if not vsurge:
+    if require_vsurge and not vsurge:
         miss.append("거래강도 약함")
     return {"action": "none", "ema_fast": ef_r, "ema_slow": es_r,
             "reason": " · ".join(miss) or "조건 미충족"}

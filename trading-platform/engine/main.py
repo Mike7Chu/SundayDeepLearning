@@ -859,7 +859,7 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
                     await sender.send(f"{icon} 청산 {names.get(code, code)}({code}) "
                                       f"{p.get('qty')}주 @{live:,.0f}원 · {reason}\n{msg}")
         elif state == "entry" and len(pos) < settings.day_max_positions:
-            sig = intraday_signal(bars)
+            sig = intraday_signal(bars, require_vsurge=settings.day_require_vsurge)
             if sig.get("action") != "buy":
                 miss = miss or sig.get("reason")           # 대표 사유(첫 종목)
                 continue

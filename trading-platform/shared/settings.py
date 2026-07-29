@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     day_trade_interval_sec: float = 45.0     # 데이 루프 주기
     intraday_bar_sec: int = 60               # 분봉 버킷(초)
     day_max_positions: int = 3               # 동시 데이 포지션 상한
+    # 거래강도(vsurge) 필터: v는 폴링 기반 갱신횟수 프록시라 고정 주기면 상수 → 항상 False가
+    # 되어 진입을 봉쇄. 실거래량 피드 붙기 전엔 OFF 유지(진입은 정배열+양봉만으로 판정).
+    day_require_vsurge: bool = False
     day_trade_take_pct: float = 1.5          # 데이 익절 목표(%)
     day_trade_stop_pct: float = 1.0          # 데이 손절(%)
     # 초단타 실험(Phase C) — 실전 영구 금지·모의 전용. 기본 OFF.

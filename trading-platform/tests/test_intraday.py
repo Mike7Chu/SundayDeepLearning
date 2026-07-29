@@ -40,6 +40,17 @@ def test_intraday_signal_buy_and_none():
     assert intraday_signal(_bars([1, 2, 3]))["action"] == "none"
 
 
+def test_intraday_signal_vsurge_default_off():
+    # v(갱신횟수)는 고정 폴링이면 봉마다 상수 → vsurge 항상 False. 기본(OFF)은 이를 무시하고
+    # 정배열+양봉만으로 진입 허용해야 함(과거엔 거래강도 약함으로 원천 봉쇄됐던 케이스).
+    up = list(range(100, 125))
+    flat = _bars(up, vols=[6] * 25)                    # 거래강도 급증 전혀 없음
+    flat[-1] = {**flat[-1], "o": up[-1] - 1, "c": up[-1]}  # 양봉
+    assert intraday_signal(flat)["action"] == "buy"                       # 기본 OFF → buy
+    assert intraday_signal(flat, require_vsurge=True)["action"] == "none"  # 켜면 봉쇄
+    assert "거래강도" in intraday_signal(flat, require_vsurge=True)["reason"]
+
+
 def test_krx_intraday_state():
     assert krx_intraday(datetime(2026, 7, 24, 10, 0)) == "entry"      # 금 10시
     assert krx_intraday(datetime(2026, 7, 24, 15, 20)) == "flatten"  # 청산구간
