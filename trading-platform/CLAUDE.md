@@ -45,7 +45,8 @@
   서버 감시, 매도 전용) `POST/GET /portfolio/oco`, 취소 지원 — 게이트(키+TOSS_TRADING_ENABLED),
   매도라 금액 한도 미적용. `GET /market` 신설. 재무·배당은 v1.2.2에도 없음(국내 KIS/DART 전용 유지).
 - ✅ **실시간 시세 파이프라인**: ①KIS 웹소켓(`collector/stock/kis_ws.py`, H0STCNT0 체결가) — 장중(평일 08:50~15:40)
-  관심∪보유 국내 41종목 등록, 체결 즉시 `stock:quote` 반영(종목당 1초 스로틀, PINGPONG 유지, 재접속)
+  **보유→급등주(전 시장 랭킹)→관심** 우선순위로 국내 41종목 등록(`pick_subs`+`kr_movers`, 41칸 공식상한 안에서
+  '오늘 움직이는' 종목 자동 편입 — 급등주 우선·관심 뒤로), 체결 즉시 `stock:quote` 반영(종목당 1초 스로틀, PINGPONG 유지, 재접속)
   ②API SSE `GET /stream`(`api/routers/stream.py`) — 변경된 종목만 2초 주기 push ③대시보드 EventSource가
   가격·등락률·평가손익 셀만 덧칠(`data-lp/lc/lpnl`, 틱 플래시, 렌더 직후 LIVE 재적용) — 전체 폴링(12s)은 정합용
   ④엔진 `_guard_loop`(20s) — 목표가/손절 감시를 실시간가(`_live_price` 2분 신선도) 기준으로 고속 순회.

@@ -8,6 +8,7 @@ from collector.stock.kis_ws import (
     build_subscribe,
     is_krx_session,
     is_pingpong,
+    kr_movers,
     parse_ticks,
     pick_subs,
 )
@@ -78,3 +79,23 @@ def test_pick_subs():
     assert "NVDA" not in out and "000660" in out
     many = [f"{i:06d}" for i in range(60)]
     assert len(pick_subs(many, [])) == 41         # 연결당 등록 상한
+
+
+def test_pick_subs_movers_priority():
+    # 우선순위: 보유 → 급등주 → 관심(사용자 선택: 급등주 우선, 관심 뒤로)
+    out = pick_subs(["005930"], ["042700"], ["035420", "000660"])
+    assert out == ["042700", "035420", "000660", "005930"]
+    # 상한 안에서 관심이 밀린다 — 급등주 41개면 관심은 진입 못함
+    movers = [f"{i:06d}" for i in range(41)]
+    out2 = pick_subs(["900000"], [], movers)      # 900000(관심)은 밀림
+    assert len(out2) == 41 and "900000" not in out2
+
+
+def test_kr_movers():
+    rk = {"kr_gainers": [{"symbol": "035420", "name": "네이버"},
+                         {"symbol": "NVDA"},          # 미국 티커 제외
+                         {"symbol": "005930"}],
+          "kr_amount": [{"symbol": "005930"},         # 중복 제거
+                        {"symbol": "000660", "name": "SK하이닉스"}]}
+    assert kr_movers(rk) == ["035420", "005930", "000660"]   # 급등 먼저·중복 제거
+    assert kr_movers({}) == [] and kr_movers(None) == []

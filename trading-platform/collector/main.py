@@ -23,7 +23,7 @@ from collector.stock.kis import (
     load_watchlist,
     quote_excd,
 )
-from collector.stock.kis_ws import pick_subs, realtime_loop
+from collector.stock.kis_ws import kr_movers, pick_subs, realtime_loop
 from notifier.telegram import TelegramSender
 from collector.stock.kis_master import fetch_universe
 from collector.stock.toss import TossClient, candle_metrics
@@ -36,6 +36,7 @@ from collector.stock.us_master import (
 from shared.redis_keys import (
     ADR_KEY,
     DART_CORP_KEY,
+    DAY_POS_KEY,
     ENGINE_PILLAR_KEY,
     FX_USDKRW_KEY,
     MARKET_INDICATORS_KEY,
@@ -1025,7 +1026,11 @@ async def toss_price_loop(redis: aioredis.Redis, toss: TossClient) -> None:
 
 
 async def _realtime_targets(redis: aioredis.Redis) -> list[str]:
-    """웹소켓 등록 대상: 보유 우선 + 관심종목(국내 6자리, 상한 41)."""
+    """웹소켓 등록 대상: 보유 → 급등주(전 시장) → 관심(국내 6자리, 상한 41).
+
+    급등주는 랭킹(MARKET_RANKINGS_KEY)에서 뽑는다 — 정적 관심종목만 보던 단타가
+    '오늘 시장에서 움직이는' 종목을 41칸 한도 안에서 실시간으로 본다.
+    """
     watch = [w["code"] for w in await effective_watchlist(redis)]
     held: list[str] = []
     try:
@@ -1035,7 +1040,20 @@ async def _realtime_targets(redis: aioredis.Redis) -> list[str]:
                     if h.get("symbol")]
     except (json.JSONDecodeError, TypeError):
         pass
-    return pick_subs(watch, held)
+    try:                                    # 데이 포지션도 실시간 유지(청산 감시용)
+        raw = await redis.get(DAY_POS_KEY)
+        if raw:
+            held = list(json.loads(raw).keys()) + held
+    except (json.JSONDecodeError, TypeError):
+        pass
+    movers: list[str] = []
+    try:
+        rk = await redis.get(MARKET_RANKINGS_KEY)
+        if rk:
+            movers = kr_movers(json.loads(rk))
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return pick_subs(watch, held, movers)
 
 
 async def main() -> None:

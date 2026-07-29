@@ -101,11 +101,33 @@ def is_krx_session(now: datetime.datetime | None = None) -> bool:
     return 850 <= hm <= 1540
 
 
-def pick_subs(watch_codes: list[str], held_codes: list[str],
-              cap: int = MAX_SUBS) -> list[str]:
-    """등록 대상 선정(순수): 보유 우선 + 관심, 국내 6자리만, 상한 cap."""
+def kr_movers(rankings: dict, cap: int = MAX_SUBS) -> list[str]:
+    """랭킹(MARKET_RANKINGS_KEY)에서 국내 급등·거래대금 상위 종목코드(순수).
+
+    kr_gainers(급등) 먼저, kr_amount(거래대금) 뒤 — '오늘 움직이는' 종목 우선순위.
+    국내 6자리만, 중복 제거, 상한 cap. 랭킹 없으면 빈 리스트.
+    """
     out: list[str] = []
-    for c in list(held_codes) + list(watch_codes):
+    for key in ("kr_gainers", "kr_amount"):
+        for r in (rankings or {}).get(key, []) or []:
+            c = r.get("symbol") if isinstance(r, dict) else None
+            if c and c.isdigit() and len(c) == 6 and c not in out:
+                out.append(c)
+            if len(out) >= cap:
+                return out
+    return out
+
+
+def pick_subs(watch_codes: list[str], held_codes: list[str],
+              mover_codes: list[str] | None = None,
+              cap: int = MAX_SUBS) -> list[str]:
+    """등록 대상 선정(순수), 국내 6자리·중복 제거·상한 cap.
+
+    우선순위: 보유(손절감시 필수) → 급등주(시장 전체에서 오늘 움직이는 종목) → 관심.
+    급등주가 41칸을 채우면 관심종목 실시간 틱이 밀린다(사용자 선택: 급등주 우선).
+    """
+    out: list[str] = []
+    for c in list(held_codes) + list(mover_codes or []) + list(watch_codes):
         if c and c.isdigit() and len(c) == 6 and c not in out:
             out.append(c)
         if len(out) >= cap:

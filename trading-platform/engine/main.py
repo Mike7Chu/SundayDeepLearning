@@ -24,6 +24,7 @@ from api.services.stock_score import compute_score
 from api.services.stock_signal import light_pillar, pillar_guide, trade_levels
 from api.services.stock_value import load_quotes
 from collector.stock.kis import effective_watchlist, is_kr_code
+from collector.stock.kis_ws import kr_movers, pick_subs
 from collector.stock.toss import TossClient
 from engine.orders import place_gated_order
 from engine.plan import (
@@ -62,6 +63,7 @@ from shared.redis_keys import (
     FWD_DONE_KEY,
     FX_USDKRW_KEY,
     KIS_ASSET_KEY,
+    MARKET_RANKINGS_KEY,
     COACH_KEY,
     COACH_WD_KEY,
     RESEARCH_HB_KEY,
@@ -811,11 +813,23 @@ async def _day_trade_loop(redis: aioredis.Redis, kis, toss: TossClient,
 async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
                      sender: TelegramSender, state: str, scalp: bool,
                      tag: str) -> None:
-    """분봉 갱신 + (진입가능 구간) 신호 진입 + 보유 데이포지션 익절/손절/장마감 청산."""
+    """분봉 갱신 + (진입가능 구간) 신호 진입 + 보유 데이포지션 익절/손절/장마감 청산.
+
+    스캔 유니버스 = 데이포지션(청산 필수) → 급등주(전 시장 랭킹) → 관심종목(국내 6자리,
+    상한 41). 정적 관심종목만 보던 걸 넘어 '오늘 시장에서 움직이는' 종목까지 평가한다.
+    웹소켓 등록 대상과 동일 집합이라 급등주도 실시간 1분봉을 받는다.
+    """
     watch = await effective_watchlist(redis)
-    codes = [w["code"] for w in watch if is_kr_code(w["code"])][:41]
     names = {w["code"]: w.get("name", "") for w in watch}
     pos = await _json_get(redis, DAY_POS_KEY)
+    rk = await _json_get(redis, MARKET_RANKINGS_KEY)     # 전 시장 급등·거래대금 상위
+    movers = kr_movers(rk)
+    for key in ("kr_gainers", "kr_amount"):              # 급등주 이름 매핑(로그·알림용)
+        for r in rk.get(key, []) or []:
+            if r.get("symbol"):
+                names.setdefault(r["symbol"], r.get("name", ""))
+    priority = [c for c in pos if is_kr_code(c)]         # 데이포지션 최우선(청산 감시)
+    codes = pick_subs([w["code"] for w in watch], priority, movers)
     broker = settings.auto_trade_broker
     budget = settings.kis_max_order_krw if broker == "kis" else settings.toss_max_order_krw
     icon = "⚡초단타" if scalp else "📈데이"
