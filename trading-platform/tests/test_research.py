@@ -6,7 +6,7 @@ import json
 
 import fakeredis.aioredis
 
-from research.analyst import Analyst
+from research.analyst import Analyst, _cli_error_hint
 from research.data import StockData, format_for_prompt, from_quote, gather
 from research.lenses import LENSES, SYSTEM_PROMPT, lens_by_key, lenses_block
 from shared.redis_keys import STOCK_QUOTE_KEY
@@ -77,3 +77,14 @@ def test_analyst_mode_resolution(monkeypatch):
     # CLI 활성이지만 바이너리 없음 → None(비활성)
     monkeypatch.setattr(settings, "research_cli_bin", "no-such-binary-xyz")
     assert Analyst().mode is None
+
+
+def test_cli_error_hint_classifies():
+    # 사용량 한도 / 미로그인 / 모델 / 빈출력 각각 다른 안내로 분기
+    assert "사용량 한도" in _cli_error_hint(1, "Claude usage limit reached", "m")
+    assert "로그인" in _cli_error_hint(1, "Please run /login to authenticate", "m")
+    assert "모델" in _cli_error_hint(1, "Unknown model foo", "claude-x")
+    empty = _cli_error_hint(1, "", "claude-opus-4-8")
+    assert "rc만" in empty and "claude-opus-4-8" in empty   # 진단 커맨드 안내 포함
+    # 실행환경(호스트/컨테이너)을 ~/.claude 실측으로 명시 — 무조건 컨테이너 단정 아님
+    assert "실행환경=" in empty

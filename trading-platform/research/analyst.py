@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import time
@@ -32,6 +33,35 @@ def parse_penalty(text: str) -> int:
     if not m:
         return 30
     return max(0, min(30, int(m.group(1))))
+
+
+def _cli_error_hint(rc: int, detail: str, model: str) -> str:
+    """claude CLI 실패의 '진짜 원인'을 추정해 실행가능한 안내로 변환(순수-ish).
+
+    기존엔 무조건 '컨테이너 미로그인'이라 단정해 호스트에서 돌려도 오진했다. 여기선
+    ~/.claude 존재로 환경을 실측하고, 출력 패턴으로 사용량한도/미로그인/모델을 구분한다.
+    """
+    d = (detail or "").lower()
+    logged_in = os.path.isdir(os.path.expanduser("~/.claude"))
+    if any(k in d for k in ("usage limit", "limit reached", "rate limit",
+                            "quota")):
+        tip = ("구독 사용량 한도 도달 — 한도 리셋되면 자동 정상화됩니다. 매일 소진되면 "
+               ".env에 ANTHROPIC_API_KEY(종량)를 넣어 병행하세요(있으면 api 우선).")
+    elif any(k in d for k in ("login", "authenticat", "unauthor", "not logged",
+                              "invalid api key", "credential", "please run")):
+        tip = ("claude 로그인이 없습니다 — 호스트에서 로그인한 '그 사용자'로 "
+               "run-research-host.sh를 실행하세요(sudo/root 금지).")
+    elif "model" in d:
+        tip = (f"모델 인자를 CLI가 못 씁니다(--model {model}). `claude --version` 갱신 "
+               "또는 .env RESEARCH_MODEL을 CLI가 아는 값으로.")
+    elif not detail:
+        tip = ("출력 없이 rc만 반환 — 대개 미로그인/사용량 한도입니다. 호스트에서 "
+               f"`claude -p hi --model {model} --output-format text; echo rc=$?`로 확인.")
+    else:
+        tip = "아래 원문으로 원인을 확인하세요."
+    env = "호스트(~/.claude 있음)" if logged_in else "컨테이너/미로그인 계정(~/.claude 없음)"
+    msg = f"claude CLI 실패(rc={rc}, 실행환경={env}). {tip}"
+    return msg + (f"\n[CLI 출력] {detail}" if detail else "")
 
 
 class Analyst:
@@ -294,8 +324,8 @@ class Analyst:
             raise RuntimeError(f"claude CLI 시간초과({timeout}s)")
         text = out.decode(errors="ignore").strip()
         if proc.returncode != 0 or not text:
-            msg = err.decode(errors="ignore").strip()[:500] or f"(빈 출력, rc={proc.returncode})"
-            raise RuntimeError(
-                f"claude CLI 실패(rc={proc.returncode}). 컨테이너에는 호스트 구독 로그인이 "
-                f"없어 실패합니다 → 호스트에서 run-research-host.sh 실행. stderr: {msg}")
+            # 진짜 원인은 stderr 또는 (text 출력형식에선) stdout에 있을 수 있다 — 둘 다 본다.
+            detail = (err.decode(errors="ignore").strip()
+                      or out.decode(errors="ignore").strip())[:500]
+            raise RuntimeError(_cli_error_hint(proc.returncode, detail, self.model))
         return text
