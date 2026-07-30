@@ -834,8 +834,9 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
     budget = settings.kis_max_order_krw if broker == "kis" else settings.toss_max_order_krw
     icon = "⚡초단타" if scalp else "📈데이"
     changed = False
-    n_live = n_ready = n_buy = 0                            # 진단 카운터
-    miss = ""                                              # 대표 '미진입 사유'
+    n_live = n_ready = n_buy = n_fill = 0                   # 진단 카운터(신호·체결 분리)
+    miss = ""                                              # 대표 '미진입 사유'(신호 없음)
+    order_miss = ""                                        # 대표 '미체결 사유'(신호는 났는데 주문 거부)
     for code in codes:
         live = await _live_price(redis, code)
         if not live or live <= 0:
@@ -879,26 +880,37 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
                 continue
             n_buy += 1                                     # 매수 신호 발생
             qty = int(budget // live)
-            if qty < 1:
+            if qty < 1:                                    # 예산<주가 → 1주도 못 삼
+                order_miss = order_miss or (
+                    f"{names.get(code, code)} 주가 {live:,.0f}원>예산 {budget:,.0f}원")
                 continue
             ok, msg = await place_gated_order(
                 redis, side="BUY", code=code, qty=qty, price=live,
                 broker=broker, kis=kis, toss=toss)
-            if ok:
-                pos[code] = {"entry": live, "qty": qty, "ts": time.time()}
-                changed = True
-                await sender.send(f"{icon} 진입 {names.get(code, code)}({code}) "
-                                  f"{qty}주 @{live:,.0f}원 · {sig.get('reason')}\n{msg}")
+            if not ok:
+                order_miss = order_miss or f"{names.get(code, code)}: {msg}"
+                continue
+            n_fill += 1
+            pos[code] = {"entry": live, "qty": qty, "ts": time.time()}
+            changed = True
+            await sender.send(f"{icon} 진입 {names.get(code, code)}({code}) "
+                              f"{qty}주 @{live:,.0f}원 · {sig.get('reason')}\n{msg}")
     if changed:
         await redis.set(DAY_POS_KEY, json.dumps(pos, ensure_ascii=False))
-    # 진단 하트비트(≈5분 1회) — 왜 안 사는지 관찰 가능하게(라이브·분봉·신호·보유·사유)
+    # 진단 하트비트(≈5분 1회) — 왜 안 사는지 관찰 가능하게. 신호/체결을 분리해서,
+    # '신호는 났는데 왜 주문이 안 됐나'(예산·한도·리스크실드)를 미체결 사유로 노출한다.
     now_t = time.time()
     if now_t - _DAY_HB.get(tag, 0) >= 300:
         _DAY_HB[tag] = now_t
+        if n_buy and not n_fill:                # 신호는 났는데 한 건도 체결 안 됨 → 이유
+            tail = " · 미체결:" + (order_miss or "사유불명")
+        elif not n_buy and miss:                # 신호 자체가 없음 → 조건 미충족 이유
+            tail = " · 미진입:" + miss
+        else:
+            tail = ""
         logger.info("[%s] %s 하트비트 — 국내 %d종목 · 실시간가 %d · 분봉충분 %d · "
-                    "매수신호 %d · 보유 %d%s", tag, state, len(codes), n_live,
-                    n_ready, n_buy, len(pos),
-                    (" · 미진입:" + miss) if (miss and not n_buy) else "")
+                    "매수신호 %d · 체결 %d · 보유 %d%s", tag, state, len(codes), n_live,
+                    n_ready, n_buy, n_fill, len(pos), tail)
 
 
 async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
