@@ -831,7 +831,11 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
     priority = [c for c in pos if is_kr_code(c)]         # 데이포지션 최우선(청산 감시)
     codes = pick_subs([w["code"] for w in watch], priority, movers)
     broker = settings.auto_trade_broker
-    budget = settings.kis_max_order_krw if broker == "kis" else settings.toss_max_order_krw
+    max_order = settings.kis_max_order_krw if broker == "kis" else settings.toss_max_order_krw
+    # 사이징 상한을 게이트(단일 종목 한도=자산 5%)와 일치시킨다. 안 맞추면 KIS_MAX_ORDER_KRW
+    # 로 잡은 수량의 est가 per_stock_cap을 넘겨 order_allowed가 전량 '한도 초과' 거부한다.
+    risk = await _json_get(redis, ENGINE_RISK_KEY)
+    budget = min(risk.get("per_stock_cap") or max_order, max_order)
     icon = "⚡초단타" if scalp else "📈데이"
     changed = False
     n_live = n_ready = n_buy = n_fill = 0                   # 진단 카운터(신호·체결 분리)
