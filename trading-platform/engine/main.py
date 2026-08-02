@@ -1092,7 +1092,7 @@ async def _agent_run(redis: aioredis.Redis, kis,
     plan = {**plan, "buys": buys, "sells": sells}
     asset, _cash = await _trade_assets(redis, kis)
     ctx = build_context(plan, holdings, risk, asset, risk.get("cash_pct"),
-                        plan.get("style") or "")
+                        plan.get("style") or "", regime=plan.get("regime"))
     from research.analyst import Analyst
     result = await Analyst().decide(ctx)
     decisions = result.get("decisions", [])

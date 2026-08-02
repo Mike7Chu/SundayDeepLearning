@@ -125,7 +125,7 @@ def _extract_json(text: str) -> dict | None:
 
 def build_context(plan: dict, holdings: list[dict], risk: dict,
                   asset: float | None, cash_pct: float | None,
-                  market_view: str = "") -> str:
+                  market_view: str = "", regime: dict | None = None) -> str:
     """엔진 플랜 + 보유 + 리스크 → 클로드에게 넘길 압축 컨텍스트(순수 텍스트).
 
     후보(buys)·매도점검(sells)은 이미 정량필터를 통과한 깔때기 결과. 여기에
@@ -141,6 +141,12 @@ def build_context(plan: dict, holdings: list[dict], risk: dict,
                      f"종목당한도 {risk.get('per_stock_cap','?')}원")
     if market_view:
         lines.append(f"[시장] {market_view}")
+    if regime and regime.get("regime") not in (None, "unknown"):
+        strat = "/".join(regime.get("strategy_labels") or regime.get("strategies") or [])
+        lines.append(f"[시황 국면] {regime.get('label')}({regime.get('posture')}) · "
+                     f"권장전략 {strat} · {' · '.join((regime.get('reasons') or [])[:3])}")
+        lines.append("  → 국면 태세에 맞게: 위험회피=신규매수 보수적·현금 우대, "
+                     "강세추세=주도주 보유 지속, 횡보=과열 추격 금지, 중립=우량 선별.")
 
     hold = [h for h in (holdings or []) if h.get("symbol")]
     if hold:

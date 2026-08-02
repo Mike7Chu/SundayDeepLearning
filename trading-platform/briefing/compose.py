@@ -97,10 +97,22 @@ def _plan_section(plan: dict) -> list[str]:
     if not plan:
         return []
     buys, sells = plan.get("buys") or [], plan.get("sells") or []
-    if not (buys or sells):
+    regime = plan.get("regime") or {}
+    rline = why = None
+    if regime.get("regime") not in (None, "unknown", ""):
+        strat = "/".join(regime.get("strategy_labels") or regime.get("strategies") or [])
+        rline = (f"\n[🧭 시황 국면] {regime.get('label')} · 태세 "
+                 f"{regime.get('posture')} · 권장전략 {strat}")
+        why = " · ".join((regime.get("reasons") or [])[:2])
+    if not (buys or sells or rline):
         return []
+    out: list[str] = []
+    if rline:                                    # 국면은 매수 후보가 없어도 보여준다
+        out.append(rline)
+        if why:
+            out.append(f"   ↳ {why}")
     style = plan.get("style")
-    out = [f"\n[🎯 오늘의 매매 플랜{(' — ' + style) if style else ''}]"]
+    out.append(f"\n[🎯 오늘의 매매 플랜{(' — ' + style) if style else ''}]")
     if buys:
         out.append("🟢 매수 후보")
         for b in buys[:4]:
@@ -115,6 +127,8 @@ def _plan_section(plan: dict) -> list[str]:
             rs = " · ".join((b.get("reasons") or [])[:3])
             if rs:
                 out.append(f"   ↳ {rs}")
+    if not buys:
+        out.append("🟢 매수 후보 없음 — 확신 하한 미달/관망(현금 우대)")
     if sells:
         out.append("🔴 매도 점검(보유 중 위험신호)")
         for s in sells[:4]:

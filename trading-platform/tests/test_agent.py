@@ -78,3 +78,16 @@ def test_build_context_lists_candidates_and_holdings():
     assert "삼성전자(005930)" in ctx and "매수 후보" in ctx
     assert "SK하이닉스(000660)" in ctx and "보유 종목" in ctx
     assert "40%" in ctx
+
+
+def test_build_context_includes_regime():
+    # 시황 국면이 있으면 라벨·권장전략·태세 가이드가 컨텍스트에 포함
+    regime = {"regime": "risk_off", "label": "위험 회피", "posture": "방어",
+              "strategies": ["S3"], "strategy_labels": ["저변동 방어"],
+              "reasons": ["지수 200일선 아래 -4.0%", "변동성 확대"]}
+    ctx = build_context({"buys": []}, [], {}, 1e7, 30, regime=regime)
+    assert "위험 회피" in ctx and "저변동 방어" in ctx and "국면 태세" in ctx
+    # unknown 국면은 렌더 안 함(노이즈 방지)
+    ctx2 = build_context({"buys": []}, [], {}, 1e7, 30,
+                         regime={"regime": "unknown", "label": "판정 불가"})
+    assert "판정 불가" not in ctx2

@@ -115,6 +115,17 @@ def test_compose_brief():
     assert "🟢매수" in msg and "배당" in msg and "투자 추천이 아닙니다" in msg
 
 
+def test_compose_brief_shows_regime_when_no_buys():
+    # 매수 후보가 없어도 시황 국면·관망 사유가 브리핑에 노출(위험회피장 설명)
+    quotes = [{"name": "삼성전자", "price": 70000, "change_pct": -1.5}]
+    plan = {"buys": [], "sells": [], "regime": {
+        "regime": "risk_off", "label": "위험 회피", "posture": "방어",
+        "strategy_labels": ["저변동 방어"], "reasons": ["지수 200일선 아래 -4.0%"]}}
+    msg = compose_brief(quotes, [], [], [], plan=plan)
+    assert "시황 국면" in msg and "위험 회피" in msg and "저변동 방어" in msg
+    assert "매수 후보 없음" in msg
+
+
 def test_has_content_empty():
     assert not has_content([], [{"magic_rank": None}], [], [{"yield_pct": None}])
 
