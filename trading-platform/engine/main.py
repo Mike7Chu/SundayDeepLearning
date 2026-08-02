@@ -25,6 +25,7 @@ from api.services.stock_signal import light_pillar, pillar_guide, trade_levels
 from api.services.stock_value import load_quotes
 from collector.stock.kis import effective_watchlist, is_derivative_etf, is_kr_code
 from collector.stock.kis_ws import kr_movers, pick_subs
+from engine.regime import classify_regime
 from collector.stock.toss import TossClient
 from engine.orders import place_gated_order
 from engine.plan import (
@@ -63,7 +64,9 @@ from shared.redis_keys import (
     FWD_DONE_KEY,
     FX_USDKRW_KEY,
     KIS_ASSET_KEY,
+    MARKET_INDICATORS_KEY,
     MARKET_RANKINGS_KEY,
+    ENGINE_REGIME_KEY,
     COACH_KEY,
     COACH_WD_KEY,
     RESEARCH_HB_KEY,
@@ -551,11 +554,38 @@ async def _guard_loop(redis: aioredis.Redis, sender: TelegramSender) -> None:
         await asyncio.sleep(settings.guard_interval_sec)
 
 
+async def _update_regime(redis: aioredis.Redis, toss: TossClient) -> dict:
+    """시황 4국면 판정(전략 라우터 입력) → 저장·로그.
+
+    코스피 200일선·변동성·외국인 수급으로 강세추세/중립/횡보/위험회피를 분류하고,
+    각 국면에 맞는 전략 ID(S1~S5)를 낸다. 지수 일봉은 토스 지표 캔들에서 조회.
+    """
+    closes: list[float] = []
+    try:
+        if toss and toss.enabled:
+            async with httpx.AsyncClient(timeout=15) as client:
+                candles = await toss.fetch_indicator_candles(client, "KOSPI", count=230)
+            rows = sorted((c for c in candles if c.get("close") and c.get("date")),
+                          key=lambda c: str(c["date"]))
+            closes = [c["close"] for c in rows]
+    except Exception as exc:
+        logger.warning("[regime] 코스피 일봉 조회 실패: %s", exc)
+    ind = await _json_get(redis, MARKET_INDICATORS_KEY)
+    inv = (ind.get("investor") or {}).get("kospi") or {}
+    reg = classify_regime(closes, foreign_net_eok=inv.get("foreigner"))
+    reg["ts"] = time.time()
+    await redis.set(ENGINE_REGIME_KEY, json.dumps(reg, ensure_ascii=False))
+    logger.info("[regime] %s(%s) · 활성전략 %s · %s", reg["label"], reg["posture"],
+                "+".join(reg["strategies"]), " · ".join(reg["reasons"][:3]))
+    return reg
+
+
 async def _cycle_loop(redis: aioredis.Redis, sender: TelegramSender,
                       toss: TossClient, kis) -> None:
     while True:
         try:
             risk = await _update_risk(redis, sender, kis)
+            await _update_regime(redis, toss)
             await _holdings_alerts(redis, sender)
             await _pillar_scan(redis, sender)
             await _pipeline(redis, sender, risk, toss, kis)
@@ -701,9 +731,10 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
                           "pnl_pct": h.get("pnl_pct"), **chk})
     sells.sort(key=lambda s: s["severity"], reverse=True)
 
+    regime = await _json_get(redis, ENGINE_REGIME_KEY)   # 시황 라우터(별 루프서 갱신)
     await redis.set(ENGINE_PLAN_KEY, json.dumps(
         {"style": "실적+추세 스윙 · 중립 리스크 · 국내 전체+미국",
-         "buys": plan_buys, "sells": sells[:3], "ts": time.time()},
+         "buys": plan_buys, "sells": sells[:3], "regime": regime, "ts": time.time()},
         ensure_ascii=False))
     logger.info("[plan] 매수 후보 %d(국내 %d·미국 %d, 검증 %d) · 매도 점검 %d",
                 len(plan_buys), len(kr_b), len(us_b), len(buys), min(3, len(sells)))

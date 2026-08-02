@@ -56,6 +56,8 @@ ENGINE_AUTO_KEY = "engine:auto_orders"
 ENGINE_PILLAR_KEY = "engine:pillar"
 # 오늘의 매매 플랜(스윙 설문 맞춤). json{style, buys:[...3], sells:[...3], ts}
 ENGINE_PLAN_KEY = "engine:plan"
+# 시황 국면(전략 라우터). json{regime,label,posture,strategies:[..],reasons,metrics,ts}
+ENGINE_REGIME_KEY = "engine:regime"
 # 텔레그램 명령: getUpdates 오프셋 / 확인 대기 주문(hash{n: json{side,code,qty,price,ts}})
 TG_OFFSET_KEY = "tg:offset"
 TG_PENDING_KEY = "tg:pending"
