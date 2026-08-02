@@ -55,6 +55,17 @@ def is_kr_code(code: str) -> bool:
     return bool(code) and code.isdigit() and len(code) == 6
 
 
+# 자동매매에서 제외할 파생형 ETF/ETN 키워드(이름 기반). 레버리지·인버스는 변동성·감쇠가
+# 커서 비용 민감한 자동매매에 최악이고, 실측 성적에서 손실 대부분을 차지했다(전략 리포트 P0).
+_DERIV_ETF_KW = ("레버리지", "인버스", "곱버스", "레버", "인버", " 2X", "2X ", "3X", "ETN")
+
+
+def is_derivative_etf(name: str) -> bool:
+    """레버리지·인버스·ETN 등 파생형 ETF/ETN 여부(이름 기반). 자동매매 유니버스 제외용."""
+    n = (name or "").upper()
+    return any(k.upper() in n for k in _DERIV_ETF_KW)
+
+
 def normalize_watch_item(code: str, name: str = "") -> dict | None:
     """관심종목 입력 정규화: 국내 6자리 숫자 또는 미국 티커(영문 1~6자, 예: NVDA).
 

@@ -23,7 +23,7 @@ from api.services.stock_radar import supply_demand
 from api.services.stock_score import compute_score
 from api.services.stock_signal import light_pillar, pillar_guide, trade_levels
 from api.services.stock_value import load_quotes
-from collector.stock.kis import effective_watchlist, is_kr_code
+from collector.stock.kis import effective_watchlist, is_derivative_etf, is_kr_code
 from collector.stock.kis_ws import kr_movers, pick_subs
 from collector.stock.toss import TossClient
 from engine.orders import place_gated_order
@@ -655,6 +655,8 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
                     continue
             closes = [c["close"] for c in candles
                       if isinstance(c, dict) and c.get("close")]
+            if is_derivative_etf(q.get("name", "")):     # 레버리지·인버스·ETN 자동매매 제외
+                continue
             m = swing_metrics(q, candles, today=time.strftime("%Y%m%d"))
             if not m:
                 continue
@@ -878,6 +880,9 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
                     await sender.send(f"{icon} 청산 {names.get(code, code)}({code}) "
                                       f"{p.get('qty')}주 @{live:,.0f}원 · {reason}\n{msg}")
         elif state == "entry" and len(pos) < settings.day_max_positions:
+            if is_derivative_etf(names.get(code, "")):     # 레버리지·인버스 신규진입 금지
+                order_miss = order_miss or f"{names.get(code, code)}: 파생ETF 제외"
+                continue
             sig = intraday_signal(bars, require_vsurge=settings.day_require_vsurge)
             if sig.get("action") != "buy":
                 miss = miss or sig.get("reason")           # 대표 사유(첫 종목)

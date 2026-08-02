@@ -24,6 +24,7 @@ from typing import Awaitable, Callable
 
 import httpx
 
+from collector.stock.kis import is_derivative_etf
 from shared.settings import settings
 
 logger = logging.getLogger("collector.kis_ws")
@@ -105,12 +106,17 @@ def kr_movers(rankings: dict, cap: int = MAX_SUBS) -> list[str]:
     """랭킹(MARKET_RANKINGS_KEY)에서 국내 급등·거래대금 상위 종목코드(순수).
 
     kr_gainers(급등) 먼저, kr_amount(거래대금) 뒤 — '오늘 움직이는' 종목 우선순위.
-    국내 6자리만, 중복 제거, 상한 cap. 랭킹 없으면 빈 리스트.
+    국내 6자리만, 중복 제거, 상한 cap. 레버리지·인버스 등 파생 ETF는 제외(한국 거래대금
+    상위가 곧 레버리지 ETF라 안 막으면 단타가 이것만 난타함 — 전략 리포트 P0).
     """
     out: list[str] = []
     for key in ("kr_gainers", "kr_amount"):
         for r in (rankings or {}).get(key, []) or []:
-            c = r.get("symbol") if isinstance(r, dict) else None
+            if not isinstance(r, dict):
+                continue
+            c = r.get("symbol")
+            if is_derivative_etf(r.get("name", "")):     # 레버리지·인버스·ETN 제외
+                continue
             if c and c.isdigit() and len(c) == 6 and c not in out:
                 out.append(c)
             if len(out) >= cap:

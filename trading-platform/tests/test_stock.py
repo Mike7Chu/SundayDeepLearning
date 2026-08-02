@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collector.stock.kis import (
     KISClient,
+    is_derivative_etf,
     load_watchlist,
     parse_balance,
     parse_growth_ratio,
@@ -68,6 +69,17 @@ def test_parse_balance():
     assert hb["holdings"][0] == {"symbol": "005930", "name": "삼성전자",
                                  "quantity": 10.0, "pnl_pct": 5.2,
                                  "price": 80000.0, "currency": "KRW"}
+
+
+def test_is_derivative_etf():
+    # 레버리지·인버스·곱버스·ETN은 True(자동매매 제외), 일반주는 False
+    assert is_derivative_etf("KODEX 레버리지")
+    assert is_derivative_etf("KODEX 인버스")
+    assert is_derivative_etf("TIGER 반도체TOP10레버리지")
+    assert is_derivative_etf("KODEX 코스닥150선물인버스")
+    assert not is_derivative_etf("삼성전자")
+    assert not is_derivative_etf("NAVER")
+    assert not is_derivative_etf("")
 
 
 def test_quote_excd():

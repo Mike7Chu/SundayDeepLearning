@@ -99,3 +99,11 @@ def test_kr_movers():
                         {"symbol": "000660", "name": "SK하이닉스"}]}
     assert kr_movers(rk) == ["035420", "005930", "000660"]   # 급등 먼저·중복 제거
     assert kr_movers({}) == [] and kr_movers(None) == []
+
+
+def test_kr_movers_excludes_leverage_inverse():
+    # 레버리지·인버스 ETF는 자동매매 유니버스에서 제외(거래대금 상위 단골이지만 손실원)
+    rk = {"kr_gainers": [{"symbol": "122630", "name": "KODEX 레버리지"},
+                         {"symbol": "114800", "name": "KODEX 인버스"},
+                         {"symbol": "035420", "name": "NAVER"}]}
+    assert kr_movers(rk) == ["035420"]        # 파생 ETF 둘 다 빠지고 일반주만
