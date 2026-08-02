@@ -169,6 +169,23 @@ def test_adr_block_premium():
     # 데이터 결손(환율/본주가 없음)이면 조용히 생략
     assert adr_block([{"usd": 170.0, "kr_price": None, "fx": None}]) == []
     assert adr_block(None) == []
+    # 비율 미확정(1.0)인데 괴리 비현실적(-88%)이면 '가짜 프리미엄' 숨기고 보류 표기
+    art = adr_block([{"code": "000660", "name": "SK하이닉스", "us_symbol": "SKH",
+                     "usd": 147.0, "ratio": 1.0, "kr_price": 1_718_000.0, "fx": 1400.0}])
+    assert art and "보류" in art[0] and "%" not in art[0].split("보류")[0]
+
+
+def test_holdings_flow_block():
+    from research.coach import holdings_flow_block
+
+    flows = [{"code": "000660", "name": "SK하이닉스", "net_eok": 1200.0,
+              "foreign_eok": 900.0, "inst_eok": 300.0, "reason": "외국인 매집"}]
+    lines = holdings_flow_block(flows)
+    assert lines and "SK하이닉스" in lines[1] and "외인 +900" in lines[1]
+    assert "합 +1,200억" in lines[1]
+    # net_eok 없으면(데이터 없음) 조용히 생략
+    assert holdings_flow_block([{"code": "000660", "net_eok": None}]) == []
+    assert holdings_flow_block(None) == []
 
 
 def test_parse_adr_map():

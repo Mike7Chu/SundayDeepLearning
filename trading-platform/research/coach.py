@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import redis.asyncio as aioredis
 
 from research.data import gather
@@ -27,6 +29,7 @@ from shared.redis_keys import (
     TOSS_HOLDINGS_KEY,
 )
 
+logger = logging.getLogger("research.coach")
 KST = timezone(timedelta(hours=9))
 
 # 미국 반도체 참조 바스켓 — 토스 미장 유니버스가 수집한 간밤 종가·등락을 코치에 주입.
@@ -151,11 +154,36 @@ def adr_block(rows: list[dict] | None) -> list[str]:
             continue
         equiv = usd * fx / ratio
         prem = (equiv / krw - 1) * 100
-        note = "" if ratio != 1.0 else " · 비율 1:1 가정(다르면 ADR_MAP에서 조정)"
+        # 비율 미확정(기본 1.0)인데 괴리가 비현실적(±25%↑)이면 '비율 아티팩트' — 가짜
+        # 프리미엄(-88% 등)을 코치에 먹이지 않는다. 괴리 수치는 숨기고 보류로 표기.
+        if ratio == 1.0 and abs(prem) > 25:
+            out.append(
+                f"[ADR 괴리] {r.get('name') or r.get('code')}({r.get('us_symbol')}): "
+                f"ADR 비율 미확정 — 괴리 계산 보류(ADR_MAP 비율 교정 필요, 현재 신호 무시)")
+            continue
+        note = "" if ratio != 1.0 else " · 비율 1:1 가정(교정 전 참고만)"
         out.append(
             f"[ADR 괴리] {r.get('name') or r.get('code')} ADR({r.get('us_symbol')}) "
             f"${usd:,.2f} → 환산 {equiv:,.0f}원 vs 본주 {krw:,.0f}원 = "
             f"프리미엄 {prem:+.1f}%{note}")
+    return out
+
+
+def holdings_flow_block(flows: list[dict] | None) -> list[str]:
+    """보유 종목별 외국인·기관 5일 순매수(수급) 블록(순수 함수).
+
+    '종목별 외인 순매수는 확인할 것' 공백을 메운다 — 지수 수급이 아니라 내가 든
+    종목에 실제로 스마트머니가 들어오는지/나가는지. 값은 억원(양수=순매수).
+    """
+    rows = [f for f in (flows or []) if f.get("net_eok") is not None]
+    if not rows:
+        return []
+    out = ["[보유 종목별 수급 — 외국인·기관 최근 5일 순매수(억원, 양수=매집)]"]
+    for f in rows:
+        out.append(
+            f"- {f.get('name') or f.get('code')}: 외인 {f.get('foreign_eok') or 0:+,.0f} · "
+            f"기관 {f.get('inst_eok') or 0:+,.0f} · 합 {f.get('net_eok'):+,.0f}억"
+            + (f" ({f['reason']})" if f.get("reason") else ""))
     return out
 
 
@@ -167,6 +195,7 @@ def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
                        us_semis: list[dict] | None = None,
                        us_ai: list[dict] | None = None,
                        adrs: list[dict] | None = None,
+                       holdings_flow: list[dict] | None = None,
                        note: str | None = None) -> str:
     """보유 스냅샷 + 목표 + 종목 정량 + 공시 + 리스크 → 데이터 블록(순수 함수).
 
@@ -183,8 +212,8 @@ def build_coach_prompt(snap: dict, cash: float | None, goal: dict,
         return ev
 
     total = sum(_krw(h) for h in hs)
-    lines = (market_block(indicators) + us_semi_block(us_semis)
-             + us_ai_block(us_ai) + adr_block(adrs))
+    lines = (market_block(indicators) + holdings_flow_block(holdings_flow)
+             + us_semi_block(us_semis) + us_ai_block(us_ai) + adr_block(adrs))
     if today and (us_semis or us_ai):
         lines.append(f"(위 미국 시세 기준: {today} KST 수집분 — 직전 거래일 종가)")
     if note:
@@ -311,6 +340,27 @@ async def gather_coach(redis: aioredis.Redis) -> str | None:
                 "ni_growth_q_pct": sd.ni_growth_q_pct,
                 "ni_growth_q_label": sd.ni_growth_q_label,
             }
+    # 보유 종목별 외국인·기관 5일 순매수(수급) — '종목별 외인 확인할 것' 공백을 채운다.
+    flows: list[dict] = []
+    try:
+        from api.services.stock_radar import supply_demand
+        from collector.stock.toss import TossClient
+        tc = TossClient()
+        if tc.enabled:
+            async with httpx.AsyncClient(timeout=15) as client:
+                for h in snap["holdings"]:
+                    code = h.get("symbol", "")
+                    if not (code and code.isdigit()):     # 국내만(외인수급=KRX)
+                        continue
+                    try:
+                        inv = await tc.fetch_investor_trading(client, code, count=5)
+                        sd = supply_demand(inv)
+                        if sd.get("net_eok") is not None:
+                            flows.append({"code": code, "name": h.get("name"), **sd})
+                    except Exception:
+                        continue
+    except Exception as exc:
+        logger.warning("[coach] 종목별 수급 조회 실패: %s", exc)
     ind = None
     ind_raw = await redis.get(MARKET_INDICATORS_KEY)
     if ind_raw:
@@ -359,4 +409,4 @@ async def gather_coach(redis: aioredis.Redis) -> str | None:
     today = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     return build_coach_prompt(snap, cash, goal, details, filings, risk, today,
                               fx_usdkrw=fx, indicators=ind, us_semis=us_semis,
-                              us_ai=us_ai, adrs=adrs, note=note)
+                              us_ai=us_ai, adrs=adrs, holdings_flow=flows, note=note)
