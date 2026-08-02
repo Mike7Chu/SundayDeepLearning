@@ -670,6 +670,12 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
                          "entry": lv.get("entry"), "stop": lv.get("stop"),
                          "target": lv.get("target"), "qty": qty})
     buys.sort(key=lambda b: b["swing"], reverse=True)
+    # 확신 하한: 스윙 미달 후보는 버린다(슬롯 강제충전 금지 — 미달이면 그 슬롯은 현금).
+    n_all = len(buys)
+    buys = [b for b in buys if b.get("swing", 0) >= settings.plan_min_swing]
+    if n_all and not buys:
+        logger.info("[plan] 확신 하한(%.0f) 미달 — 매수 후보 없음(현금 보유)",
+                    settings.plan_min_swing)
     # 국내·미국 각각 스윙 상위 N개 확보 → 국장/미장 슬롯이 각자 매매할 후보를 갖게 한다.
     # (전엔 swing 순 상위 3만 담아 미국 모멘텀주가 독식 → 국장 슬롯이 늘 빈손이었음.)
     kr_b = [b for b in buys if b.get("currency") != "USD"][:settings.plan_kr_buys]
