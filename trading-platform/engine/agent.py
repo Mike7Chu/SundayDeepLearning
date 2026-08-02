@@ -164,9 +164,10 @@ def build_context(plan: dict, holdings: list[dict], risk: dict,
         for b in buys[:30]:
             cur = "$" if b.get("currency") == "USD" else ""
             rs = " · ".join((b.get("reasons") or [])[:4])
+            tag = b.get("strategy_label") or b.get("strategy") or ""
             lines.append(
                 f"- {b.get('name')}({b.get('code')}) 현재 {cur}{b.get('price')} "
-                f"· 스윙 {b.get('swing','?')}점 · 진입 {cur}{b.get('entry')}"
+                f"· {tag} {b.get('swing','?')}점 · 진입 {cur}{b.get('entry')}"
                 f"/손절 {cur}{b.get('stop')}/목표 {cur}{b.get('target')} · {rs}")
 
     sells = plan.get("sells") or []

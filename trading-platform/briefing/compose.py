@@ -122,7 +122,8 @@ def _plan_section(plan: dict) -> list[str]:
                     f"손절 {_px(b.get('stop'), cur)}")
             sw = b.get("swing")
             if sw is not None:
-                head += f" (스윙 {sw:g})"
+                tag = b.get("strategy_label") or b.get("strategy")
+                head += f" (점수 {sw:g}{(' · ' + tag) if tag else ''})"
             out.append(head)
             rs = " · ".join((b.get("reasons") or [])[:3])
             if rs:

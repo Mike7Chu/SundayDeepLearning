@@ -26,6 +26,7 @@ from api.services.stock_value import load_quotes
 from collector.stock.kis import effective_watchlist, is_derivative_etf, is_kr_code
 from collector.stock.kis_ws import kr_movers, pick_subs
 from engine.regime import classify_regime
+from engine.strategies import DEFAULT_ACTIVE, run_strategies
 from collector.stock.toss import TossClient
 from engine.orders import place_gated_order
 from engine.plan import (
@@ -34,7 +35,6 @@ from engine.plan import (
     sell_checks,
     stage1_rank,
     suggest_qty,
-    swing_metrics,
 )
 from engine.risk import evaluate_risk
 from engine.screener import final_score, quant_filter
@@ -663,6 +663,9 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
         except (json.JSONDecodeError, TypeError, ValueError):
             fx = None
 
+    # 시황 라우터: 이 국면에 켜진 전략만 후보를 고른다(전략 리포트 §04).
+    regime = await _json_get(redis, ENGINE_REGIME_KEY)
+    active = regime.get("strategies") or DEFAULT_ACTIVE
     buys: list[dict] = []
     async with httpx.AsyncClient(timeout=15) as client:
         for q in stage1_rank(quotes, held, top=40):
@@ -687,18 +690,18 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
                       if isinstance(c, dict) and c.get("close")]
             if is_derivative_etf(q.get("name", "")):     # 레버리지·인버스·ETN 자동매매 제외
                 continue
-            m = swing_metrics(q, candles, today=time.strftime("%Y%m%d"))
-            if not m:
+            pick = run_strategies(active, q, candles)     # 국면 활성 전략 → 최고 픽
+            if not pick:
                 continue
             kr = code.isdigit()
-            lv = trade_levels(closes, q.get("price"), kr=kr) or {}
-            qty = suggest_qty(lv.get("entry") or 0, asset,
+            qty = suggest_qty(pick.get("entry") or q.get("price") or 0, asset,
                               risk.get("per_stock_cap"), fx=fx, usd=not kr)
             buys.append({"code": code, "name": q.get("name", ""),
                          "price": q.get("price"), "currency": q.get("currency", "KRW"),
-                         "swing": m["swing"], "reasons": m["reasons"],
-                         "entry": lv.get("entry"), "stop": lv.get("stop"),
-                         "target": lv.get("target"), "qty": qty})
+                         "swing": pick["score"], "strategy": pick["strategy"],
+                         "strategy_label": pick["label"], "reasons": pick["reasons"],
+                         "entry": pick.get("entry"), "stop": pick.get("stop"),
+                         "target": pick.get("target"), "qty": qty})
     buys.sort(key=lambda b: b["swing"], reverse=True)
     # 확신 하한: 스윙 미달 후보는 버린다(슬롯 강제충전 금지 — 미달이면 그 슬롯은 현금).
     n_all = len(buys)
