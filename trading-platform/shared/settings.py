@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     day_trade_interval_sec: float = 45.0     # 데이 루프 주기
     intraday_bar_sec: int = 60               # 분봉 버킷(초)
     day_max_positions: int = 3               # 동시 데이 포지션 상한
+    # 단타 품질 게이트: 동전주/저가 펌핑주 진입 금지(딥노이드·썸에이지류 차단),
+    # 위험회피장(regime=risk_off)이면 신규 진입 정지(가짜 돌파 되돌림 회피). 청산은 무관.
+    day_min_price_krw: float = 3000.0        # 단타 최소 진입가(동전주 제외)
+    day_skip_risk_off: bool = True           # 위험회피장이면 단타 신규진입 스탠드다운
     # 거래강도(vsurge) 필터: v는 폴링 기반 갱신횟수 프록시라 고정 주기면 상수 → 항상 False가
     # 되어 진입을 봉쇄. 실거래량 피드 붙기 전엔 OFF 유지(진입은 정배열+양봉만으로 판정).
     day_require_vsurge: bool = False

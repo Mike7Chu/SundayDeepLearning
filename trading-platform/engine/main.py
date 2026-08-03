@@ -890,6 +890,9 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
     # 로 잡은 수량의 est가 per_stock_cap을 넘겨 order_allowed가 전량 '한도 초과' 거부한다.
     risk = await _json_get(redis, ENGINE_RISK_KEY)
     budget = min(risk.get("per_stock_cap") or max_order, max_order)
+    # 위험회피장이면 단타 신규진입 스탠드다운(청산은 계속) — 급등주 가짜돌파 되돌림 회피.
+    regime = await _json_get(redis, ENGINE_REGIME_KEY)
+    stand_down = settings.day_skip_risk_off and regime.get("regime") == "risk_off"
     icon = "⚡초단타" if scalp else "📈데이"
     changed = False
     n_live = n_ready = n_buy = n_fill = 0                   # 진단 카운터(신호·체결 분리)
@@ -951,9 +954,12 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
 
         if code in pos:                                    # 이미 보유 → 청산은 위 방어 패스가 담당
             continue
-        if state == "entry" and len(pos) < settings.day_max_positions:
+        if state == "entry" and not stand_down and len(pos) < settings.day_max_positions:
             if is_derivative_etf(names.get(code, "")):     # 레버리지·인버스 신규진입 금지
                 order_miss = order_miss or f"{names.get(code, code)}: 파생ETF 제외"
+                continue
+            if live < settings.day_min_price_krw:          # 동전주/저가 펌핑주 제외
+                order_miss = order_miss or f"{names.get(code, code)}: 저가주 제외(<{settings.day_min_price_krw:,.0f})"
                 continue
             sig = intraday_signal(bars, require_vsurge=settings.day_require_vsurge)
             if sig.get("action") != "buy":
@@ -983,7 +989,9 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
     now_t = time.time()
     if now_t - _DAY_HB.get(tag, 0) >= 300:
         _DAY_HB[tag] = now_t
-        if n_buy and not n_fill:                # 신호는 났는데 한 건도 체결 안 됨 → 이유
+        if stand_down:                          # 위험회피장 → 신규진입 정지(청산만)
+            tail = " · 스탠드다운(위험회피장 — 신규진입 정지, 청산만)"
+        elif n_buy and not n_fill:              # 신호는 났는데 한 건도 체결 안 됨 → 이유
             tail = " · 미체결:" + (order_miss or "사유불명")
         elif not n_buy and miss:                # 신호 자체가 없음 → 조건 미충족 이유
             tail = " · 미진입:" + miss
