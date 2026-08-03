@@ -443,6 +443,18 @@ async def _live_price(redis: aioredis.Redis, code: str) -> float | None:
     return None
 
 
+async def _quote_price(redis: aioredis.Redis, code: str) -> float | None:
+    """저장된 마지막 시세가(신선도 무관) — 청산 판정 폴백용(실시간 끊겨도 관리 지속)."""
+    raw = await redis.hget(STOCK_QUOTE_KEY, code)
+    if not raw:
+        return None
+    try:
+        p = json.loads(raw).get("price")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return float(p) if p and p > 0 else None
+
+
 async def _holdings_alerts(redis: aioredis.Redis, sender: TelegramSender) -> None:
     """보유 종목이 추천 목표가/손절선에 닿으면 알림(종목·종류당 24h 1회).
 
@@ -883,6 +895,44 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
     n_live = n_ready = n_buy = n_fill = 0                   # 진단 카운터(신호·체결 분리)
     miss = ""                                              # 대표 '미진입 사유'(신호 없음)
     order_miss = ""                                        # 대표 '미체결 사유'(신호는 났는데 주문 거부)
+
+    # ── 방어 1) 보유 데이포지션 청산 — 스캔 유니버스·실시간 신선도와 '무관하게' 매 사이클
+    # 전량 점검한다. 실시간가가 끊겨도(웹소켓 이탈) 저장 시세→진입가로 폴백해 익절/손절/
+    # 장마감 정리가 항상 평가되게 한다(예전엔 실시간가 없으면 관리 자체가 스킵돼 묶였음).
+    for code, p in list(pos.items()):
+        px = (await _live_price(redis, code) or await _quote_price(redis, code)
+              or p.get("entry"))
+        if not px or px <= 0:
+            continue
+        entry = p.get("entry") or px
+        ret = (px / entry - 1) * 100
+        reason = None
+        if state == "flatten":
+            reason = "장마감 정리"
+        elif ret >= settings.day_trade_take_pct:
+            reason = f"익절 +{ret:.1f}%"
+        elif ret <= -settings.day_trade_stop_pct:
+            reason = f"손절 {ret:.1f}%"
+        if not reason:
+            continue
+        ok, msg = await place_gated_order(
+            redis, side="SELL", code=code, qty=p.get("qty") or 1,
+            price=px, broker=broker, kis=kis, toss=toss)
+        nm = names.get(code, code)
+        if ok:
+            pos.pop(code, None)
+            changed = True
+            await sender.send(f"{icon} 청산 {nm}({code}) {p.get('qty')}주 "
+                              f"@{px:,.0f}원 · {reason}\n{msg}")
+        else:                                              # 방어 2) 매도 실패 알림(쓰로틀)
+            logger.warning("[%s] 매도 실패 %s(%s) %s: %s — 재시도 예정",
+                           tag, nm, code, reason, msg)
+            hbk = f"{tag}:sellfail:{code}"
+            if time.time() - _DAY_HB.get(hbk, 0) >= 600:
+                _DAY_HB[hbk] = time.time()
+                await sender.send(f"⚠️ {icon} 매도 실패 {nm}({code}) · {reason}\n{msg}\n"
+                                  f"포지션이 묶였습니다 — 재시도 중이나 수동 확인 권장.")
+
     for code in codes:
         live = await _live_price(redis, code)
         if not live or live <= 0:
@@ -899,27 +949,9 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
         if len([b for b in bars if b.get("c")]) > 20:      # 신호 평가 가능(분봉 21+)
             n_ready += 1
 
-        if code in pos:                                    # 보유 데이포지션 → 청산 판정
-            p = pos[code]
-            entry = p.get("entry") or live
-            ret = (live / entry - 1) * 100
-            reason = None
-            if state == "flatten":
-                reason = "장마감 정리"
-            elif ret >= settings.day_trade_take_pct:
-                reason = f"익절 +{ret:.1f}%"
-            elif ret <= -settings.day_trade_stop_pct:
-                reason = f"손절 {ret:.1f}%"
-            if reason:
-                ok, msg = await place_gated_order(
-                    redis, side="SELL", code=code, qty=p.get("qty") or 1,
-                    price=live, broker=broker, kis=kis, toss=toss)
-                if ok:
-                    pos.pop(code, None)
-                    changed = True
-                    await sender.send(f"{icon} 청산 {names.get(code, code)}({code}) "
-                                      f"{p.get('qty')}주 @{live:,.0f}원 · {reason}\n{msg}")
-        elif state == "entry" and len(pos) < settings.day_max_positions:
+        if code in pos:                                    # 이미 보유 → 청산은 위 방어 패스가 담당
+            continue
+        if state == "entry" and len(pos) < settings.day_max_positions:
             if is_derivative_etf(names.get(code, "")):     # 레버리지·인버스 신규진입 금지
                 order_miss = order_miss or f"{names.get(code, code)}: 파생ETF 제외"
                 continue
