@@ -1148,7 +1148,14 @@ async def _agent_run(redis: aioredis.Redis, kis,
         {"slot": slot, "ts": now, "market_view": mv, "n": len(decisions),
          "acted": len(acted), "paper": settings.kis_paper}, ensure_ascii=False))
     tag = "·모의" if settings.kis_paper else "·실계좌"
-    body = "\n".join(acted) if acted else "관망 — 신규 매매 없음(확신 부족/현금 보유)"
+    if acted:
+        body = "\n".join(acted)
+    elif decisions:                                  # 검토는 했고 전부 HOLD
+        body = (f"관망 — 후보 {len(buys)}·보유 {len(holdings)} 검토, "
+                f"{len(decisions)}건 모두 HOLD(확신 부족/현금 보유)")
+    else:                                            # 결정 0건 — 파싱 실패 가능
+        body = (f"관망 — 후보 {len(buys)}·보유 {len(holdings)} 검토, 신규 매매 없음"
+                + ("" if mv else " · ⚠️ 판정 파싱 실패(엔진 로그 확인)"))
     from notifier.telegram import stock_buttons
     btns = (stock_buttons(touched) or []) + (dashboard_buttons() or [])  # 매매 종목 상세 + 대시보드
     await sender.send(f"🤖 스윙 에이전트 판정({slot}{tag}) — 완전위임\n"

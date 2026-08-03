@@ -276,8 +276,10 @@ class Analyst:
             "[출력 — 오직 JSON 하나. 앞뒤 설명 금지]\n"
             '{"market_view":"오늘 시장 한 줄","decisions":['
             '{"action":"BUY|SELL|HOLD","code":"종목코드","conviction":0-100,"reason":"한 줄 근거"}]}\n'
-            "매수/매도할 게 없으면 decisions를 빈 배열로 두세요.\n\n"
-            f"{context}"
+            "매수/매도할 게 없으면 decisions를 빈 배열로, 하지만 market_view는 반드시 채우세요.\n\n"
+            f"{context}\n\n"
+            "[최종 지시] 웹검색을 했더라도 **마지막 출력은 위 형식의 JSON 객체 하나뿐**입니다. "
+            "산문·마크다운·코드펜스 없이 JSON만. market_view는 비우지 마세요."
         )
         try:
             if mode == "api":
@@ -291,6 +293,27 @@ class Analyst:
             return {"enabled": True, "market_view": f"결정 실패: {exc}",
                     "decisions": [], "mode": mode, "ts": time.time()}
         parsed = parse_decisions(report)
+        # 웹검색 모드에서 산문만 내놓아 JSON이 없을 수 있다 → 원문 로깅 후 'JSON만' 1회 재시도.
+        if not parsed["decisions"] and not parsed["market_view"]:
+            logger.warning("[agent] JSON 파싱 실패 — 원문(%d자): %s",
+                           len(report or ""), (report or "").replace("\n", " ")[:400])
+            if (report or "").strip():
+                try:
+                    strict = ("아래 컨텍스트로 매매를 결정하되 **오직 JSON 한 줄만** 출력. "
+                              "설명·마크다운·웹검색 금지.\n"
+                              '{"market_view":"한 줄","decisions":[{"action":"BUY|SELL|HOLD",'
+                              '"code":"코드","conviction":0-100,"reason":"근거"}]}\n\n'
+                              + context)
+                    report2 = await (self._via_api(strict) if mode == "api"
+                                     else self._via_cli(strict, timeout=_CLI_TIMEOUT))
+                    p2 = parse_decisions(report2)
+                    if p2["decisions"] or p2["market_view"]:
+                        parsed = p2
+                    else:
+                        logger.warning("[agent] 재시도도 JSON 실패 — 원문: %s",
+                                       (report2 or "").replace("\n", " ")[:300])
+                except Exception as exc:
+                    logger.warning("[agent] JSON 재시도 실패: %s", exc)
         return {"enabled": True, "mode": mode, "ts": time.time(), **parsed}
 
     async def _via_api(self, prompt: str) -> str:

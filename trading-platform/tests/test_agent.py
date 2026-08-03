@@ -67,6 +67,16 @@ def test_parse_decisions_bare_and_garbage():
     assert parse_decisions("설명만 있고 JSON 없음")["decisions"] == []
 
 
+def test_parse_decisions_prefers_object_with_keys():
+    # 산문에 스키마 예시 중괄호가 먼저 나와도, 결정 키를 가진 '실제' 객체를 집는다.
+    text = ('형식은 {"action":"BUY"} 처럼 씁니다. 웹검색 결과 삼성 저평가.\n'
+            '최종: {"market_view":"강세","decisions":[{"action":"BUY","code":"005930",'
+            '"conviction":70,"reason":"실적"}]}')
+    out = parse_decisions(text)
+    assert out["market_view"] == "강세" and len(out["decisions"]) == 1
+    assert out["decisions"][0]["code"] == "005930"
+
+
 def test_build_context_lists_candidates_and_holdings():
     plan = {"buys": [{"code": "005930", "name": "삼성전자", "price": 80000,
                       "swing": 90, "entry": 78000, "stop": 72000, "target": 90000,

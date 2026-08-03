@@ -105,7 +105,9 @@ def _extract_json(text: str) -> dict | None:
             return json.loads(m.group(1))
         except json.JSONDecodeError:
             pass
-    # 중괄호 균형으로 첫 완전한 객체 스캔
+    # 중괄호 균형으로 '완전한 객체 전부'를 모아, 결정 키를 가진 걸 우선(산문에 섞인
+    # 스키마 예시·다른 중괄호를 잘못 집지 않게). 없으면 마지막 유효 객체.
+    objs: list[dict] = []
     start = text.find("{")
     while start != -1:
         depth = 0
@@ -116,11 +118,19 @@ def _extract_json(text: str) -> dict | None:
                 depth -= 1
                 if depth == 0:
                     try:
-                        return json.loads(text[start:i + 1])
+                        o = json.loads(text[start:i + 1])
+                        if isinstance(o, dict):
+                            objs.append(o)
                     except json.JSONDecodeError:
-                        break
+                        pass
+                    break
         start = text.find("{", start + 1)
-    return None
+    if not objs:
+        return None
+    for o in reversed(objs):                 # 결정/시장뷰 키를 가진 마지막 객체 우선
+        if "decisions" in o or "market_view" in o:
+            return o
+    return objs[-1]
 
 
 def build_context(plan: dict, holdings: list[dict], risk: dict,
