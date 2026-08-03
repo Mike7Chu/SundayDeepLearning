@@ -443,6 +443,30 @@ async def _live_price(redis: aioredis.Redis, code: str) -> float | None:
     return None
 
 
+async def _stock_flow(redis: aioredis.Redis, toss: TossClient, client,
+                      code: str) -> dict | None:
+    """종목별 외국인·기관 5일 순매수(수급) — 30분 캐시. S6 수급 모멘텀 입력.
+
+    supply_demand 결과 {net_eok, foreign_eok, inst_eok, ...}. 국내 6자리만.
+    """
+    if not (code and code.isdigit()):
+        return None
+    ck = f"stock:flow:{code}"
+    cached = await redis.get(ck)
+    if cached:
+        try:
+            return json.loads(cached)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    try:
+        from api.services.stock_radar import supply_demand
+        sd = supply_demand(await toss.fetch_investor_trading(client, code, count=5))
+    except Exception:
+        return None
+    await redis.set(ck, json.dumps(sd, ensure_ascii=False), ex=1800)
+    return sd
+
+
 async def _quote_price(redis: aioredis.Redis, code: str) -> float | None:
     """저장된 마지막 시세가(신선도 무관) — 청산 판정 폴백용(실시간 끊겨도 관리 지속)."""
     raw = await redis.hget(STOCK_QUOTE_KEY, code)
@@ -702,6 +726,11 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
                       if isinstance(c, dict) and c.get("close")]
             if is_derivative_etf(q.get("name", "")):     # 레버리지·인버스·ETN 자동매매 제외
                 continue
+            if "S6" in active and toss.enabled:          # 수급 모멘텀 활성 → 종목별 수급 주입
+                fl = await _stock_flow(redis, toss, client, code)
+                if fl and fl.get("net_eok") is not None:
+                    q["flow_net_eok"] = fl.get("net_eok")
+                    q["flow_foreign_eok"] = fl.get("foreign_eok")
             pick = run_strategies(active, q, candles)     # 국면 활성 전략 → 최고 픽
             if not pick:
                 continue

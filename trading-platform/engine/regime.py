@@ -14,10 +14,10 @@
 """
 from __future__ import annotations
 
-# 전략 ID → 사람이 읽는 이름(대시보드·브리핑·로그 공용)
+# 전략 ID → 사람이 읽는 이름(대시보드·브리핑·로그 공용, engine.strategies와 동기)
 STRATEGY_LABELS = {
     "S1": "추세 모멘텀", "S2": "퀄리티-밸류", "S3": "저변동 방어",
-    "S4": "단기 평균회귀", "S5": "촉매·수급 이벤트",
+    "S4": "단기 평균회귀", "S5": "실적 서프라이즈(PEAD)", "S6": "수급 모멘텀",
 }
 
 
@@ -87,11 +87,11 @@ def classify_regime(index_closes: list[float], *,
     if not above and stress:
         regime, label, posture, strat = "risk_off", "위험 회피", "방어", ["S3"]
     elif above and rising and not vol_hi and not breadth_weak:
-        regime, label, posture, strat = "bull_trend", "강세 추세", "공격", ["S1", "S5"]
+        regime, label, posture, strat = "bull_trend", "강세 추세", "공격", ["S1", "S5", "S6"]
     elif abs(dist) < 0.03 and not vol_hi:
         regime, label, posture, strat = "range", "횡보 레인지", "역발상", ["S4"]
     else:
-        regime, label, posture, strat = "neutral", "중립·순환", "선별", ["S2"]
+        regime, label, posture, strat = "neutral", "중립·순환", "선별", ["S2", "S6"]
     if foreign_pos and regime == "neutral" and above:
         reasons.append("외인 순매수 — 위험선호 편")
 

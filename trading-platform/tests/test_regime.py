@@ -16,11 +16,11 @@ def test_insufficient_data():
 
 
 def test_bull_trend_uptrend():
-    # 200일 이상 꾸준한 상승 → 지수>200일선·MA상승·저변동 → 강세 추세(S1+S5)
+    # 200일 이상 꾸준한 상승 → 지수>200일선·MA상승·저변동 → 강세 추세(S1+S5+S6)
     closes = _trend(230)
     r = classify_regime(closes, foreign_net_eok=500)
     assert r["regime"] == "bull_trend"
-    assert r["strategies"] == ["S1", "S5"] and r["posture"] == "공격"
+    assert r["strategies"] == ["S1", "S5", "S6"] and r["posture"] == "공격"
     assert r["metrics"]["ma_rising"] is True and r["metrics"]["dist_ma_pct"] > 0
 
 

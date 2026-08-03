@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from engine.strategies import (
     DEFAULT_ACTIVE, STRATEGY_FUNCS, run_strategies,
-    s1_momentum, s2_quality_value, s3_defensive, s4_meanrev, s5_catalyst,
+    s1_momentum, s2_quality_value, s3_defensive, s4_meanrev, s5_catalyst, s6_flow,
 )
 
 
@@ -70,6 +70,22 @@ def test_s5_catalyst_needs_surprise_and_breakout():
                        _candles(closes)) is None
 
 
+def test_s6_flow_needs_accumulation_and_trend():
+    closes = [100 + i for i in range(70)]                 # 상승추세
+    q = {"code": "005930", "price": closes[-1], "flow_net_eok": 400.0,
+         "flow_foreign_eok": 300.0}
+    p = s6_flow(q, _candles(closes))
+    assert p and p["strategy"] == "S6" and p["score"] >= 55
+    assert "매집" in p["reasons"][0]
+    # 수급 데이터 없으면 None(주입 안 된 종목)
+    assert s6_flow({"code": "005930", "price": 170}, _candles(closes)) is None
+    # 순매집 약하면(50억 미만) None
+    assert s6_flow({**q, "flow_net_eok": 10.0}, _candles(closes)) is None
+    # 하락추세 매집은 제외(추세 확인)
+    down = [170 - i for i in range(70)]
+    assert s6_flow({**q, "price": down[-1]}, _candles(down)) is None
+
+
 def test_run_strategies_picks_best_of_active():
     closes = [100 + i for i in range(80)]
     q = {"code": "005930", "price": closes[-1], "high_52w": closes[-1],
@@ -82,5 +98,5 @@ def test_run_strategies_picks_best_of_active():
     assert run_strategies(["S4"], q, _candles(closes)) is None
     # active 비면 DEFAULT_ACTIVE 사용
     assert run_strategies([], q, _candles(closes)) is not None
-    assert set(STRATEGY_FUNCS) == {"S1", "S2", "S3", "S4", "S5"}
+    assert set(STRATEGY_FUNCS) == {"S1", "S2", "S3", "S4", "S5", "S6"}
     assert DEFAULT_ACTIVE == ["S1", "S2"]

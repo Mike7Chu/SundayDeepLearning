@@ -8,7 +8,8 @@
   S2 퀄리티-밸류     TTM 저PER·고ROE·저부채·FCF (중립·순환장, 저회전)
   S3 저변동 방어     저변동·저부채·배당 (위험 회피장)
   S4 단기 평균회귀   과매도 반등+거래량 (횡보 레인지장)
-  S5 촉매·수급       실적 서프라이즈+돌파 (뉴스·리스크온)
+  S5 실적 서프라이즈  실적 beat 후 표류(PEAD)+돌파 (뉴스·리스크온)
+  S6 수급 모멘텀     외국인·기관 5일 순매집+추세 (한국 전용 선행지표)
 
 예측 아님·판단 보조. 최종 심판은 비용 반영 net(백테스트/포워드로그). 재무 결측이면
 해당 전략은 None(억지 매수 금지 — 리포트 P0 확신 하한과 일관).
@@ -21,7 +22,7 @@ from api.services.stock_signal import (
 
 STRATEGY_LABELS = {
     "S1": "추세 모멘텀", "S2": "퀄리티-밸류", "S3": "저변동 방어",
-    "S4": "단기 평균회귀", "S5": "촉매·수급 이벤트",
+    "S4": "단기 평균회귀", "S5": "실적 서프라이즈(PEAD)", "S6": "수급 모멘텀",
 }
 
 
@@ -228,8 +229,43 @@ def s5_catalyst(q: dict, candles: list) -> dict | None:
             "reasons": reasons, **_levels(q, price, cs)}
 
 
+# ── S6 수급 모멘텀 (외국인·기관 매집) ───────────────────────────────────────
+def s6_flow(q: dict, candles: list) -> dict | None:
+    """한국 전용 선행지표: 외국인·기관 5일 순매집 + 추세 확인.
+
+    q에 flow_net_eok(외인+기관 5일 순매수 억), flow_foreign_eok가 채워져 있어야 함
+    (_swing_plan이 S6 활성 시 supply_demand로 주입). 하락추세 매집은 제외(추세 확인).
+    """
+    fnet = q.get("flow_net_eok")
+    if fnet is None or fnet < 50:                     # 최소 매집 강도(합 50억+)
+        return None
+    cs, *_ = _series(candles)
+    price = q.get("price") or (cs[-1] if cs else None)
+    if not price or len(cs) < 60:
+        return None
+    s20, s60 = sma(cs, 20), sma(cs, 60)
+    if not (s60 and price > s60):                     # 추세 확인(하락장 매집 제외)
+        return None
+    score = 50 + min(35.0, fnet / 20)                 # 700억+ → 만점권
+    if s20 and price > s20:
+        score += 8
+    foreign = q.get("flow_foreign_eok")
+    if foreign and foreign > 0:
+        score += 7
+    score = min(100.0, score)
+    if score < 55:
+        return None
+    reasons = [f"외인+기관 5일 +{fnet:,.0f}억 매집"]
+    if foreign and foreign > 0:
+        reasons.append(f"외인 +{foreign:,.0f}억")
+    if s20 and price > s20:
+        reasons.append("정배열")
+    return {"strategy": "S6", "label": STRATEGY_LABELS["S6"], "score": round(score, 1),
+            "reasons": reasons, **_levels(q, price, cs)}
+
+
 STRATEGY_FUNCS = {"S1": s1_momentum, "S2": s2_quality_value, "S3": s3_defensive,
-                  "S4": s4_meanrev, "S5": s5_catalyst}
+                  "S4": s4_meanrev, "S5": s5_catalyst, "S6": s6_flow}
 
 # 국면 미상/폴백: 강세·중립 성격의 두 축을 기본 활성(억지 매매 금지는 각 전략 임계로 보장).
 DEFAULT_ACTIVE = ["S1", "S2"]
