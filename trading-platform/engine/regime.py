@@ -47,7 +47,8 @@ def classify_regime(index_closes: list[float], *,
     n = len(closes)
     if n < 40:
         return {"regime": "unknown", "label": "판정 불가", "posture": "중립",
-                "strategies": ["S2"], "confidence": "low",
+                "strategies": ["S2"], "confidence": "low", "exposure_pct": 50,
+                "strategy_labels": [STRATEGY_LABELS["S2"]],
                 "reasons": ["지수 일봉 부족 — 데이터 축적 후 판정"], "metrics": {}}
 
     p = min(ma_long, n)                         # 200일 우선, 부족하면 가능한 최장
@@ -95,10 +96,14 @@ def classify_regime(index_closes: list[float], *,
     if foreign_pos and regime == "neutral" and above:
         reasons.append("외인 순매수 — 위험선호 편")
 
+    # 국면별 목표 노출도(%) — 매수 사이징을 곱으로 조절. 강세=풀노출, 위험회피=축소.
+    exposure = {"bull_trend": 100, "neutral": 60, "range": 40,
+                "risk_off": 20}.get(regime, 50)
+
     return {"regime": regime, "label": label, "posture": posture,
             "strategies": strat, "confidence": "high" if n >= ma_long else "mid",
             "strategy_labels": [STRATEGY_LABELS.get(s, s) for s in strat],
-            "reasons": reasons,
+            "exposure_pct": exposure, "reasons": reasons,
             "metrics": {"dist_ma_pct": round(dist * 100, 2), "ma_rising": rising,
                         "vol": round(vol, 4), "vol_base": round(base, 4),
                         "vol_high": vol_hi, "foreign_eok": foreign_net_eok,

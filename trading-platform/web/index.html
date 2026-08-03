@@ -621,7 +621,7 @@ function planCardHTML(pl){
   if(!buys.length&&!sells.length&&!rgOn) return '';
   const mn=(v,us)=>v==null?"–":(us?money(v,"USD"):won(v));
   const rgTone={bull_trend:"pos",risk_off:"neg",range:"",neutral:""}[rg.regime]||"";
-  const rgBadge=rgOn?`<span class="badge">🧭 ${rg.label} · ${rg.posture||''} · ${(rg.strategy_labels||rg.strategies||[]).join("/")}</span>`:'';
+  const rgBadge=rgOn?`<span class="badge">🧭 ${rg.label} · ${rg.posture||''}${rg.exposure_pct!=null?` · 비중 ${rg.exposure_pct}%`:''} · ${(rg.strategy_labels||rg.strategies||[]).join("/")}</span>`:'';
   const rgLine=rgOn?`<div class="num ${rgTone}" style="margin:2px 0 8px">${(rg.reasons||[]).slice(0,3).join(" · ")}</div>`:'';
   const buyRows=buys.map((b,i)=>{const us=b.currency==="USD";
     return `<div class="card" style="margin-top:8px"><div class="row clk" onclick="openStock('${b.code}','${qesc(b.name||'')}')">

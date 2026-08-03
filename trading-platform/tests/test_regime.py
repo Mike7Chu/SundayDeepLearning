@@ -42,6 +42,15 @@ def test_range_near_ma():
         assert r["strategies"] == ["S4"]
 
 
+def test_exposure_by_regime():
+    # 강세=100% 풀노출, 위험회피=20% 축소(비중 오버레이)
+    assert classify_regime(_trend(230))["exposure_pct"] == 100          # bull_trend
+    off = _trend(220, start=200, step=-0.4)
+    off = off[:-5] + [off[-6] * f for f in (0.97, 0.94, 0.90, 0.86, 0.82)]
+    assert classify_regime(off, foreign_net_eok=-2000)["exposure_pct"] == 20
+    assert classify_regime([1, 2, 3])["exposure_pct"] == 50             # unknown 폴백
+
+
 def test_strategy_labels_present():
     r = classify_regime(_trend(230))
     assert set(r["strategies"]).issubset(STRATEGY_LABELS)

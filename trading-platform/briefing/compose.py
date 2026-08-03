@@ -101,8 +101,10 @@ def _plan_section(plan: dict) -> list[str]:
     rline = why = None
     if regime.get("regime") not in (None, "unknown", ""):
         strat = "/".join(regime.get("strategy_labels") or regime.get("strategies") or [])
+        exp = regime.get("exposure_pct")
         rline = (f"\n[🧭 시황 국면] {regime.get('label')} · 태세 "
-                 f"{regime.get('posture')} · 권장전략 {strat}")
+                 f"{regime.get('posture')} · 권장전략 {strat}"
+                 + (f" · 목표비중 {exp}%" if exp is not None else ""))
         why = " · ".join((regime.get("reasons") or [])[:2])
     if not (buys or sells or rline):
         return []

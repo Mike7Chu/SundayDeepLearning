@@ -279,6 +279,7 @@ async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
                  else settings.toss_max_order_krw)
     hold = await _json_get(redis, TOSS_HOLDINGS_KEY)
     held = {h.get("symbol") for h in hold.get("holdings", [])}
+    exp = await _exposure_frac(redis)                # 국면 비중 오버레이(매수 사이징 곱)
     now = time.time()
     for r in rows:
         code, entry = r["code"], r.get("entry")
@@ -311,7 +312,7 @@ async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
                         broker, code, f"{live:.0f}" if live else "?", entry)
             continue                              # 쿨다운 안 걸어 다음에 눌리면 매수
         order_price, note = dec
-        budget = min(risk.get("per_stock_cap") or max_order, max_order)
+        budget = min(risk.get("per_stock_cap") or max_order, max_order) * exp
         qty = int(budget // order_price)
         qty = await _cap_by_cash(redis, code, qty, order_price)  # 원화 예수금 상한
         if qty < 1:
@@ -465,6 +466,17 @@ async def _stock_flow(redis: aioredis.Redis, toss: TossClient, client,
         return None
     await redis.set(ck, json.dumps(sd, ensure_ascii=False), ex=1800)
     return sd
+
+
+async def _exposure_frac(redis: aioredis.Redis) -> float:
+    """국면 목표 노출도(0~1) — 매수 사이징 곱. 강세=1.0, 위험회피=0.2. 국면 없으면 1.0.
+
+    국면이 '어떤 전략'뿐 아니라 '얼마나 실을지'까지 조절 — 위험회피장엔 같은 신호라도
+    포지션을 줄여 하방을 방어한다(전략 리포트 §04 국면 라우터의 비중 오버레이).
+    """
+    reg = await _json_get(redis, ENGINE_REGIME_KEY)
+    exp = reg.get("exposure_pct")
+    return 1.0 if exp is None else max(0.1, min(1.0, exp / 100.0))
 
 
 async def _quote_price(redis: aioredis.Redis, code: str) -> float | None:
@@ -803,6 +815,7 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
     now = time.time()
     fx = await _fx_rate(redis)                        # USD→KRW (주문 한도 원화 환산용)
     max_order = settings.kis_max_order_krw
+    exp = await _exposure_frac(redis)                # 국면 비중 오버레이(매수 사이징 곱)
     for b in us_buys[:2]:                            # 상위 2개만(과도한 자동주문 억제)
         code, entry = b["code"], b.get("entry")
         qty = b.get("qty")
@@ -820,7 +833,7 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
         # 주문 한도(원)에 맞춰 수량 축소 — 국내 _auto_buy와 동일 규율. 미장은 고가주가
         # 많아 고정수량이면 1주도 10만원 한도를 넘어 place_gated_order가 전량 거부하던 버그.
         if fx:
-            budget_krw = min(risk.get("per_stock_cap") or max_order, max_order)
+            budget_krw = min(risk.get("per_stock_cap") or max_order, max_order) * exp
             qty_cap = int((budget_krw / fx) // order_price)
             if qty_cap < 1:                          # 1주도 한도 초과 → 조용히 스킵(첫 회만 로그)
                 if not await _prev_failed(redis, code):
@@ -1094,7 +1107,8 @@ async def _agent_buy(redis: aioredis.Redis, kis, row: dict, risk: dict,
         return None, "과확장", ""
     order_price, note = dec
     max_order = settings.kis_max_order_krw
-    budget = min(risk.get("per_stock_cap") or max_order, max_order)
+    exp = await _exposure_frac(redis)                    # 국면 비중 오버레이(매수 사이징 곱)
+    budget = min(risk.get("per_stock_cap") or max_order, max_order) * exp
     if code.isdigit():                                   # 국내(원)
         qty = int(budget // order_price)
     elif fx:                                             # 미국(USD, 한도 원화 환산)
