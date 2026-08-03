@@ -26,6 +26,7 @@ from shared.redis_keys import (
     MARKET_INDICATORS_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
+    STOCK_UNIVERSE_KEY,
 )
 from shared.settings import settings
 
@@ -44,6 +45,17 @@ async def gather(redis: aioredis.Redis) -> tuple[list, list, list, list, list]:
             quotes.append(json.loads(v))
         except (json.JSONDecodeError, TypeError):
             continue
+    # 이름 없는 시세(가격만 들어온 유니버스·급등주 항목)는 전 시장 유니버스 맵에서 보강.
+    try:
+        uni_raw = await redis.get(STOCK_UNIVERSE_KEY)
+        if uni_raw:
+            names = {u["code"]: u.get("name") for u in json.loads(uni_raw)
+                     if u.get("code") and u.get("name")}
+            for q in quotes:
+                if not q.get("name") and names.get(q.get("code")):
+                    q["name"] = names[q["code"]]
+    except (json.JSONDecodeError, TypeError, KeyError):
+        pass
     value_rows = (await value_screener(redis)).get("rows", [])
     signal_rows = []
     for w in load_watchlist():

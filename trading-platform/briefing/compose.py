@@ -197,7 +197,11 @@ def compose_brief(quotes: list[dict], value_rows: list[dict],
         movers = sorted(quotes, key=lambda q: abs(q.get("change_pct") or 0), reverse=True)[:5]
         lines.append("\n[관심종목 등락 TOP]")
         for q in movers:
-            lines.append(f"· {q.get('name','')} {int(q.get('price') or 0):,}원 {_arrow(q.get('change_pct'))}")
+            nm = q.get("name") or q.get("code") or "?"      # 이름 없으면 코드로 폴백
+            px = q.get("price") or 0
+            pxs = (f"${px:,.2f}" if q.get("currency") == "USD"  # 통화 구분($/원)
+                   else f"{int(px):,}원")
+            lines.append(f"· {nm} {pxs} {_arrow(q.get('change_pct'))}")
 
     buys = [s for s in signal_rows if s.get("signal") == "buy"]
     sells = [s for s in signal_rows if s.get("signal") == "sell"]
