@@ -176,6 +176,28 @@ def _stats_section(stats: dict) -> list[str]:
     return out
 
 
+def _risk_discipline_section(plan: dict) -> list[str]:
+    """손절 규율 — 하드 손절선 이탈(자본보존) 보유를 최상단에 크게 경고(순수 함수).
+
+    깊은 손실이 브리핑 중간에 묻혀 방치되는 걸 막는다. 토스는 수동 매도라 알림이
+    마지막 방어선 — 손실 큰 순으로 정렬해 '지금 결정할 것'으로 올린다.
+    """
+    sells = (plan or {}).get("sells") or []
+    hard = [s for s in sells if (s.get("hard") or 0) >= 3]   # 손절선 이탈·딥로스
+    if not hard:
+        return []
+    hard.sort(key=lambda s: s.get("pnl_pct") if s.get("pnl_pct") is not None else 0)
+    out = ["\n🚨 [손절 규율 — 하드 손절선 이탈(자본보존)]",
+           "  아래는 손절선·딥로스를 벗어난 보유입니다. 손실 관리가 수익보다 큽니다 — 오늘 결정하세요."]
+    for s in hard[:5]:
+        pnl = s.get("pnl_pct")
+        rs = " · ".join((s.get("reasons") or [])[:2])
+        out.append(f"· {s.get('name') or s.get('code')}({s.get('code')}) "
+                   f"{('' if pnl is None else f'{pnl:+.1f}%')} — {s.get('action', '손절 검토')}"
+                   f"{(' · ' + rs) if rs else ''}")
+    return out
+
+
 def compose_brief(quotes: list[dict], value_rows: list[dict],
                   signal_rows: list[dict], dividend_rows: list[dict],
                   drip: list[dict] | None = None, *,
@@ -188,6 +210,7 @@ def compose_brief(quotes: list[dict], value_rows: list[dict],
     앞쪽(시장·미장·플랜·레이더·자동매매·성적)이 '행동'에 가까운 정보, 뒤쪽이 참고 목록.
     """
     lines: list[str] = ["📊 오늘의 주식 브리핑"]
+    lines += _risk_discipline_section(plan or {})     # 손절 규율 — 최상단(자본보존 우선)
     lines += _market_section(market or {})
     lines += _us_section(us or {})
     lines += _plan_section(plan or {})

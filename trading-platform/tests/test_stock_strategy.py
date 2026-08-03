@@ -126,6 +126,23 @@ def test_compose_brief_shows_regime_when_no_buys():
     assert "매수 후보 없음" in msg
 
 
+def test_risk_discipline_top_of_brief():
+    # 하드 손절선 이탈 보유는 브리핑 최상단 🚨 블록으로(손실 큰 순)
+    plan = {"buys": [], "sells": [
+        {"code": "001440", "name": "대한전선", "pnl_pct": -55.1, "hard": 3,
+         "action": "손절 검토", "reasons": ["딥로스 하드 손절선(-20%) 이탈"]},
+        {"code": "042700", "name": "한미반도체", "pnl_pct": -39.5, "hard": 3,
+         "action": "손절 검토", "reasons": ["추세 이탈"]},
+        {"code": "005930", "name": "삼성전자", "pnl_pct": -3.0, "hard": 0,
+         "soft": 1, "action": "정리 검토", "reasons": ["약한 신호"]}]}
+    msg = compose_brief([{"name": "A", "price": 100, "change_pct": 1}], [], [], [],
+                        plan=plan)
+    assert "손절 규율" in msg
+    head = msg.split("[🎯")[0]                    # 매매 플랜보다 앞(최상단)
+    assert "대한전선" in head and head.index("대한전선") < head.index("한미반도체")  # 손실 큰 순
+    assert "삼성전자" not in head.split("손절 규율")[1].split("\n\n")[0]  # 하드 아님 → 제외
+
+
 def test_has_content_empty():
     assert not has_content([], [{"magic_rank": None}], [], [{"yield_pct": None}])
 
