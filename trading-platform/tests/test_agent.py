@@ -90,6 +90,26 @@ def test_build_context_lists_candidates_and_holdings():
     assert "40%" in ctx
 
 
+def test_diagnose_autotrade():
+    from engine.agent import diagnose_autotrade
+    gates = {"auto_trade_enabled": True, "kis_trading_enabled": True,
+             "kis_paper": True, "broker": "kis", "agent_enabled": True,
+             "intraday_entry_enabled": False}
+    regime = {"regime": "risk_off", "label": "위험 회피", "posture": "방어",
+              "exposure_pct": 20, "strategies": ["S3"], "strategy_labels": ["저변동 방어"]}
+    plan = {"buys": [], "sells": [{"code": "001440", "name": "대한전선", "hard": 3}]}
+    agent_last = {"slot": "09:40", "n": 0, "acted": 0, "market_view": ""}
+    out = "\n".join(diagnose_autotrade(gates, regime, plan, agent_last))
+    assert "위험 회피" in out and "목표비중 20%" in out
+    assert "매수 후보 0" in out                       # 확신 하한/관망
+    assert "초단타 강등" in out                        # 신규진입 OFF
+    assert "결정 0건" in out                           # 에이전트 파싱/후보 이슈 힌트
+    assert "대한전선" in out                           # 하드 손절
+    # 전역 게이트 OFF면 최상단 경고
+    off = diagnose_autotrade({"auto_trade_enabled": False}, {}, {}, {})
+    assert any("자동매매 OFF" in x for x in off)
+
+
 def test_build_context_includes_regime():
     # 시황 국면이 있으면 라벨·권장전략·태세 가이드가 컨텍스트에 포함
     regime = {"regime": "risk_off", "label": "위험 회피", "posture": "방어",

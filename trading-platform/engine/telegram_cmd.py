@@ -31,10 +31,12 @@ from notifier.telegram import (
     stock_buttons,
 )
 from shared.redis_keys import (
+    AGENT_LAST_KEY,
     COACH_NOTE_KEY,
     COACH_REQ_KEY,
     ENGINE_BUYLIST_KEY,
     ENGINE_PLAN_KEY,
+    ENGINE_REGIME_KEY,
     ENGINE_RISK_KEY,
     RESEARCH_HB_KEY,
     STOCK_MARKET_KEY,
@@ -49,7 +51,8 @@ from shared.settings import settings
 logger = logging.getLogger(__name__)
 
 _PENDING_TTL = 120.0   # '확인' 유효시간(초)
-_HELP = ("명령: 잔고 · 상태 · 후보 · 플랜 · 점검 · 리포트 · 도움말\n"
+_HELP = ("명령: 잔고 · 상태 · 후보 · 플랜 · 진단 · 점검 · 리포트 · 도움말\n"
+         "진단  ← 오늘 자동매매가 왜 사고팔았나/안 했나(국면·후보·에이전트·초단타)\n"
          "플랜  ← 오늘의 매매 플랜(매수 후보 3 + 매도 점검 3, 스윙 맞춤)\n"
          "점검  ← AI 아침 점검(보유 종목 판정)을 지금 바로 요청\n"
          "리포트 <본문 붙여넣기>  ← 증권사 데일리(SK증권 등)를 저장 — 다음 점검에\n"
@@ -67,11 +70,13 @@ def parse_command(text: str) -> dict | None:
     # 빠른명령 키보드 라벨(이모지 접두, 예 '🎯 플랜') → 뒤 단어로 정규화
     if " " in t:
         tail = t.rsplit(" ", 1)[-1]
-        if tail in ("잔고", "상태", "후보", "플랜", "점검", "도움말"):
+        if tail in ("잔고", "상태", "후보", "플랜", "점검", "진단", "도움말"):
             t = tail
-    if t in ("잔고", "상태", "후보", "플랜", "매매플랜", "도움말", "/start", "help"):
+    if t in ("잔고", "상태", "후보", "플랜", "매매플랜", "진단", "도움말", "/start", "help"):
         return {"cmd": {"/start": "도움말", "help": "도움말",
                         "매매플랜": "플랜"}.get(t, t)}
+    if t.replace(" ", "") in ("진단", "왜", "왜안샀어", "자동매매진단"):
+        return {"cmd": "진단"}
     if t.replace(" ", "") in ("점검", "지금점검", "아침점검", "오늘점검"):
         return {"cmd": "점검"}
     # 리서치 노트: '리포트 <본문>'=추가, '리포트'=확인, '리포트삭제'=초기화
@@ -236,6 +241,17 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
             + esc(" / ".join(r.get("reasons", [])))
             + f"\nAI 리서치(호스트): {'✅ 구동 중' if hb else '🚫 응답 없음 — 재시작 필요'}",
             buttons=_dash_btn(), html=True)
+    elif cmd == "진단":
+        from engine.agent import diagnose_autotrade
+        gates = {"auto_trade_enabled": settings.auto_trade_enabled,
+                 "kis_trading_enabled": settings.kis_trading_enabled,
+                 "kis_paper": settings.kis_paper, "broker": settings.auto_trade_broker,
+                 "agent_enabled": settings.agent_enabled,
+                 "intraday_entry_enabled": settings.intraday_entry_enabled}
+        lines = diagnose_autotrade(
+            gates, await _jget(redis, ENGINE_REGIME_KEY),
+            await _jget(redis, ENGINE_PLAN_KEY), await _jget(redis, AGENT_LAST_KEY))
+        await sender.send("\n".join(lines), buttons=_dash_btn())
     elif cmd == "후보":
         b = await _jget(redis, ENGINE_BUYLIST_KEY)
         rows = b.get("rows", [])[:5]

@@ -13,6 +13,61 @@ import json
 import re
 
 
+def diagnose_autotrade(gates: dict, regime: dict, plan: dict,
+                       agent_last: dict) -> list[str]:
+    """'오늘 자동매매가 왜 조용한가'를 평이한 문장으로(순수 함수).
+
+    전역 게이트·국면·스윙 후보·에이전트 직전 판정·초단타 상태·하드손절을 한 화면에
+    모아, '정상 방어'인지 '고장'인지 사용자가 바로 판별하게 한다. 입력은 Redis dict들.
+    """
+    L: list[str] = ["🔎 자동매매 진단"]
+    if not gates.get("auto_trade_enabled"):
+        L.append("⛔ 자동매매 OFF(AUTO_TRADE_ENABLED=false) — 매매 안 함")
+    if not gates.get("kis_trading_enabled"):
+        L.append("⛔ 한투 주문 게이트 OFF(KIS_TRADING_ENABLED=false) — 주문 전량 거부")
+    L.append(f"· 계좌 {'모의' if gates.get('kis_paper') else '실계좌'} · 브로커 "
+             f"{gates.get('broker', '?')}")
+
+    rg = regime or {}
+    if rg.get("regime") not in (None, "unknown", ""):
+        strat = "/".join(rg.get("strategy_labels") or rg.get("strategies") or [])
+        L.append(f"🧭 국면 {rg.get('label')} · 태세 {rg.get('posture')} · "
+                 f"목표비중 {rg.get('exposure_pct', '?')}% · 전략 {strat}")
+
+    buys = (plan or {}).get("buys") or []
+    if buys:
+        nm = ", ".join(f"{b.get('name') or b.get('code')}({b.get('swing', '?')})"
+                       for b in buys[:4])
+        L.append(f"🟢 스윙 매수 후보 {len(buys)}건: {nm} — 에이전트/자동매수가 집행 판단")
+    else:
+        L.append("🟢 스윙 매수 후보 0 — 확신 하한 미달/위험회피 관망(현금 우대). "
+                 "약세장이면 '정상 방어'")
+
+    if not gates.get("agent_enabled"):
+        L.append("🤖 에이전트 OFF(AGENT_ENABLED=false)")
+    elif agent_last:
+        mv = (agent_last.get("market_view") or "").strip() or "(시장뷰 없음)"
+        L.append(f"🤖 에이전트 직전({agent_last.get('slot', '?')}): 결정 "
+                 f"{agent_last.get('n', 0)}건 · 집행 {agent_last.get('acted', 0)}건 · {mv[:60]}")
+        if not agent_last.get("n"):
+            L.append("   → 결정 0건: 후보 없음이거나 JSON 파싱 실패(로그 [agent] 확인)")
+    else:
+        L.append("🤖 에이전트 판정 기록 없음(오늘 슬롯 전이거나 미기동)")
+
+    if not gates.get("intraday_entry_enabled"):
+        L.append("⚡ 초단타 강등(신규진입 OFF) — 청산만. 되살리려면 INTRADAY_ENTRY_ENABLED=true")
+    elif rg.get("regime") == "risk_off":
+        L.append("⚡ 초단타 위험회피 스탠드다운(신규진입 정지, 청산만)")
+    else:
+        L.append("⚡ 초단타 진입 가능(신호 대기)")
+
+    hard = [s for s in ((plan or {}).get("sells") or []) if (s.get("hard") or 0) >= 3]
+    if hard:
+        nm = ", ".join(s.get("name") or s.get("code") for s in hard[:4])
+        L.append(f"🚨 하드 손절선 이탈 {len(hard)}건: {nm} — 토스는 수동 매도(직접 결정)")
+    return L
+
+
 def parse_slots(spec: str) -> list[str]:
     """"09:40,14:30" → ["09:40","14:30"] (유효한 HH:MM만, 정렬)."""
     out = []
