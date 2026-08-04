@@ -972,7 +972,19 @@ async def _day_cycle(redis: aioredis.Redis, kis, toss: TossClient,
             changed = True
             await sender.send(f"{icon} 청산 {nm}({code}) {p.get('qty')}주 "
                               f"@{px:,.0f}원 · {reason}\n{msg}")
-        else:                                              # 방어 2) 매도 실패 알림(쓰로틀)
+        elif any(k in (msg or "") for k in                 # 방어 2a) 계좌에 없는 유령 포지션
+                 ("잔고내역이 없", "잔고가 없", "보유하고 있지 않", "매도가능수량")):
+            # KIS가 '보유 없음'으로 거부 → 이미 팔렸거나 미체결/리셋. 추적만 제거(스팸 중단).
+            pos.pop(code, None)
+            changed = True
+            logger.warning("[%s] %s(%s) 모의잔고 없음 — 유령 포지션 정리(추적 제거): %s",
+                           tag, nm, code, msg)
+            hbk = f"{tag}:phantom:{code}"
+            if time.time() - _DAY_HB.get(hbk, 0) >= 86400:  # 종목당 하루 1회만 안내
+                _DAY_HB[hbk] = time.time()
+                await sender.send(f"🧹 {icon} 추적 정리 {nm}({code}) — 모의계좌에 잔고가 "
+                                  f"없어 포지션 추적만 제거했습니다(이미 매도/미체결). 재시도 중단.")
+        else:                                              # 방어 2b) 그 외 실패 알림(쓰로틀)
             logger.warning("[%s] 매도 실패 %s(%s) %s: %s — 재시도 예정",
                            tag, nm, code, reason, msg)
             hbk = f"{tag}:sellfail:{code}"
