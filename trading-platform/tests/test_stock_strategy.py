@@ -143,6 +143,27 @@ def test_risk_discipline_top_of_brief():
     assert "삼성전자" not in head.split("손절 규율")[1].split("\n\n")[0]  # 하드 아님 → 제외
 
 
+def test_briefing_freshness_guard():
+    # 재시작 직후 '지난주 시세'로 브리핑 나가는 것 방어: 최신 ts가 오래면 보류
+    import time as _t
+
+    from briefing.main import _quotes_fresh
+    from shared.redis_keys import STOCK_QUOTE_KEY
+
+    async def _run():
+        r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        # 지난주 시세만 있음 → stale
+        await r.hset(STOCK_QUOTE_KEY, "005930",
+                     json.dumps({"price": 70000, "ts": _t.time() - 8 * 86400}))
+        assert await _quotes_fresh(r) is False
+        # 방금 갱신된 시세 → fresh
+        await r.hset(STOCK_QUOTE_KEY, "005930",
+                     json.dumps({"price": 71000, "ts": _t.time()}))
+        assert await _quotes_fresh(r) is True
+
+    asyncio.run(_run())
+
+
 def test_has_content_empty():
     assert not has_content([], [{"magic_rank": None}], [], [{"yield_pct": None}])
 

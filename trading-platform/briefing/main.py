@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as aioredis
 
@@ -20,6 +22,7 @@ from collector.stock.kis import load_watchlist
 from notifier.telegram import TelegramSender, dashboard_buttons
 from shared.redis_keys import (
     AGENT_LAST_KEY,
+    BRIEFING_DONE_KEY,
     ENGINE_PLAN_KEY,
     ENGINE_RISK_KEY,
     JOURNAL_KEY,
@@ -29,6 +32,8 @@ from shared.redis_keys import (
     STOCK_UNIVERSE_KEY,
 )
 from shared.settings import settings
+
+KST = timezone(timedelta(hours=9))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -131,18 +136,41 @@ async def run_once(redis: aioredis.Redis, sender: TelegramSender) -> bool:
     return True
 
 
+async def _quotes_fresh(redis: aioredis.Redis) -> bool:
+    """저장 시세 중 가장 최신 ts가 신선한가 — 재시작 직후 '지난주 값' 발송 방어.
+
+    Redis 영속화(RDB)로 재시작해도 옛 시세가 남아, 수집기가 갱신하기 전에 브리핑이
+    나가면 지난주 가격이 찍힌다. 최신 시세가 briefing_stale_hours보다 오래면 보류.
+    """
+    newest = 0.0
+    for v in (await redis.hgetall(STOCK_QUOTE_KEY)).values():
+        try:
+            ts = json.loads(v).get("ts") or 0
+        except (json.JSONDecodeError, TypeError):
+            ts = 0
+        newest = max(newest, float(ts or 0))
+    return bool(newest) and (time.time() - newest) < settings.briefing_stale_hours * 3600
+
+
 async def run() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     sender = TelegramSender()
-    logger.info("briefing start (interval=%ss, telegram=%s)",
-                settings.briefing_interval_sec, sender.enabled)
+    logger.info("briefing start (발송 %d시 KST · 확인 %.0fs · telegram=%s)",
+                settings.briefing_hour_kst, settings.briefing_check_sec, sender.enabled)
     try:
         while True:
             try:
-                await run_once(redis, sender)
+                now = datetime.now(KST)
+                today = now.strftime("%Y-%m-%d")
+                done = await redis.get(BRIEFING_DONE_KEY)
+                if done != today and now.hour >= settings.briefing_hour_kst:
+                    if not await _quotes_fresh(redis):
+                        logger.info("브리핑 보류 — 시세 갱신 전(재시작 직후?). 다음 확인 대기")
+                    elif await run_once(redis, sender):
+                        await redis.set(BRIEFING_DONE_KEY, today)   # 하루 1회 dedup
             except Exception as exc:
                 logger.warning("브리핑 실패: %s", exc)
-            await asyncio.sleep(settings.briefing_interval_sec)
+            await asyncio.sleep(settings.briefing_check_sec)
     finally:
         await redis.aclose()
 

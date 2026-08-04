@@ -105,7 +105,10 @@ class Settings(BaseSettings):
     toss_max_retry: int = 4               # rate-limit/invalid-token 시 재시도 횟수
 
     # 텔레그램 일일 브리핑(주식 시세·시그널·가치·배당 요약). 키 없으면 로그만
-    briefing_interval_sec: float = 86400.0        # 브리핑 주기(기본 1일)
+    briefing_interval_sec: float = 86400.0        # (구) 브리핑 주기 — 스케줄 방식으로 대체
+    briefing_hour_kst: int = 16                   # 일일 브리핑 발송 시각(KST, 장마감 후 요약)
+    briefing_check_sec: float = 1800.0            # 스케줄 확인 주기(초)
+    briefing_stale_hours: float = 12.0            # 시세가 이보다 오래면 발송 보류(재시작 직후 방어)
     briefing_drip_budget: float = 0.0             # 배당 정기적립 월예산(원). 0=미사용
 
     # ===== 매매 엔진(멍거 리스크 실드) — 1시간 주기 검증. 실주문은 별도 게이트 =====

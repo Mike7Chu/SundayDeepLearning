@@ -91,6 +91,8 @@ COACH_WD_KEY = "coach:watchdog"
 
 # 포워드 로그 마지막 실행일(str YYYY-MM-DD) — 하루 1회 스냅샷 dedup
 FWD_DONE_KEY = "fwd:done"
+# 일일 브리핑 마지막 발송일(str YYYY-MM-DD) — 재시작해도 하루 1회만 발송(dedup)
+BRIEFING_DONE_KEY = "briefing:done"
 
 
 def fwd_scores_key(date: str) -> str:
