@@ -194,6 +194,24 @@
     border-radius:var(--r-sm); }
   .panel > .scroll .helpbar{ margin:10px 12px; }
   .rbody{ white-space:pre-wrap; font-family:inherit; font-size:13.5px; line-height:1.7; margin:0; color:var(--text); }
+  .md{ font-size:14px; line-height:1.65; color:var(--text); word-break:break-word; }
+  .md p{ margin:0 0 10px; }
+  .md .mdh{ margin:16px 0 8px; line-height:1.3; font-weight:750; }
+  .md h3.mdh{ font-size:18px; } .md h4.mdh{ font-size:16px; }
+  .md h5.mdh{ font-size:14.5px; color:var(--muted,#8a94a0); }
+  .md h6.mdh{ font-size:13.5px; color:var(--muted,#8a94a0); }
+  .md ul,.md ol{ margin:0 0 10px; padding-left:20px; } .md li{ margin:3px 0; }
+  .md blockquote{ margin:10px 0; padding:8px 12px; border-left:3px solid var(--accent,#0e8a78);
+    background:rgba(127,127,127,.08); border-radius:0 8px 8px 0; }
+  .md hr{ border:0; border-top:1px solid var(--line,#2a3138); margin:14px 0; }
+  .md code{ font-family:ui-monospace,Menlo,monospace; font-size:12.5px;
+    background:rgba(127,127,127,.14); padding:1px 5px; border-radius:4px; }
+  .md b,.md strong{ font-weight:700; }
+  .md a{ color:var(--accent,#0e8a78); }
+  .mdtblwrap{ overflow-x:auto; margin:8px 0; }
+  .mdtbl{ border-collapse:collapse; width:100%; font-size:13px; }
+  .mdtbl th,.mdtbl td{ border:1px solid var(--line,#2a3138); padding:6px 9px; text-align:left; vertical-align:top; }
+  .mdtbl th{ background:rgba(127,127,127,.10); font-weight:700; }
   .rdisc{ margin-top:10px; color:var(--faint); font-size:11px; border-top:1px solid var(--line); padding-top:8px; }
   .arow{ display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; margin:8px 0; }
   .arow label{ font-size:13px; color:var(--text); display:inline-flex; gap:6px; align-items:center; }
@@ -648,7 +666,7 @@ function coachCardHTML(co){
   const body=!co.enabled
     ? `<div class="empty">AI 리서치 백엔드가 꺼져 있어요 — 호스트에서 run-research-host.sh 실행(구독) 또는 ANTHROPIC_API_KEY 설정이 필요합니다.</div>`
     : (r&&r.report
-        ? `<details ${window.coachOpen?"open":""} ontoggle="window.coachOpen=this.open"><summary class="clk">리포트 보기 <span class="num">(마지막 점검: ${when})</span></summary><pre class="rbody" style="margin-top:8px">${escH(r.report)}</pre></details>`
+        ? `<details ${window.coachOpen?"open":""} ontoggle="window.coachOpen=this.open"><summary class="clk">리포트 보기 <span class="num">(마지막 점검: ${when})</span></summary><div class="md" style="margin-top:8px">${mdHTML(r.report)}</div></details>`
         : `<div class="empty">아직 점검 리포트가 없어요 — 매일 아침 ${co.hour_kst??8}시에 자동 생성되고, 아래 '지금 점검'으로 바로 받을 수도 있어요.</div>`);
   return `<div class="card" style="grid-column:1/-1">
     <h3>🧭 AI 아침 점검 <span class="badge">매일 ${co.hour_kst??8}시 텔레그램 자동 발송</span>
@@ -1368,19 +1386,48 @@ function btCard(code,d){
    </div>`;
 }
 const escH=(s)=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+// 경량 마크다운 → 안전 HTML(외부 라이브러리 없음). 먼저 escape 후 블록 단위 변환.
+// 스킬/리서치 리포트(제목·굵게·표·리스트·인용·구분선)를 대시보드에서 읽기 좋게.
+function mdHTML(src){
+  if(!src) return "";
+  let s=String(src).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const il=t=>t.replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const L=s.split(/\r?\n/); let o=[],i=0;
+  const cells=r=>r.trim().replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+  const isBlock=x=>/^(#{1,4}\s|\s*[-*·]\s|\s*\d+[.)]\s|\s*&gt;|\s*\|)/.test(x)||/^\s*([-*_])\1{2,}\s*$/.test(x);
+  while(i<L.length){
+    let ln=L[i];
+    if(/^\s*$/.test(ln)){i++;continue;}
+    if(/^\s*([-*_])\1{2,}\s*$/.test(ln)){o.push('<hr>');i++;continue;}
+    let h=ln.match(/^(#{1,4})\s+(.*)$/);
+    if(h){const n=Math.min(6,h[1].length+2);o.push(`<h${n} class="mdh">${il(h[2])}</h${n}>`);i++;continue;}
+    if(/^\s*&gt;\s?/.test(ln)){let b=[];while(i<L.length&&/^\s*&gt;\s?/.test(L[i])){b.push(il(L[i].replace(/^\s*&gt;\s?/,'')));i++;}o.push(`<blockquote>${b.join('<br>')}</blockquote>`);continue;}
+    if(/^\s*\|.*\|\s*$/.test(ln)&&i+1<L.length&&/^\s*\|?[\s:|-]+\|?\s*$/.test(L[i+1])){
+      const hd=cells(ln);i+=2;let rs=[];
+      while(i<L.length&&/^\s*\|.*\|\s*$/.test(L[i])){rs.push(cells(L[i]));i++;}
+      o.push('<div class="mdtblwrap"><table class="mdtbl"><thead><tr>'+hd.map(c=>`<th>${il(c)}</th>`).join('')+'</tr></thead><tbody>'+rs.map(r=>'<tr>'+r.map(c=>`<td>${il(c)}</td>`).join('')+'</tr>').join('')+'</tbody></table></div>');continue;}
+    if(/^\s*[-*·]\s+/.test(ln)){let it=[];while(i<L.length&&/^\s*[-*·]\s+/.test(L[i])){it.push(`<li>${il(L[i].replace(/^\s*[-*·]\s+/,''))}</li>`);i++;}o.push(`<ul>${it.join('')}</ul>`);continue;}
+    if(/^\s*\d+[.)]\s+/.test(ln)){let it=[];while(i<L.length&&/^\s*\d+[.)]\s+/.test(L[i])){it.push(`<li>${il(L[i].replace(/^\s*\d+[.)]\s+/,''))}</li>`);i++;}o.push(`<ol>${it.join('')}</ol>`);continue;}
+    let p=[];while(i<L.length&&!/^\s*$/.test(L[i])&&!isBlock(L[i])){p.push(il(L[i]));i++;}
+    o.push(`<p>${p.join('<br>')}</p>`);
+  }
+  return o.join('');
+}
 async function mResearch(code, force){
   const e=$("mExtra"); e.innerHTML=`<div class="empty">AI 분석 ${force?'다시 실행 중…':'불러오는 중…'}</div>`;
   try{ const r=await (await fetch(`/research/${encodeURIComponent(code)}/run${force?'?force=true':''}`,{method:"POST"})).json();
     if(r.queued){
       // 호스트가 처리 → 이전 결과 있으면 먼저 보여주고, 새 결과 폴링
       e.innerHTML=`<div class="num" style="margin:4px 0">🧠 분석 요청됨 — 호스트 처리 중… (최대 1~2분)</div>`
-        +(r.prev?`<pre class="rbody">${escH(r.prev)}</pre>`:'');
+        +(r.prev?`<div class="md">${mdHTML(r.prev)}</div>`:'');
       pollResearch(code, e, 0); return;
     }
     const again=`<a class="clk" onclick="mResearch('${qesc(code)}',true)">🔄 다시 분석</a>`;
     const note=r.cached?`<div class="num" style="margin:4px 0">📌 저장된 분석 (${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}) · 관심종목은 매주 자동 갱신 · ${again}</div>`
       :`<div class="num" style="margin:4px 0">방금 분석 · ${again}</div>`;
-    e.innerHTML=note+`<pre class="rbody">${escH(r.report)}</pre>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
+    e.innerHTML=note+`<div class="md">${mdHTML(r.report)}</div>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
 }
 async function mStory(code, force){
@@ -1389,13 +1436,13 @@ async function mStory(code, force){
     if(r.enabled===false){ e.innerHTML=`<div class="empty">${escH(r.report)}</div>`; return; }
     if(r.queued){
       e.innerHTML=`<div class="num" style="margin:4px 0">📖 스토리 분석 요청됨 — 호스트 처리 중… (다년치 공시라 2~4분)</div>`
-        +(r.prev?`<pre class="rbody">${escH(r.prev)}</pre>`:'');
+        +(r.prev?`<div class="md">${mdHTML(r.prev)}</div>`:'');
       pollStory(code, e, 0); return;
     }
     const again=`<a class="clk" onclick="mStory('${qesc(code)}',true)">🔄 다시 분석</a>`;
     const note=r.cached?`<div class="num" style="margin:4px 0">📌 저장된 스토리 (${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}) · ${again}</div>`
       :`<div class="num" style="margin:4px 0">방금 분석 · ${again}</div>`;
-    e.innerHTML=note+`<pre class="rbody">${escH(r.report)}</pre>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
+    e.innerHTML=note+`<div class="md">${mdHTML(r.report)}</div>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
 }
 async function pollStory(code, e, tries){
@@ -1403,7 +1450,7 @@ async function pollStory(code, e, tries){
   await new Promise(r=>setTimeout(r,6000));
   const d=await jget("/research/"+encodeURIComponent(code)+"/story").catch(()=>null);
   if(d&&d.report&&d.ts){
-    e.innerHTML=`<pre class="rbody">${escH(d.report)}</pre>`+(d.disclaimer?`<div class="rdisc">${d.disclaimer}</div>`:"");
+    e.innerHTML=`<div class="md">${mdHTML(d.report)}</div>`+(d.disclaimer?`<div class="rdisc">${d.disclaimer}</div>`:"");
   }else pollStory(code, e, tries+1);
 }
 async function pollResearch(code, e, tries){
@@ -1411,7 +1458,7 @@ async function pollResearch(code, e, tries){
   await new Promise(r=>setTimeout(r,6000));
   const d=await jget("/research/"+encodeURIComponent(code));
   if(d&&d.report&&d.ts){
-    e.innerHTML=`<pre class="rbody">${(d.report||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</pre>`+(d.disclaimer?`<div class="rdisc">${d.disclaimer}</div>`:"");
+    e.innerHTML=`<div class="md">${mdHTML(d.report)}</div>`+(d.disclaimer?`<div class="rdisc">${d.disclaimer}</div>`:"");
   }else pollResearch(code, e, tries+1);
 }
 
