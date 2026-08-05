@@ -462,7 +462,11 @@ async def _stock_flow(redis: aioredis.Redis, toss: TossClient, client,
     try:
         from api.services.stock_radar import supply_demand
         sd = supply_demand(await toss.fetch_investor_trading(client, code, count=5))
-    except Exception:
+    except Exception as exc:                       # 실패 원인 노출(종목당 30분 throttle)
+        hbk = f"flowerr:{code}"
+        if time.time() - _DAY_HB.get(hbk, 0) >= 1800:
+            _DAY_HB[hbk] = time.time()
+            logger.warning("[flow] %s 종목별 수급 조회 실패: %s", code, exc)
         return None
     await redis.set(ck, json.dumps(sd, ensure_ascii=False), ex=1800)
     return sd
