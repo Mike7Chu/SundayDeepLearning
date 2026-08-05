@@ -723,6 +723,7 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
     active = regime.get("strategies") or DEFAULT_ACTIVE
     stage1 = stage1_rank(quotes, held, top=40)
     s1_kr = sum(1 for q in stage1 if str(q.get("code", "")).isdigit())
+    kr_diag: list[str] = []                       # 국내 후보 탈락 진단(봉수·수급·전략결과)
     buys: list[dict] = []
     async with httpx.AsyncClient(timeout=15) as client:
         for q in stage1:
@@ -753,6 +754,12 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
                     q["flow_net_eok"] = fl.get("net_eok")
                     q["flow_foreign_eok"] = fl.get("foreign_eok")
             pick = run_strategies(active, q, candles)     # 국면 활성 전략 → 최고 픽
+            if code.isdigit() and len(kr_diag) < 8:       # 국내 탈락 사유 진단(봉·수급·결과)
+                fnet = q.get("flow_net_eok")
+                kr_diag.append(
+                    f"{(q.get('name') or code)[:6]}(봉{len(closes)}"
+                    + (f"·수급{fnet:+.0f}억" if fnet is not None else "·수급-")
+                    + (f"·✅{pick['strategy']}{pick['score']:.0f})" if pick else "·✗)"))
             if not pick:
                 continue
             kr = code.isdigit()
@@ -806,6 +813,8 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
                 "| 국내 흐름: stage1 %d → 전략통과 %d(전체 후보 %d중)",
                 len(plan_buys), len(kr_b), len(us_b), len(buys), min(3, len(sells)),
                 s1_kr, buys_kr, len(stage1))
+    if s1_kr and not buys_kr and kr_diag:         # 국내가 stage1은 통과했는데 전략서 전멸
+        logger.info("[plan] 국내 탈락 상세: %s", " · ".join(kr_diag))
     # 미장 자동매매(옵트인): 스윙 상위 미국 후보를 KIS 해외(모의 지원)로 자동매수.
     # 국내=가치(2단계 필터), 미국=모멘텀(스윙) — 전략 분리 유지.
     if kis is not None and sender is not None:
