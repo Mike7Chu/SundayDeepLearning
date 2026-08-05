@@ -613,20 +613,17 @@ async def _update_regime(redis: aioredis.Redis, toss: TossClient) -> dict:
                       key=lambda c: str(c["date"]))
         return [c["close"] for c in rows]
 
+    # 지수 일봉 = KODEX 200(069500) 일봉(코스피200 추종 프록시). 토스 KOSPI 지표 캔들은
+    # count=230에 invalid-request라 사용 불가 → 일반 종목 일봉 조회(200봉+ 안정적)로 대체.
     closes: list[float] = []
     src = "-"
-    try:
-        if toss and toss.enabled:
+    if toss and toss.enabled:
+        try:
             async with httpx.AsyncClient(timeout=15) as client:
-                closes = _closes(await toss.fetch_indicator_candles(
-                    client, "KOSPI", count=230))
-                src = f"KOSPI지표({len(closes)})"
-                if len(closes) < 60:              # 지표 캔들이 짧으면 KODEX200으로 폴백
-                    proxy = _closes(await toss.fetch_daily_history(client, "069500"))
-                    if len(proxy) > len(closes):
-                        closes, src = proxy, f"KODEX200({len(proxy)})"
-    except Exception as exc:
-        logger.warning("[regime] 지수 일봉 조회 실패: %s", exc)
+                closes = _closes(await toss.fetch_daily_history(client, "069500"))
+            src = f"KODEX200({len(closes)})"
+        except Exception as exc:
+            logger.warning("[regime] 지수 프록시(069500) 일봉 실패: %s", exc)
     ind = await _json_get(redis, MARKET_INDICATORS_KEY)
     inv = (ind.get("investor") or {}).get("kospi") or {}
     reg = classify_regime(closes, foreign_net_eok=inv.get("foreigner"))
