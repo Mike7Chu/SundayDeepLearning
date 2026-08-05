@@ -319,6 +319,21 @@ class KISClient:
             pass
         return out
 
+    async def fetch_investor_trading(self, client: httpx.AsyncClient, code: str,
+                                     count: int = 5) -> list[dict]:
+        """종목별 투자자 매매동향(일별) — 주식현재가 투자자(FHKST01010900).
+
+        개인/외국인/기관 순매수 거래대금(원)을 최근 count일. supply_demand 입력용으로
+        [{date, foreigner, institution, individual}](억원, 최신순) 반환. 토스 지수 전용
+        엔드포인트와 달리 '종목별' 수급을 준다(한국장 급등의 핵심 선행지표).
+        """
+        payload = await self._get(
+            client, "/uapi/domestic-stock/v1/quotations/inquire-investor",
+            "FHKST01010900",
+            {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code},
+            f"투자자수급 {code}")
+        return parse_kis_investor(payload, days=count)
+
     # ---- 주문 (자동매매 전용 — 호출부에서 kis_trading_enabled 등 게이트 필수) ----
     async def _post_order(self, client: httpx.AsyncClient, url: str, *,
                           headers: dict, body: dict, ctx: str,
@@ -611,6 +626,36 @@ def parse_stability_ratio(output) -> dict:
     """안정성비율(FHKST66430600) → {debt_ratio(부채비율), period}. 필드: lblt_rate."""
     r = _fin_latest(output)
     return {"debt_ratio": _f(r.get("lblt_rate")), "period": r.get("stac_yymm")}
+
+
+def parse_kis_investor(payload: dict, days: int = 5) -> list[dict]:
+    """주식현재가 투자자(FHKST01010900) → [{date, foreigner, institution, individual}].
+
+    순매수 거래대금(_tr_pbmn, 원)을 억원으로 환산(supply_demand와 호환). output은 최신순
+    일별 리스트. 필드: frgn/orgn/prsn_ntby_tr_pbmn, stck_bsop_date.
+    """
+    rows = (payload or {}).get("output") or []
+    if isinstance(rows, dict):
+        rows = [rows]
+
+    def _eok(r, k):
+        v = r.get(k)
+        if v in (None, ""):
+            return 0.0
+        try:
+            return round(float(str(v).replace(",", "")) / 1e8, 1)
+        except (ValueError, TypeError):
+            return 0.0
+
+    out: list[dict] = []
+    for r in rows[:days]:
+        if not isinstance(r, dict):
+            continue
+        out.append({"date": r.get("stck_bsop_date"),
+                    "foreigner": _eok(r, "frgn_ntby_tr_pbmn"),
+                    "institution": _eok(r, "orgn_ntby_tr_pbmn"),
+                    "individual": _eok(r, "prsn_ntby_tr_pbmn")})
+    return out
 
 
 def parse_overseas_balance(payload: dict) -> dict:

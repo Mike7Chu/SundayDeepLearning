@@ -344,16 +344,16 @@ async def gather_coach(redis: aioredis.Redis) -> str | None:
     flows: list[dict] = []
     try:
         from api.services.stock_radar import supply_demand
-        from collector.stock.toss import TossClient
-        tc = TossClient()
-        if tc.enabled:
+        from collector.stock.kis import KISClient
+        kc = KISClient()                          # KIS 종목별 투자자(토스 지수전용 대체)
+        if kc.enabled:
             async with httpx.AsyncClient(timeout=15) as client:
                 for h in snap["holdings"]:
                     code = h.get("symbol", "")
                     if not (code and code.isdigit()):     # 국내만(외인수급=KRX)
                         continue
                     try:
-                        inv = await tc.fetch_investor_trading(client, code, count=5)
+                        inv = await kc.fetch_investor_trading(client, code, count=5)
                         sd = supply_demand(inv)
                         if sd.get("net_eok") is not None:
                             flows.append({"code": code, "name": h.get("name"), **sd})

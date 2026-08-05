@@ -5,6 +5,7 @@ from collector.stock.kis import (
     KISClient,
     is_derivative_etf,
     load_watchlist,
+    parse_kis_investor,
     parse_balance,
     parse_growth_ratio,
     parse_overseas_balance,
@@ -80,6 +81,26 @@ def test_is_derivative_etf():
     assert not is_derivative_etf("삼성전자")
     assert not is_derivative_etf("NAVER")
     assert not is_derivative_etf("")
+
+
+def test_parse_kis_investor():
+    # 순매수 거래대금(원)을 억원으로 환산, 최신 days개, supply_demand 호환 키
+    payload = {"output": [
+        {"stck_bsop_date": "20260805", "frgn_ntby_tr_pbmn": "32000000000",   # +320억
+         "orgn_ntby_tr_pbmn": "5000000000", "prsn_ntby_tr_pbmn": "-37000000000"},
+        {"stck_bsop_date": "20260804", "frgn_ntby_tr_pbmn": "-1,000,000,000",  # -10억(콤마)
+         "orgn_ntby_tr_pbmn": "2000000000", "prsn_ntby_tr_pbmn": "-1000000000"}]}
+    rows = parse_kis_investor(payload, days=5)
+    assert len(rows) == 2
+    assert rows[0] == {"date": "20260805", "foreigner": 320.0,
+                       "institution": 50.0, "individual": -370.0}
+    assert rows[1]["foreigner"] == -10.0                  # 콤마·음수 파싱
+    # supply_demand와 결합 시 외인+기관 합산 정상
+    from api.services.stock_radar import supply_demand
+    sd = supply_demand(rows)
+    assert sd["net_eok"] == 320 + 50 - 10 + 20            # 외인+기관 2일 합
+    # 빈 응답 방어
+    assert parse_kis_investor({}) == [] and parse_kis_investor({"output": {}}) == []
 
 
 def test_quote_excd():

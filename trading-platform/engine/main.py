@@ -444,13 +444,14 @@ async def _live_price(redis: aioredis.Redis, code: str) -> float | None:
     return None
 
 
-async def _stock_flow(redis: aioredis.Redis, toss: TossClient, client,
+async def _stock_flow(redis: aioredis.Redis, kis, client,
                       code: str) -> dict | None:
     """종목별 외국인·기관 5일 순매수(수급) — 30분 캐시. S6 수급 모멘텀 입력.
 
-    supply_demand 결과 {net_eok, foreign_eok, inst_eok, ...}. 국내 6자리만.
+    KIS 주식현재가 투자자(종목별)로 조회 — 토스 지수 전용 엔드포인트와 달리 개별 종목
+    수급을 준다(한국장 급등 선행지표). supply_demand 결과 {net_eok,...}. 국내 6자리만.
     """
-    if not (code and code.isdigit()):
+    if not (code and code.isdigit()) or not (kis and kis.enabled):
         return None
     ck = f"stock:flow:{code}"
     cached = await redis.get(ck)
@@ -461,7 +462,7 @@ async def _stock_flow(redis: aioredis.Redis, toss: TossClient, client,
             pass
     try:
         from api.services.stock_radar import supply_demand
-        sd = supply_demand(await toss.fetch_investor_trading(client, code, count=5))
+        sd = supply_demand(await kis.fetch_investor_trading(client, code, count=5))
     except Exception as exc:                       # 실패 원인 노출(종목당 30분 throttle)
         hbk = f"flowerr:{code}"
         if time.time() - _DAY_HB.get(hbk, 0) >= 1800:
@@ -752,8 +753,8 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
                       if isinstance(c, dict) and c.get("close")]
             if is_derivative_etf(q.get("name", "")):     # 레버리지·인버스·ETN 자동매매 제외
                 continue
-            if "S6" in active and toss.enabled:          # 수급 모멘텀 활성 → 종목별 수급 주입
-                fl = await _stock_flow(redis, toss, client, code)
+            if "S6" in active and kis and kis.enabled:   # 수급 모멘텀 활성 → 종목별 수급 주입
+                fl = await _stock_flow(redis, kis, client, code)
                 if fl and fl.get("net_eok") is not None:
                     q["flow_net_eok"] = fl.get("net_eok")
                     q["flow_foreign_eok"] = fl.get("foreign_eok")
