@@ -71,7 +71,8 @@ def classify_regime(index_closes: list[float], *,
     breadth_ok = breadth_pct is not None and breadth_pct >= 60
 
     above = dist >= 0
-    stress = vol_hi or breadth_weak or foreign_neg
+    uptrend = above and rising                    # 추세 방향(200일선 위 + 장기선 상승)
+    stress = breadth_weak or foreign_neg          # 구조적 스트레스(변동성은 노출도로 분리)
 
     reasons = [f"지수 200일선 {'위 +' if above else '아래 '}{dist * 100:.1f}%",
                "장기선 상승" if rising else "장기선 하락"]
@@ -84,21 +85,25 @@ def classify_regime(index_closes: list[float], *,
     if breadth_pct is not None:
         reasons.append(f"breadth {breadth_pct:.0f}%")
 
-    # 순서 = 자본보존 우선(위험회피 먼저) → 강세 → 횡보 → 나머지 중립.
-    if not above and stress:
+    # 추세 방향이 전략 '선택'을, 변동성이 '비중'을 정한다(분리). 상승추세면 변동성이
+    # 커도 모멘텀을 끄지 않고 비중만 줄인다 — 명백한 상승장을 '중립'으로 깔던 문제 해소.
+    # 순서 = 자본보존 우선(위험회피) → 강세추세 → 횡보 → 나머지 중립.
+    if not above and (stress or vol_hi):
         regime, label, posture, strat = "risk_off", "위험 회피", "방어", ["S3"]
-    elif above and rising and not vol_hi and not breadth_weak:
+        exposure = 20
+    elif uptrend and not breadth_weak:
         regime, label, posture, strat = "bull_trend", "강세 추세", "공격", ["S1", "S5", "S6"]
+        exposure = 60 if vol_hi else 100          # 추세는 타되 변동성 크면 비중 축소
     elif abs(dist) < 0.03 and not vol_hi:
         regime, label, posture, strat = "range", "횡보 레인지", "역발상", ["S4"]
+        exposure = 40
     else:
         regime, label, posture, strat = "neutral", "중립·순환", "선별", ["S2", "S6"]
+        exposure = 60 if not vol_hi else 40
     if foreign_pos and regime == "neutral" and above:
         reasons.append("외인 순매수 — 위험선호 편")
-
-    # 국면별 목표 노출도(%) — 매수 사이징을 곱으로 조절. 강세=풀노출, 위험회피=축소.
-    exposure = {"bull_trend": 100, "neutral": 60, "range": 40,
-                "risk_off": 20}.get(regime, 50)
+    if regime == "bull_trend" and vol_hi:
+        reasons.append("상승추세·고변동 — 모멘텀 유지·비중 축소")
 
     return {"regime": regime, "label": label, "posture": posture,
             "strategies": strat, "confidence": "high" if n >= ma_long else "mid",

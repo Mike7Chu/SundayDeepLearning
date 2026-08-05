@@ -24,6 +24,18 @@ def test_bull_trend_uptrend():
     assert r["metrics"]["ma_rising"] is True and r["metrics"]["dist_ma_pct"] > 0
 
 
+def test_bull_trend_high_vol_keeps_momentum_reduces_exposure():
+    # 상승추세인데 최근 변동성 큼 → 모멘텀(S1/S5/S6) 유지하되 비중만 축소(강세를 중립으로
+    # 깔던 문제 해소). 추세 방향=전략선택, 변동성=비중.
+    base = [100 + 0.4 * i for i in range(230)]
+    for i in range(210, 230):                          # 최근 20봉 큰 변동성 주입
+        base[i] += 8 if i % 2 else -8
+    r = classify_regime(base, foreign_net_eok=100)
+    assert r["regime"] == "bull_trend" and r["strategies"] == ["S1", "S5", "S6"]
+    assert r["metrics"]["vol_high"] is True
+    assert r["exposure_pct"] == 60                      # 고변동 → 풀노출 아님
+
+
 def test_risk_off_downtrend_stress():
     # 하락 추세 + 마지막 급락(변동성 확대) → 지수<200일선 + 스트레스 → 위험 회피(S3)
     closes = _trend(220, start=200, step=-0.4)      # 하락
