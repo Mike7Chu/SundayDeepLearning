@@ -1193,6 +1193,16 @@ function paintModal(code,name,d){
       ${EF?`<div class="num" style="margin-top:4px"><a class="clk" href="${EF.url}" target="_blank">${escH(EF.title)}</a></div>`:''}
       ${figH}
       ${hasFig?'':'<div class="num" style="opacity:.7;margin-top:2px">아래 분기 성장 수치는 직전 정기보고서 기준 — 이 공시가 가장 최신 실적이에요. 수치 자동 추출은 발표 직후 몇 분 내 반영됩니다.</div>'}</div>`:'';
+    const RD=d.reverse_dcf;
+    const rdG=g=>g==null?"–":`${(g*100).toFixed(1)}%`;
+    const rdcfH=RD?(RD.ok?`<div class="card" style="margin-top:8px;border-left:3px solid var(--accent,#0e8a78)">
+      <b>🔬 역DCF — 지금 주가가 요구하는 성장률</b>
+      <div class="cgrid" style="margin-top:6px">
+        ${kv("요구 성장률",`<b class="neg">${rdG(RD.implied_growth)}/년</b>`,`현재 시총이 함의하는 향후 10년 FCF 성장률 · 할인율 ${(RD.wacc*100).toFixed(0)}%`)}
+        ${kv("과거 실제",RD.reference_cagr!=null?`<b>${rdG(RD.reference_cagr)}/년</b>`:'<span class="num">비교치 부족</span>',RD.fcf_cagr!=null?"FCF CAGR":"매출 CAGR")}</div>
+      <div class="num" style="margin-top:6px">민감도 · ${RD.sensitivity.map(s=>`WACC ${(s.wacc*100).toFixed(0)}%→${rdG(s.growth)}`).join(" · ")}</div>
+      <div class="num" style="margin-top:4px;opacity:.85">${escH(RD.verdict)}</div></div>`
+      :`<div class="card" style="margin-top:8px"><b>🔬 역DCF</b> <span class="num">${escH(RD.reason||'')}</span></div>`):'';
     const pts=d.price_ts||Q.ts;
     const staleWarn=(staleSec(pts)>(krxOpen()?180:4*3600))
       ?`<div class="card" style="margin-bottom:8px;border-left:3px solid var(--up)">
@@ -1207,7 +1217,7 @@ function paintModal(code,name,d){
     $("mBody").innerHTML=`<div class="arow" style="margin-bottom:8px">${wbtn}${freshBadge(pts)}</div>
       ${noDataWarn}${staleWarn}
       <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}
-      <div class="modal-sec">회사 가치·실적</div>${flashH}${fund}
+      <div class="modal-sec">회사 가치·실적</div>${flashH}${fund}${rdcfH}
       <div class="modal-sec">주가 흐름</div>${sgH}
       <div class="modal-sec">매매 가격 가이드</div>${lvH}
       <div class="modal-sec">배당금</div>${dvH}

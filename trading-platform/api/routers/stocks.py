@@ -557,8 +557,23 @@ async def stock_detail(code: str) -> dict:
                                 _json.dumps(supply), ex=86400)
         except Exception:
             supply = None
+    # 역DCF: 시총(억)·FCF(억)가 있으면 '지금 주가가 요구하는 성장률'을 역산. 순부채는
+    # 근사(EV≈시총, net_debt=0). WACC는 유형별(대형↓·중소형↑·미국 기본). FCF 없으면
+    # ok=False로 사유 노출(국내는 DART 수집 대기, 미국은 리서치 웹검색에서 보강).
+    from api.services.reverse_dcf import reverse_dcf
+    mc, fcf_v = quote.get("market_cap"), quote.get("fcf_eok")
+    if kr:
+        wacc = 0.09 if (mc and mc >= 100000) else 0.11   # 시총 10조↑ 대형 9%, else 11%
+    else:
+        wacc = 0.09 if (mc and mc >= 500000) else 0.10
+    if mc and fcf_v is not None:
+        rdcf = reverse_dcf(mc, fcf_v, wacc=wacc)
+    else:
+        rdcf = {"ok": False, "reason": (
+            "FCF 미수집 — 국내는 DART 수집 대기" if kr
+            else "미국 FCF는 AI 리서치(웹검색)에서 제공")}
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
             "levels": levels, "pillar": pillar, "earnings_flash": flash,
-            "supply": supply, "price_ts": quote.get("ts"),
+            "supply": supply, "reverse_dcf": rdcf, "price_ts": quote.get("ts"),
             "in_watchlist": any(w.get("code") == code for w in wl)}
