@@ -99,6 +99,12 @@ def test_parse_kis_investor():
     from api.services.stock_radar import supply_demand
     sd = supply_demand(rows)
     assert sd["net_eok"] == 320 + 50 - 10 + 20            # 외인+기관 2일 합
+    # 거래대금 필드가 비면 수량×종가로 폴백(엔드포인트별 필드 편차 방어)
+    qonly = {"output": [{"stck_bsop_date": "20260805", "stck_clpr": "50000",
+                         "frgn_ntby_qty": "100000", "orgn_ntby_qty": "-20000",
+                         "prsn_ntby_qty": "0"}]}
+    r2 = parse_kis_investor(qonly)
+    assert r2[0]["foreigner"] == 50.0 and r2[0]["institution"] == -10.0  # 10만주×5만/1e8
     # 빈 응답 방어
     assert parse_kis_investor({}) == [] and parse_kis_investor({"output": {}}) == []
 

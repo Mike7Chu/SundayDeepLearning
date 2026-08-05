@@ -638,23 +638,32 @@ def parse_kis_investor(payload: dict, days: int = 5) -> list[dict]:
     if isinstance(rows, dict):
         rows = [rows]
 
-    def _eok(r, k):
-        v = r.get(k)
+    def _num(v):
         if v in (None, ""):
-            return 0.0
+            return None
         try:
-            return round(float(str(v).replace(",", "")) / 1e8, 1)
+            return float(str(v).replace(",", ""))
         except (ValueError, TypeError):
-            return 0.0
+            return None
+
+    def _eok(r, amt_key, qty_key):
+        # 순매수 거래대금(원) 우선, 비어있으면 수량×종가로 폴백(엔드포인트별 필드 편차 방어).
+        amt = _num(r.get(amt_key))
+        if amt is not None and amt != 0:
+            return round(amt / 1e8, 1)
+        qty, clpr = _num(r.get(qty_key)), _num(r.get("stck_clpr"))
+        if qty is not None and clpr:
+            return round(qty * clpr / 1e8, 1)
+        return round(amt / 1e8, 1) if amt is not None else 0.0
 
     out: list[dict] = []
     for r in rows[:days]:
         if not isinstance(r, dict):
             continue
         out.append({"date": r.get("stck_bsop_date"),
-                    "foreigner": _eok(r, "frgn_ntby_tr_pbmn"),
-                    "institution": _eok(r, "orgn_ntby_tr_pbmn"),
-                    "individual": _eok(r, "prsn_ntby_tr_pbmn")})
+                    "foreigner": _eok(r, "frgn_ntby_tr_pbmn", "frgn_ntby_qty"),
+                    "institution": _eok(r, "orgn_ntby_tr_pbmn", "orgn_ntby_qty"),
+                    "individual": _eok(r, "prsn_ntby_tr_pbmn", "prsn_ntby_qty")})
     return out
 
 
