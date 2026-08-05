@@ -105,13 +105,18 @@ def test_parse_daily_and_dividend():
 
 # ---------- 브리핑 ----------
 def test_compose_brief():
-    quotes = [{"name": "삼성전자", "price": 70000, "change_pct": 1.5}]
+    import time as _t
+    quotes = [{"name": "삼성전자", "price": 70000, "change_pct": 1.5, "ts": _t.time()}]
     value_rows = [{"name": "A", "per": 5, "pbr": 0.8, "roe": 12, "magic_rank": 3}]
     signal_rows = [{"name": "B", "signal": "buy", "rsi": 28, "sma_cross": "golden"}]
     div_rows = [{"name": "C", "yield_pct": 5.0, "next_ex_date": "20240401"}]
     assert has_content(quotes, value_rows, signal_rows, div_rows)
     msg = compose_brief(quotes, value_rows, signal_rows, div_rows)
     assert "주식 브리핑" in msg and "삼성전자" in msg
+    # 지난주 시세(오래된 ts)는 등락 TOP에서 제외
+    stale = [{"name": "옛레버리지", "price": 320000, "change_pct": 60.0,
+              "ts": _t.time() - 8 * 86400}]
+    assert "옛레버리지" not in compose_brief(stale, value_rows, [], [])
     assert "🟢매수" in msg and "배당" in msg and "투자 추천이 아닙니다" in msg
 
 

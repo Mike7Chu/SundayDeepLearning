@@ -5,6 +5,10 @@
 """
 from __future__ import annotations
 
+import time
+
+_MOVER_FRESH_SEC = 36 * 3600   # 등락 TOP은 최근 갱신된 시세만(지난주 얼어붙은 값 제외)
+
 
 def _arrow(pct) -> str:
     if pct is None:
@@ -218,8 +222,12 @@ def compose_brief(quotes: list[dict], value_rows: list[dict],
     lines += _auto_section(risk or {}, agent or {})
     lines += _stats_section(stats or {})
 
-    if quotes:
-        movers = sorted(quotes, key=lambda q: abs(q.get("change_pct") or 0), reverse=True)[:5]
+    # 등락 TOP: 최근 갱신된 시세만(수집 끊긴 종목의 '지난주 상한가'가 상위 차지하는 것 방지).
+    now = time.time()
+    fresh = [q for q in quotes
+             if q.get("ts") and (now - float(q.get("ts") or 0)) < _MOVER_FRESH_SEC]
+    if fresh:
+        movers = sorted(fresh, key=lambda q: abs(q.get("change_pct") or 0), reverse=True)[:5]
         lines.append("\n[관심종목 등락 TOP]")
         for q in movers:
             nm = q.get("name") or q.get("code") or "?"      # 이름 없으면 코드로 폴백

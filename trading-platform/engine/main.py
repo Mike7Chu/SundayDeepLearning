@@ -608,23 +608,33 @@ async def _update_regime(redis: aioredis.Redis, toss: TossClient) -> dict:
     코스피 200일선·변동성·외국인 수급으로 강세추세/중립/횡보/위험회피를 분류하고,
     각 국면에 맞는 전략 ID(S1~S5)를 낸다. 지수 일봉은 토스 지표 캔들에서 조회.
     """
+    def _closes(cs):
+        rows = sorted((c for c in (cs or []) if c.get("close") and c.get("date")),
+                      key=lambda c: str(c["date"]))
+        return [c["close"] for c in rows]
+
     closes: list[float] = []
+    src = "-"
     try:
         if toss and toss.enabled:
             async with httpx.AsyncClient(timeout=15) as client:
-                candles = await toss.fetch_indicator_candles(client, "KOSPI", count=230)
-            rows = sorted((c for c in candles if c.get("close") and c.get("date")),
-                          key=lambda c: str(c["date"]))
-            closes = [c["close"] for c in rows]
+                closes = _closes(await toss.fetch_indicator_candles(
+                    client, "KOSPI", count=230))
+                src = f"KOSPI지표({len(closes)})"
+                if len(closes) < 60:              # 지표 캔들이 짧으면 KODEX200으로 폴백
+                    proxy = _closes(await toss.fetch_daily_history(client, "069500"))
+                    if len(proxy) > len(closes):
+                        closes, src = proxy, f"KODEX200({len(proxy)})"
     except Exception as exc:
-        logger.warning("[regime] 코스피 일봉 조회 실패: %s", exc)
+        logger.warning("[regime] 지수 일봉 조회 실패: %s", exc)
     ind = await _json_get(redis, MARKET_INDICATORS_KEY)
     inv = (ind.get("investor") or {}).get("kospi") or {}
     reg = classify_regime(closes, foreign_net_eok=inv.get("foreigner"))
     reg["ts"] = time.time()
     await redis.set(ENGINE_REGIME_KEY, json.dumps(reg, ensure_ascii=False))
-    logger.info("[regime] %s(%s) · 활성전략 %s · %s", reg["label"], reg["posture"],
-                "+".join(reg["strategies"]), " · ".join(reg["reasons"][:3]))
+    logger.info("[regime] %s(%s) · 활성전략 %s · 지수봉 %s · %s",
+                reg["label"], reg["posture"], "+".join(reg["strategies"]), src,
+                " · ".join(reg["reasons"][:2]))
     return reg
 
 
