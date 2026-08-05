@@ -80,6 +80,8 @@ def normalize_watch_item(code: str, name: str = "") -> dict | None:
 
 
 class KISClient:
+    _inv_sample_logged = False        # 투자자수급 원본 응답 1회 로깅(필드 진단)
+
     def __init__(self):
         # 이중 앱키: 실전 조회키가 있으면 시세/재무/해외는 실전 도메인(안정, 모의 500 회피),
         # 주문은 별도(모의계좌면 모의 도메인+모의키). 실전키 없으면 기존 로직.
@@ -332,6 +334,11 @@ class KISClient:
             "FHKST01010900",
             {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": code},
             f"투자자수급 {code}")
+        if not KISClient._inv_sample_logged:          # 원본 응답 1회 확인(필드명 진단)
+            KISClient._inv_sample_logged = True
+            rows = (payload or {}).get("output") or []
+            logger.info("[kis-investor] %s 응답샘플(첫행): %s", code,
+                        str(rows[0] if rows else payload)[:500])
         return parse_kis_investor(payload, days=count)
 
     # ---- 주문 (자동매매 전용 — 호출부에서 kis_trading_enabled 등 게이트 필수) ----
