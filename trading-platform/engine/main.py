@@ -721,9 +721,11 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
     # 시황 라우터: 이 국면에 켜진 전략만 후보를 고른다(전략 리포트 §04).
     regime = await _json_get(redis, ENGINE_REGIME_KEY)
     active = regime.get("strategies") or DEFAULT_ACTIVE
+    stage1 = stage1_rank(quotes, held, top=40)
+    s1_kr = sum(1 for q in stage1 if str(q.get("code", "")).isdigit())
     buys: list[dict] = []
     async with httpx.AsyncClient(timeout=15) as client:
-        for q in stage1_rank(quotes, held, top=40):
+        for q in stage1:
             code = q["code"]
             candles: list = []
             raw_c = await redis.get(stock_ohlcv_key(code))
@@ -799,8 +801,11 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
         {"style": "실적+추세 스윙 · 중립 리스크 · 국내 전체+미국",
          "buys": plan_buys, "sells": sells[:3], "regime": regime, "ts": time.time()},
         ensure_ascii=False))
-    logger.info("[plan] 매수 후보 %d(국내 %d·미국 %d, 검증 %d) · 매도 점검 %d",
-                len(plan_buys), len(kr_b), len(us_b), len(buys), min(3, len(sells)))
+    buys_kr = sum(1 for b in buys if b.get("currency") != "USD")
+    logger.info("[plan] 매수 후보 %d(국내 %d·미국 %d, 검증 %d) · 매도 점검 %d "
+                "| 국내 흐름: stage1 %d → 전략통과 %d(전체 후보 %d중)",
+                len(plan_buys), len(kr_b), len(us_b), len(buys), min(3, len(sells)),
+                s1_kr, buys_kr, len(stage1))
     # 미장 자동매매(옵트인): 스윙 상위 미국 후보를 KIS 해외(모의 지원)로 자동매수.
     # 국내=가치(2단계 필터), 미국=모멘텀(스윙) — 전략 분리 유지.
     if kis is not None and sender is not None:
