@@ -1224,7 +1224,8 @@ function paintModal(code,name,d){
       <div class="modal-sec">더 알아보기</div>
       <div class="arow"><button class="btn" onclick="mChart('${qesc(code)}','${US?'USD':'KRW'}')">📊 차트(TradingView)</button>
         <button class="btn" onclick="mBacktest('${qesc(code)}')">📈 과거 성과</button>
-        <button class="btn" onclick="mResearch('${qesc(code)}')">🧠 AI 분석</button></div><div id="mExtra"></div>`;
+        <button class="btn" onclick="mResearch('${qesc(code)}')">🧠 AI 분석</button>
+        <button class="btn" onclick="mStory('${qesc(code)}')">📖 스토리 분석</button></div><div id="mExtra"></div>`;
 }
 // 차트 — #mExtra에 주입(모달 20초 새로고침이 mExtra는 보존 → 껌뻑임 없음).
 // 미국: TradingView 고급위젯(로그인 불필요·자동 거래소). 국내: KRX 실시간이 TradingView
@@ -1381,6 +1382,29 @@ async function mResearch(code, force){
       :`<div class="num" style="margin:4px 0">방금 분석 · ${again}</div>`;
     e.innerHTML=note+`<pre class="rbody">${escH(r.report)}</pre>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
+}
+async function mStory(code, force){
+  const e=$("mExtra"); e.innerHTML=`<div class="empty">📖 스토리 분석 ${force?'다시 실행 중…':'불러오는 중…'} (다년치 공시 비교라 시간이 좀 걸려요)</div>`;
+  try{ const r=await (await fetch(`/research/${encodeURIComponent(code)}/story${force?'?force=true':''}`,{method:"POST"})).json();
+    if(r.enabled===false){ e.innerHTML=`<div class="empty">${escH(r.report)}</div>`; return; }
+    if(r.queued){
+      e.innerHTML=`<div class="num" style="margin:4px 0">📖 스토리 분석 요청됨 — 호스트 처리 중… (다년치 공시라 2~4분)</div>`
+        +(r.prev?`<pre class="rbody">${escH(r.prev)}</pre>`:'');
+      pollStory(code, e, 0); return;
+    }
+    const again=`<a class="clk" onclick="mStory('${qesc(code)}',true)">🔄 다시 분석</a>`;
+    const note=r.cached?`<div class="num" style="margin:4px 0">📌 저장된 스토리 (${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}) · ${again}</div>`
+      :`<div class="num" style="margin:4px 0">방금 분석 · ${again}</div>`;
+    e.innerHTML=note+`<pre class="rbody">${escH(r.report)}</pre>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
+  }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
+}
+async function pollStory(code, e, tries){
+  if(tries>30){ e.innerHTML='<div class="empty">아직 결과가 없어요 — 호스트 research 구동 여부 확인</div>'; return; }
+  await new Promise(r=>setTimeout(r,6000));
+  const d=await jget("/research/"+encodeURIComponent(code)+"/story").catch(()=>null);
+  if(d&&d.report&&d.ts){
+    e.innerHTML=`<pre class="rbody">${escH(d.report)}</pre>`+(d.disclaimer?`<div class="rdisc">${d.disclaimer}</div>`:"");
+  }else pollStory(code, e, tries+1);
 }
 async function pollResearch(code, e, tries){
   if(tries>20){ e.innerHTML='<div class="empty">아직 결과가 없어요 — 호스트 research 구동 여부 확인(run-research-host.sh)</div>'; return; }

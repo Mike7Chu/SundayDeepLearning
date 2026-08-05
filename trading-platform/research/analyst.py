@@ -140,6 +140,46 @@ class Analyst:
                               report=f"⚠️ 분석 실패 (백엔드={mode})\n{exc}")
         return self._wrap(data, enabled=True, report=report)
 
+    async def analyze_story(self, data: StockData) -> dict:
+        """기업 스토리 리더 — 다년치 공시를 웹검색으로 비교(company-story 방법론).
+
+        지난 2~3년의 '영화': 공시 문장 변화·경영진 톤·가이던스 달성. 웹검색 필수라
+        구독 CLI/API 웹검색 경로에서만 의미. KR=DART 사업보고서, US=10-K+어닝콜.
+        """
+        mode = self.mode
+        if mode is None:
+            return self._disabled_report(data)
+        kr = str(data.code or "").isdigit()
+        prompt = (
+            f"당신은 {data.name}({data.code})의 지난 2~3년 '스토리'를 읽는 애널리스트입니다. "
+            "요약 카드가 '지금의 사진'이라면 이건 '지난 몇 년의 영화'입니다. 웹검색으로 다년치 "
+            "공시를 찾아 비교하세요.\n"
+            + ("[자료 — 한국] DART 사업보고서 2~3개년(dart.fss.or.kr) + IR/실적발표 자료. "
+               "⚠️ 한국은 어닝콜 트랜스크립트 전문 공개가 드물어 톤 분석 정밀도는 미국보다 "
+               "낮음 — 이 한계를 리포트 상단에 명시하고 사업보고서·IR 기반으로 분석.\n"
+               if kr else
+               "[자료 — 미국] 10-K 2~3개년(SEC EDGAR) + 어닝콜 트랜스크립트(IR/seekingalpha 등).\n")
+            + "[분석 4]\n"
+            "1) 공시 문장 변화 — '리스크 요인'·'사업의 내용'에서 새로 등장하거나 사라진 "
+            "핵심 문장을 연도와 함께(예: 2023 10-K엔 없던 '중국 규제' 문장이 2024에 등장).\n"
+            "2) 경영진 톤 변화 — (미국 어닝콜 가능 시) 자신감↔방어적 어조 변화. 한국은 IR 톤·"
+            "표현 강도 변화.\n"
+            "3) 가이던스 달성 — 과거 제시한 목표(매출·마진·출하) 대비 실제 달성/미달.\n"
+            "4) 한 줄 스토리 — 위를 하나의 이야기로.\n"
+            "[규율] 모든 발견에 출처(문서·연도/분기) 명시. 없는 변화를 지어내지 말 것"
+            "('변화 없음'이 정답일 수 있음). [사실]과 [해석]을 분리. 한국어 출력. 확인 못 한 건 "
+            "'확인 불가'.\n\n"
+            f"{format_for_prompt(data)}"
+        )
+        try:
+            report = await (self._via_api(prompt) if mode == "api" else self._via_cli(
+                prompt, extra_args=("--allowedTools", "WebSearch"),
+                timeout=_COACH_CLI_TIMEOUT))
+        except Exception as exc:
+            logger.warning("[story %s] 실패(mode=%s): %s", data.code, mode, exc)
+            return self._wrap(data, enabled=True, report=f"⚠️ 스토리 분석 실패\n{exc}")
+        return self._wrap(data, enabled=True, report=report)
+
     async def analyze_inversion(self, data: StockData) -> dict:
         """멍거 역방향 사고: '지금 사면 망하는 이유'만 집중 분석 → 감점(0~30) 산출.
 

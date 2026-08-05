@@ -64,6 +64,9 @@ TG_PENDING_KEY = "tg:pending"
 # 역방향(Inversion) AI 분석. inv_requests=set(요청 큐), inversion=hash{code: json{penalty,report,ts}}
 RESEARCH_INV_REQ_KEY = "research:inv_requests"
 RESEARCH_INV_KEY = "research:inversion"
+# 기업 스토리(다년치 공시 diff). story_requests=set(요청 큐), story=hash{code: json{report,ts}}
+RESEARCH_STORY_REQ_KEY = "research:story_requests"
+RESEARCH_STORY_KEY = "research:story"
 
 # USD/KRW 환율(토스 exchange-rate, 포트폴리오 루프가 갱신). json{rate, ts}
 FX_USDKRW_KEY = "fx:usdkrw"

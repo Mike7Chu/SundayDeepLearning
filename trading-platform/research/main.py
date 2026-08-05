@@ -25,6 +25,8 @@ from shared.redis_keys import (
     RESEARCH_INV_REQ_KEY,
     RESEARCH_KEY,
     RESEARCH_REQ_KEY,
+    RESEARCH_STORY_KEY,
+    RESEARCH_STORY_REQ_KEY,
 )
 from shared.settings import settings
 
@@ -114,6 +116,17 @@ async def run() -> None:
         except Exception as exc:
             logger.warning("[DATA_ERROR] %s 역방향 검증 실패: %s", code, exc)
 
+    async def story_code(code: str) -> None:
+        """기업 스토리(다년치 공시 diff) 요청 처리 → research:story 저장."""
+        try:
+            data = await gather(redis, code) or StockData(code=code)
+            result = await analyst.analyze_story(data)
+            await redis.hset(RESEARCH_STORY_KEY, code,
+                             json.dumps(result, ensure_ascii=False))
+            logger.info("[story] %s 스토리 분석 완료", code)
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] %s 스토리 분석 실패: %s", code, exc)
+
     coach_fail_ts = 0.0   # 정기 점검 실패 시 30분 쿨다운(15초 루프의 재시도 스팸 방지)
 
     async def run_coach(reason: str) -> None:
@@ -194,6 +207,13 @@ async def run() -> None:
                     await heartbeat()
                     await coach_if_requested()
                     await analyze_code(code)
+                    await asyncio.sleep(2)
+                # 1b) 스토리 분석 요청(📖 다년치 공시 diff — 무거워서 온디맨드 전용)
+                stories = await redis.spop(RESEARCH_STORY_REQ_KEY, 3)
+                for code in (stories or []):
+                    await heartbeat()
+                    await coach_if_requested()
+                    await story_code(code)
                     await asyncio.sleep(2)
                 # 2) 정기 전체 분석 — 최근 리포트가 있는 종목은 건너뜀(재시작해도 재분석 안 함)
                 if time.time() - last_full >= 3600:   # 1시간마다 점검(신규/만료분만 분석)

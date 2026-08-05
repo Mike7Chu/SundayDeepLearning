@@ -15,7 +15,12 @@ from api.redis_client import get_redis
 from collector.stock.kis import effective_watchlist, load_watchlist
 from research.analyst import Analyst
 from research.data import StockData, gather
-from shared.redis_keys import RESEARCH_KEY, RESEARCH_REQ_KEY
+from shared.redis_keys import (
+    RESEARCH_KEY,
+    RESEARCH_REQ_KEY,
+    RESEARCH_STORY_KEY,
+    RESEARCH_STORY_REQ_KEY,
+)
 
 router = APIRouter()
 
@@ -82,3 +87,40 @@ async def research_run(code: str, force: bool = False) -> dict:
     return {"queued": True, "code": code,
             "report": "분석 요청됨 — 호스트 research가 곧 처리합니다. 잠시 후 새로고침.",
             "prev": existing.get("report") if existing else None}
+
+
+@router.post("/research/{code}/story")
+async def research_story(code: str, force: bool = False) -> dict:
+    """기업 스토리(다년치 공시 diff) 분석 — company-story 방법론. 웹검색 필요(구독 CLI/API).
+
+    저장분 있으면 반환(force로 재실행). API 모드는 즉시, 구독 CLI는 호스트 큐로.
+    """
+    redis = get_redis()
+    raw = await redis.hget(RESEARCH_STORY_KEY, code)
+    prev = json.loads(raw) if raw else None
+    if not force and prev and prev.get("report"):
+        return {**prev, "cached": True}
+    analyst = Analyst()
+    if analyst.mode == "api":
+        data = await gather(redis, code) or StockData(code=code, name=_name_for(code))
+        if not data.name:
+            data.name = _name_for(code)
+        report = await analyst.analyze_story(data)
+        await redis.hset(RESEARCH_STORY_KEY, code, json.dumps(report, ensure_ascii=False))
+        return report
+    if analyst.mode is None:
+        return {"enabled": False, "code": code,
+                "report": "AI 리서치 비활성 — 구독 CLI(RESEARCH_USE_CLI) 또는 API 키 필요."}
+    await redis.sadd(RESEARCH_STORY_REQ_KEY, code)
+    return {"queued": True, "code": code,
+            "report": "스토리 분석 요청됨(다년치 공시 비교 — 시간이 좀 걸립니다). 잠시 후 새로고침.",
+            "prev": (prev or {}).get("report")}
+
+
+@router.get("/research/{code}/story")
+async def research_story_get(code: str) -> dict:
+    redis = get_redis()
+    raw = await redis.hget(RESEARCH_STORY_KEY, code)
+    if not raw:
+        raise HTTPException(status_code=404, detail="스토리 리포트 없음 — POST .../story로 생성")
+    return json.loads(raw)
