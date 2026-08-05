@@ -34,11 +34,12 @@ def _q(code, price, g=None, hi=None, lo=None, chg=0.0, **kw):
 def test_stage1_rank_filters():
     quotes = [
         _q("A", 10000, g=50, hi=11000, lo=6000),        # 통과(실적+상단권)
-        _q("B", 10000, g=5, hi=11000, lo=6000),          # 실적 미달
+        _q("B", 10000, g=5, hi=11000, lo=6000),          # 실적 약해도 52주 상단권 → 모멘텀 통과
         _q("C", 10000, g=80, hi=20000, lo=9000),         # 52주 하단권 제외
         _q("D", 10000, g=40, hi=11000, lo=6000),         # 보유 중 제외
         _q("E", 300, g=90, hi=400, lo=100),              # 동전주 제외
         _q("F", None, g=90),                              # 가격 없음
+        _q("H", 10000, g=None, hi=None, lo=None, chg=-1.0),  # 실적·모멘텀 근거 전무 제외
         {"code": "NVDA", "name": "엔비디아", "price": 180.0, "currency": "USD",
          "ni_growth_q_pct": 60, "high_52w": 190.0, "low_52w": 90.0,
          "change_pct": 1.0},                              # 미국 통과
@@ -46,7 +47,8 @@ def test_stage1_rank_filters():
     out = stage1_rank(quotes, held={"D"})
     codes = [q["code"] for q in out]
     assert "A" in codes and "NVDA" in codes
-    assert all(c not in codes for c in ("B", "C", "D", "E", "F"))
+    assert "B" in codes                                  # 국내 모멘텀(상단권) 통과 — S1/S6 평가용
+    assert all(c not in codes for c in ("C", "D", "E", "F", "H"))
     # 잠정실적이 분기보다 우선 사용됨(실적 필터 통과)
     flash = _q("G", 10000, g=None, hi=11000, lo=6000, flash_op_yoy=30.0)
     assert stage1_rank([flash], set())

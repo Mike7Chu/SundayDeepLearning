@@ -80,10 +80,16 @@ def stage1_rank(quotes: list[dict], held: set[str], top: int = 40) -> list[dict]
                 continue
             s1 = (pos if pos is not None else 0.6) * 60 + chg
         else:
+            # 국내: 실적 개선이면 강한 가점, 없어도 모멘텀(52주 상단권·당일 강세)으로 통과.
+            # (S1 모멘텀·S6 수급 전략이 실적 없는 종목도 평가 → 실적을 하드게이트로 막지 않음.
+            #  2차 swing_metrics/전략이 추세·과열을 최종 검증하므로 여기선 통과폭을 준다.)
             g, _ = _growth_of(q)
-            if g is None or g < 10:
-                continue                               # 국내 스윙은 실적 개선 전제
-            s1 = min(g, 100) + (pos if pos is not None else 0.6) * 50 + chg
+            if g is not None and g >= 10:
+                s1 = min(g, 100) + (pos if pos is not None else 0.6) * 50 + chg
+            else:
+                if pos is None and chg <= 0:
+                    continue                           # 모멘텀 근거 전무 → 제외
+                s1 = (pos if pos is not None else 0.6) * 50 + chg
         rows.append((s1, q))
     rows.sort(key=lambda x: x[0], reverse=True)
     return [q for _, q in rows[:top]]
