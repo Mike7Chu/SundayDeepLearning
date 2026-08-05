@@ -88,6 +88,14 @@
 - ✅ **펀더멘탈 TTM 신선화**: KIS EPS/BPS(연간 고정) 대신 DART 분기 누적으로 TTM EPS·ROE·PER·BPS
   계산(`dart.ttm_fundamentals`, 추가 호출 0) → 스크리너·점수·리서치·모달이 '2026.2Q TTM' 우선.
 - ✅ **상세 모달 TradingView 차트**: 📊 버튼 → 고급차트 임베드(KR=KRX:코드/US=티커). 리서치 웹검색 ON.
+- ✅ **리서치 고도화(타민더마켓 스킬 방법론 흡수)**: ①**역DCF**(`api/services/reverse_dcf.py` 순수):
+  적정주가 대신 '현재 시총이 함의하는 10년 FCF 성장률'을 이분법 역산 + WACC 민감도 + 과거 CAGR
+  비교. `/stocks/{code}` 응답·모달 '🔬 역DCF' 카드(KR=DART FCF, US=리서치 웹검색). ②**리서치 프롬프트
+  강화**: analyze()에 2분 드릴(사업모델 한 문장)·출처 규율·역DCF 지시(US는 웹검색으로 FCF). ③**기업
+  스토리 리더**(`analyst.analyze_story`, `/research/{code}/story`, 모달 📖): 다년치 공시 diff(공시 문장
+  변화·경영진 톤·가이던스 달성). KR=DART 사업보고서(어닝콜 전문만 한계 명시), US=10-K+어닝콜. 호스트
+  큐(RESEARCH_STORY_REQ) 온디맨드. ④**스킬 설치 스크립트**(`deploy/install-skills.sh`): 스킬 zip을
+  `~/.claude/skills/`에 설치 → Pi `claude -p`에서 트리거('DIS 분석해줘'). 스킬 저작물은 레포 미커밋(개인용).
 - ✅ **전략 리팩터(리포트 기반)**: 28건 실측 성적 진단(net이 gross의 12%뿐 — 비용이 88% 잠식,
   자동매수 대부분 '점수 39·관망') → 근본원인 3 차단 + 시황 라우터 + 전략 5.
   ①**P0 지혈**: `is_derivative_etf`로 레버리지·인버스·ETN 자동매매 유니버스 제외(급등주 편입·
