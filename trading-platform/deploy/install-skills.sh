@@ -6,8 +6,9 @@
 # ⚠️ 스킬 zip은 배포자(예: 타민더마켓)의 저작물 — 개인 사용만. 레포에 커밋하지 않는다.
 #
 # 사용:
-#   bash deploy/install-skills.sh taminskills.zip          # 번들(내부 zip 여러 개) OK
-#   bash deploy/install-skills.sh a.zip b.zip c.zip        # 개별 스킬 zip 여러 개
+#   bash deploy/install-skills.sh https://.../tamin-skills.zip   # URL(curl로 다운로드)
+#   bash deploy/install-skills.sh taminskills.zip                # 로컬 번들(내부 zip 여러 개)
+#   bash deploy/install-skills.sh a.zip b.zip c.zip              # 개별 스킬 zip 여러 개
 #   CLAUDE_SKILLS_DIR=/custom/dir bash deploy/install-skills.sh a.zip   # 설치 위치 지정
 set -euo pipefail
 
@@ -16,9 +17,21 @@ mkdir -p "$DEST"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 
 if [ "$#" -eq 0 ]; then
-  echo "사용법: bash deploy/install-skills.sh <스킬.zip> [zip...]"; exit 1
+  echo "사용법: bash deploy/install-skills.sh <스킬.zip 또는 URL> [...]"; exit 1
 fi
 command -v unzip >/dev/null || { echo "❌ unzip 필요(sudo apt-get install unzip)"; exit 1; }
+
+resolve_arg() {                 # URL이면 curl로 받아 로컬 경로 출력, 로컬이면 그대로.
+  local a="$1"
+  case "$a" in
+    http://*|https://*)
+      command -v curl >/dev/null || { echo "__ERR_no_curl"; return; }
+      local out; out="$tmp/dl.$RANDOM.zip"
+      if curl -fsSL -A "Mozilla/5.0" -o "$out" "$a"; then echo "$out"
+      else echo "__ERR_download"; fi ;;
+    *) [ -f "$a" ] && echo "$a" || echo "__ERR_missing" ;;
+  esac
+}
 
 install_skill_zip() {           # $1 = SKILL.md 를 포함한 스킬 zip
   local z="$1" d md sdir name
@@ -33,20 +46,22 @@ install_skill_zip() {           # $1 = SKILL.md 를 포함한 스킬 zip
 }
 
 for arg in "$@"; do
-  [ -f "$arg" ] || { echo "건너뜀(파일 없음): $arg"; continue; }
-  case "$arg" in
-    *.zip) : ;;
-    *) echo "건너뜀(zip 아님): $arg"; continue ;;
+  src="$(resolve_arg "$arg")"
+  case "$src" in
+    __ERR_no_curl)   echo "❌ curl 필요(URL 다운로드): $arg"; continue ;;
+    __ERR_download)  echo "❌ 다운로드 실패(URL 확인·네트워크): $arg"; continue ;;
+    __ERR_missing)   echo "건너뜀(파일 없음): $arg"; continue ;;
   esac
+  case "$arg" in http://*|https://*) echo "· 다운로드: $arg" ;; esac
   # 번들(내부에 또 다른 zip)이면 각 내부 zip을 설치, 아니면 그 자체를 스킬로 설치.
-  b="$(mktemp -d "$tmp/b.XXXXXX")"; unzip -oq "$arg" -d "$b" || true
+  b="$(mktemp -d "$tmp/b.XXXXXX")"; unzip -oq "$src" -d "$b" || { echo "  ⚠️ zip 아님: $arg"; continue; }
   nested="$(find "$b" -maxdepth 2 -name '*.zip' 2>/dev/null || true)"
   if [ -n "$nested" ]; then
     echo "· 번들 감지: $(basename "$arg")"
     while IFS= read -r z; do install_skill_zip "$z"; done <<< "$nested"
   else
     echo "· 스킬: $(basename "$arg")"
-    install_skill_zip "$arg"
+    install_skill_zip "$src"
   fi
 done
 
