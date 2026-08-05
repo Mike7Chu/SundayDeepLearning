@@ -85,11 +85,12 @@ def test_is_derivative_etf():
 
 def test_parse_kis_investor():
     # 순매수 거래대금(원)을 억원으로 환산, 최신 days개, supply_demand 호환 키
+    # _tr_pbmn 단위는 백만원 → 억원 ÷100 (320억=32000백만원)
     payload = {"output": [
-        {"stck_bsop_date": "20260805", "frgn_ntby_tr_pbmn": "32000000000",   # +320억
-         "orgn_ntby_tr_pbmn": "5000000000", "prsn_ntby_tr_pbmn": "-37000000000"},
-        {"stck_bsop_date": "20260804", "frgn_ntby_tr_pbmn": "-1,000,000,000",  # -10억(콤마)
-         "orgn_ntby_tr_pbmn": "2000000000", "prsn_ntby_tr_pbmn": "-1000000000"}]}
+        {"stck_bsop_date": "20260805", "frgn_ntby_tr_pbmn": "32000",   # +320억
+         "orgn_ntby_tr_pbmn": "5000", "prsn_ntby_tr_pbmn": "-37000"},
+        {"stck_bsop_date": "20260804", "frgn_ntby_tr_pbmn": "-1,000",   # -10억(콤마)
+         "orgn_ntby_tr_pbmn": "2000", "prsn_ntby_tr_pbmn": "-1000"}]}
     rows = parse_kis_investor(payload, days=5)
     assert len(rows) == 2
     assert rows[0] == {"date": "20260805", "foreigner": 320.0,
