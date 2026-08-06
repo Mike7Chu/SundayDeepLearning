@@ -153,6 +153,56 @@ async def _cur_price(redis: aioredis.Redis, code: str) -> float | None:
         return None
 
 
+async def _cur_name(redis: aioredis.Redis, code: str) -> str:
+    for key in (STOCK_QUOTE_KEY, STOCK_MARKET_KEY):
+        raw = await redis.hget(key, code)
+        if raw:
+            try:
+                return json.loads(raw).get("name") or code
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return code
+
+
+async def _prep_pillar_buy(redis: aioredis.Redis, sender: TelegramSender,
+                           code: str) -> None:
+    """빛의기둥 '🛒 단순매수' 원탭 — 현재가·한도로 수량 자동계산 → 확인 카드 발송.
+
+    눌림목 대기·수량 계산 없이 '지금 현재가로' 매수. 실제 체결은 확인(cf:N) 한 번
+    더 눌러야 하고, place_gated_order의 브로커·한도·모의 게이트가 최종 검증한다.
+    한국장 빛의기둥이라 국내(KIS) 기준.
+    """
+    price = await _cur_price(redis, code)
+    if not price or price <= 0:
+        await sender.send(f"🛒 {code} 현재가를 몰라요 — 장중에 다시 시도하거나 "
+                          f"'매수 {code} <수량> <가격>'으로 직접 지정해 주세요.")
+        return
+    risk = await _jget(redis, ENGINE_RISK_KEY)
+    cap = min(risk.get("per_stock_cap") or settings.kis_max_order_krw,
+              settings.kis_max_order_krw)          # 종목당 한도 ∩ 주문 한도
+    qty = int(cap // price)
+    if qty < 1:
+        await sender.send(
+            f"🛒 {await _cur_name(redis, code)}({code}) 1주 {price:,.0f}원 > 한도 "
+            f"{settings.kis_max_order_krw:,.0f}원 — 매수 불가(KIS_MAX_ORDER_KRW 상향 필요).")
+        return
+    n = str(int(time.time()) % 100000)
+    broker = settings.auto_trade_broker              # 국내 기본 kis(모의 지원)
+    await redis.hset(TG_PENDING_KEY, n, json.dumps(
+        {"cmd": "order", "side": "BUY", "code": code, "qty": qty,
+         "price": price, "broker": broker, "ts": time.time()}, ensure_ascii=False))
+    broker_kr = "한투" + ("·모의" if settings.kis_paper else "·실전") if broker == "kis" else "토스"
+    name = await _cur_name(redis, code)
+    await sender.send(
+        f"🛒 <b>단순매수 확인</b> [{esc(broker_kr)}] — 빛의기둥\n"
+        f"{esc(name)} <code>{esc(code)}</code> <b>{qty:g}주</b> @ 현재가 "
+        f"<b>{price:,.0f}원</b>\n예상 금액 <b>{qty * price:,.0f}원</b>\n"
+        f"※ 눌림목 대기 없이 지금 매수 · 되돌림 위험 있어요\n"
+        f"→ 버튼을 누르거나 2분 내 '확인 {n}' 회신",
+        buttons=[[{"text": "✅ 확인 매수", "cb": f"cf:{n}"},
+                  {"text": "❌ 취소", "cb": f"dr:{n}"}]], html=True)
+
+
 async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
                   sender: TelegramSender, text: str) -> None:
     p = parse_command(text)
@@ -303,7 +353,11 @@ async def _handle_callback(redis: aioredis.Redis, toss: TossClient, kis,
     data = cq.get("data", "")
     cid = cq.get("id", "")
     msg_id = ((cq.get("message") or {}).get("message_id"))
-    if data.startswith("cf:"):
+    if data.startswith("bp:"):                       # 빛의기둥 '단순매수' → 확인 카드
+        await sender.answer_callback(cid, "매수 준비 중…")
+        await sender.clear_buttons(msg_id)           # 알림의 매수 버튼 제거(중복 방지)
+        await _prep_pillar_buy(redis, sender, data[3:])
+    elif data.startswith("cf:"):
         result = await _execute_pending(redis, toss, kis, data[3:])
         await sender.answer_callback(cid, "처리 완료")
         await sender.clear_buttons(msg_id)

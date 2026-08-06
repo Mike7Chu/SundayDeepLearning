@@ -777,7 +777,8 @@ async def _pillar_confirm_alert(redis: aioredis.Redis, toss: TossClient,
             f"오늘 거래대금 {value_eok:,.0f}억 · 평소의 {value_eok / avg2:.1f}배 · "
             "고가 마감형 장대양봉\n"
             + (guide + "\n" if guide else "")
-            + "※ 테마 동반 여부 확인 · 판단 보조")
+            + "※ 테마 동반 여부 확인 · 판단 보조",
+            buttons=[[{"text": "🛒 단순매수", "cb": f"bp:{code}"}]])  # 원탭 매수(확인 1회)
         logger.info("[pillar/market] %s %.0f억 x%.1f", code, value_eok, value_eok / avg2)
     except Exception as exc:
         logger.debug("[pillar %s] 확정 실패: %s", code, exc)

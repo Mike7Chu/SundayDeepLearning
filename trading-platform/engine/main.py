@@ -1191,7 +1191,8 @@ async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
             f"거래대금 {lp['value_eok']:,.0f}억 · 평소의 {lp['surge_x']:.1f}배 · "
             "고가 마감 장대양봉\n"
             + (guide + "\n" if guide else "")
-            + "※ 테마 동반 여부 확인 · 판단 보조")
+            + "※ 테마 동반 여부 확인 · 판단 보조",
+            buttons=[[{"text": "🛒 단순매수", "cb": f"bp:{code}"}]])  # 원탭 매수(확인 1회)
         logger.info("[pillar] %s %.0f억 x%.1f", code, lp["value_eok"], lp["surge_x"])
 
 
