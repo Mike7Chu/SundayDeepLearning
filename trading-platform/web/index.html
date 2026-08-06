@@ -1437,7 +1437,7 @@ async function mStory(code, force){
     if(r.queued){
       e.innerHTML=`<div class="num" style="margin:4px 0">📖 스토리 분석 요청됨 — 호스트 처리 중… (다년치 공시라 2~4분)</div>`
         +(r.prev?`<div class="md">${mdHTML(r.prev)}</div>`:'');
-      pollStory(code, e, 0); return;
+      pollStory(code, e, 0, r.prev_ts||0); return;   // 이전 분기 저장분(prev_ts)보다 새 결과만 채택
     }
     const again=`<a class="clk" onclick="mStory('${qesc(code)}',true)">🔄 다시 분석</a>`;
     const note=r.cached?`<div class="num" style="margin:4px 0">📌 저장된 스토리 (${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}) · ${again}</div>`
@@ -1445,13 +1445,13 @@ async function mStory(code, force){
     e.innerHTML=note+`<div class="md">${mdHTML(r.report)}</div>`+(r.disclaimer?`<div class="rdisc">${r.disclaimer}</div>`:"");
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${err.message}</div>`; }
 }
-async function pollStory(code, e, tries){
+async function pollStory(code, e, tries, prevTs){
   if(tries>30){ e.innerHTML='<div class="empty">아직 결과가 없어요 — 호스트 research 구동 여부 확인</div>'; return; }
   await new Promise(r=>setTimeout(r,6000));
   const d=await jget("/research/"+encodeURIComponent(code)+"/story").catch(()=>null);
-  if(d&&d.report&&d.ts){
+  if(d&&d.report&&d.ts&&(!prevTs||d.ts>prevTs)){   // 이전 저장분보다 새 결과(ts)만 표시
     e.innerHTML=`<div class="md">${mdHTML(d.report)}</div>`+(d.disclaimer?`<div class="rdisc">${d.disclaimer}</div>`:"");
-  }else pollStory(code, e, tries+1);
+  }else pollStory(code, e, tries+1, prevTs);
 }
 async function pollResearch(code, e, tries){
   if(tries>20){ e.innerHTML='<div class="empty">아직 결과가 없어요 — 호스트 research 구동 여부 확인(run-research-host.sh)</div>'; return; }

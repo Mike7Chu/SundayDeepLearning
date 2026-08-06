@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
@@ -27,6 +28,20 @@ router = APIRouter()
 
 def _name_for(code: str) -> str:
     return next((w.get("name", "") for w in load_watchlist() if w["code"] == code), "")
+
+
+def _quarter_key(ts: float | None) -> tuple[int, int] | None:
+    """타임스탬프의 (연, 분기1~4) — KST 기준. 분기 경계로 캐시 신선도 판정."""
+    if not ts:
+        return None
+    dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9)))
+    return (dt.year, (dt.month - 1) // 3 + 1)
+
+
+def _same_quarter(ts: float | None) -> bool:
+    """저장된 리포트가 '지금과 같은 분기'에 만들어졌는가(분기 바뀌면 재분석 신호)."""
+    qk = _quarter_key(ts)
+    return qk is not None and qk == _quarter_key(time.time())
 
 
 @router.get("/research")
@@ -98,7 +113,9 @@ async def research_story(code: str, force: bool = False) -> dict:
     redis = get_redis()
     raw = await redis.hget(RESEARCH_STORY_KEY, code)
     prev = json.loads(raw) if raw else None
-    if not force and prev and prev.get("report"):
+    # 분기 캐시: 같은 분기에 이미 분석했으면 재요청 없이 저장분(토큰 절약).
+    # 분기가 바뀌면 자동 재분석(신규 사업보고서·실적 반영). force면 무조건 재분석.
+    if not force and prev and prev.get("report") and _same_quarter(prev.get("ts")):
         return {**prev, "cached": True}
     analyst = Analyst()
     if analyst.mode == "api":
@@ -114,7 +131,8 @@ async def research_story(code: str, force: bool = False) -> dict:
     await redis.sadd(RESEARCH_STORY_REQ_KEY, code)
     return {"queued": True, "code": code,
             "report": "스토리 분석 요청됨(다년치 공시 비교 — 시간이 좀 걸립니다). 잠시 후 새로고침.",
-            "prev": (prev or {}).get("report")}
+            "prev": (prev or {}).get("report"),
+            "prev_ts": (prev or {}).get("ts")}   # 폴링이 '이전 분기 저장분'을 새 결과로 오인 않게
 
 
 @router.get("/research/{code}/story")
