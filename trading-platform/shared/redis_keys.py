@@ -54,6 +54,9 @@ JOURNAL_KEY = "journal:entries"
 ENGINE_AUTO_KEY = "engine:auto_orders"
 # 빛의기둥(수급 포착) 알림 기록(hash{code: "YYYY-MM-DD"} — 하루 1회)
 ENGINE_PILLAR_KEY = "engine:pillar"
+# 에이전트 승인매수로 등록된 관리 손절/목표(hash{code: json{stop,target,entry,qty,ts}})
+# — 가드 루프가 실시간가와 대조해 손절/목표 도달 시 원탭 매도 알림.
+ENGINE_MANAGED_STOP_KEY = "engine:managed_stops"
 # 오늘의 매매 플랜(스윙 설문 맞춤). json{style, buys:[...3], sells:[...3], ts}
 ENGINE_PLAN_KEY = "engine:plan"
 # 시황 국면(전략 라우터). json{regime,label,posture,strategies:[..],reasons,metrics,ts}

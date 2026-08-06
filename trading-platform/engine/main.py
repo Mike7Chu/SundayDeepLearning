@@ -39,7 +39,7 @@ from engine.plan import (
 from engine.risk import evaluate_risk
 from engine.screener import final_score, quant_filter
 from engine.telegram_cmd import command_loop
-from notifier.telegram import TelegramSender, dashboard_buttons
+from notifier.telegram import TelegramSender, dashboard_buttons, esc
 from engine.intraday import add_tick, intraday_signal, krx_intraday
 from engine.agent import (
     build_context,
@@ -57,6 +57,7 @@ from shared.redis_keys import (
     ENGINE_TRAIL_KEY,
     ENGINE_AUTO_KEY,
     ENGINE_PILLAR_KEY,
+    ENGINE_MANAGED_STOP_KEY,
     ENGINE_BUYLIST_KEY,
     ENGINE_PEAK_KEY,
     ENGINE_PLAN_KEY,
@@ -73,6 +74,7 @@ from shared.redis_keys import (
     RESEARCH_INV_KEY,
     RESEARCH_INV_REQ_KEY,
     STOCK_QUOTE_KEY,
+    TG_PENDING_KEY,
     TOSS_ACCOUNT_KEY,
     TOSS_HOLDINGS_KEY,
     fwd_scores_key,
@@ -590,6 +592,55 @@ async def _coach_watchdog(redis: aioredis.Redis, sender: TelegramSender) -> None
     logger.warning("[watchdog] 아침 점검 미발송 — 경고 발송(hb=%s)", bool(hb))
 
 
+async def _managed_stop_alerts(redis: aioredis.Redis, sender: TelegramSender) -> None:
+    """에이전트 승인매수로 등록된 손절/목표를 실시간가와 대조 → 도달 시 원탭 매도 알림.
+
+    보유 알림(_holdings_alerts)은 토스 실계좌 기준이라 에이전트 KIS 매수는 못 잡는다.
+    승인매수 시 등록된 손절/목표(ENGINE_MANAGED_STOP_KEY)를 별도로 감시해, 도달하면
+    '매도 승인' 버튼과 함께 알린다. 1회성(알림 후 등록 해제 — 재알림 스팸 방지).
+    """
+    managed = await redis.hgetall(ENGINE_MANAGED_STOP_KEY)
+    for code, raw in managed.items():
+        try:
+            m = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            await redis.hdel(ENGINE_MANAGED_STOP_KEY, code)
+            continue
+        live = await _live_price(redis, code)
+        if not live or live <= 0:
+            continue
+        stop, target = m.get("stop"), m.get("target")
+        if stop and live <= stop:
+            label = "🛑 손절선 도달"
+        elif target and live >= target:
+            label = "🎯 목표가 도달"
+        else:
+            continue
+        await redis.hdel(ENGINE_MANAGED_STOP_KEY, code)     # 1회성
+        kr = code.isdigit()
+        f = (lambda v: f"{v:,.0f}원") if kr else (lambda v: f"${v:,.2f}")
+        qty = int(m.get("qty") or 0)
+        name = m.get("name") or code
+        entry = m.get("entry") or 0
+        pnl = (live / entry - 1) * 100 if entry else 0.0
+        if qty < 1:
+            await sender.send(f"{label} — {name}({code}) 현재 {f(live)} "
+                              f"(진입 {f(entry)} 대비 {pnl:+.1f}%)")
+            continue
+        n = str(int(time.time() * 1000) % 1000000)
+        await redis.hset(TG_PENDING_KEY, n, json.dumps(
+            {"cmd": "order", "side": "SELL", "code": code, "qty": qty,
+             "price": live, "broker": "kis", "ts": time.time()}, ensure_ascii=False))
+        await sender.send(
+            f"{label} — {esc(name)}(<code>{esc(code)}</code>)\n"
+            f"현재 <b>{esc(f(live))}</b> · 진입 {esc(f(entry))} 대비 <b>{pnl:+.1f}%</b>\n"
+            f"에이전트 손절/목표 도달 — 매도할까요? <b>{qty:g}주</b> @ {esc(f(live))}\n"
+            f"→ 승인 또는 2분 내 '확인 {n}'",
+            html=True, buttons=[[{"text": "✅ 매도 승인", "cb": f"cf:{n}"},
+                                 {"text": "❌ 보유 유지", "cb": f"dr:{n}"}]])
+        logger.info("[agent/관리손절] %s %s live=%.2f", code, label, live)
+
+
 async def _guard_loop(redis: aioredis.Redis, sender: TelegramSender) -> None:
     """고속 가드 — 목표가/손절선 감시만 20초 주기(실시간 시세 대응).
 
@@ -601,6 +652,7 @@ async def _guard_loop(redis: aioredis.Redis, sender: TelegramSender) -> None:
     while True:
         try:
             await _holdings_alerts(redis, sender)
+            await _managed_stop_alerts(redis, sender)
             await _coach_watchdog(redis, sender)
         except Exception as exc:
             logger.warning("[DATA_ERROR] guard 실패: %s", exc)
@@ -1191,8 +1243,7 @@ async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
             f"거래대금 {lp['value_eok']:,.0f}억 · 평소의 {lp['surge_x']:.1f}배 · "
             "고가 마감 장대양봉\n"
             + (guide + "\n" if guide else "")
-            + "※ 테마 동반 여부 확인 · 판단 보조",
-            buttons=[[{"text": "🛒 단순매수", "cb": f"bp:{code}"}]])  # 원탭 매수(확인 1회)
+            + "※ 테마 동반 여부 확인 · 판단 보조")
         logger.info("[pillar] %s %.0f억 x%.1f", code, lp["value_eok"], lp["surge_x"])
 
 
@@ -1233,6 +1284,69 @@ async def _agent_buy(redis: aioredis.Redis, kis, row: dict, risk: dict,
         ensure_ascii=False))
     cur = "$" if not code.isdigit() else ""
     return ok, msg, f"{qty:g}주 @{cur}{order_price:g}({note})"
+
+
+async def _agent_propose_buy(redis: aioredis.Redis, sender: TelegramSender, row: dict,
+                             risk: dict, fx: float | None, now: float,
+                             reason: str, market_view: str) -> bool:
+    """승인 모드 매수 제안 — 자동 체결 대신 근거·진입·손절·목표 담은 알림+승인 버튼.
+
+    _agent_buy와 동일하게 진입가·수량·한도를 산정하되 주문은 넣지 않고, TG_PENDING_KEY에
+    대기 주문(손절·목표 포함)을 저장해 기존 확인 흐름(cf:/dr:)으로 집행되게 한다.
+    승인(cf) 후 _execute_pending이 체결하고 손절/목표를 관리 손절에 등록한다.
+    반환 True=제안 발송, False=스킵(쿨다운·과확장·수량0).
+    """
+    code, entry = row["code"], row.get("entry")
+    if not entry:
+        return False
+    if await _auto_cooldown(redis, code, now):
+        return False
+    kr = code.isdigit()
+    live = await _live_price(redis, code) or row.get("price")
+    dec = entry_decision(entry, live, settings.entry_chase_band_pct)
+    # 과확장이면 추천 진입가(눌림목)에 '지정가 대기' 제안 — 승인만 하면 눌릴 때 체결.
+    order_price = dec[0] if dec else entry
+    note = dec[1] if dec else "추천가 지정가(눌림 대기)"
+    max_order = settings.kis_max_order_krw
+    exp = await _exposure_frac(redis)
+    budget = min(risk.get("per_stock_cap") or max_order, max_order) * exp
+    if kr:
+        qty = int(budget // order_price)
+    elif fx:
+        qty = int((budget / fx) // order_price)
+    else:
+        return False
+    qty = await _cap_by_cash(redis, code, qty, order_price)
+    if qty < 1:
+        return False
+    n = str(int(time.time() * 1000) % 1000000)       # 제안 식별자(밀리초로 충돌 회피)
+    stop, target = row.get("stop"), row.get("target")
+    await redis.hset(TG_PENDING_KEY, n, json.dumps(
+        {"cmd": "order", "side": "BUY", "code": code, "qty": qty,
+         "price": order_price, "broker": "kis", "stop": stop, "target": target,
+         "name": row.get("name"), "ts": time.time()}, ensure_ascii=False))
+    cur, f = ("$", lambda v: f"${v:,.2f}") if not kr else ("", lambda v: f"{v:,.0f}원")
+    tag = "모의" if settings.kis_paper else "실계좌"
+    est = f(qty * order_price) if kr else f"${qty * order_price:,.2f}"
+    body = (
+        f"🤖 <b>에이전트 매수 제안</b> [{esc(tag)}]\n"
+        f"{esc(row.get('name') or code)} <code>{esc(code)}</code> · 스윙 "
+        f"{esc(row.get('swing'))}점 · {esc(row.get('strategy_label') or '')}\n"
+        f"📊 시장뷰: {esc(market_view[:120] or '-')}\n"
+        f"🧠 판단 근거: {esc(reason[:400] or '-')}\n\n"
+        f"· 매수 <b>{esc(f(order_price))}</b> ({esc(note)}) · <b>{qty:g}주</b> "
+        f"≈ {esc(est)}\n"
+        f"· 손절 <b>{esc(f(stop)) if stop else '-'}</b>"
+        + (f" ({(stop/order_price-1)*100:+.1f}%)" if stop else "")
+        + f" · 목표 <b>{esc(f(target)) if target else '-'}</b>"
+        + (f" ({(target/order_price-1)*100:+.1f}%)" if target else "") + "\n"
+        f"→ 승인하면 매수 + 손절/목표 자동 감시. 2분 내 결정('확인 {n}'도 가능)")
+    await sender.send(body, html=True, buttons=[[
+        {"text": "✅ 매수 승인", "cb": f"cf:{n}"},
+        {"text": "❌ 넘기기", "cb": f"dr:{n}"}]])
+    logger.info("[agent/제안] %s %s주 @%s%.2f 손절%s 목표%s", code, qty, cur,
+                order_price, stop, target)
+    return True
 
 
 async def _agent_sell(redis: aioredis.Redis, kis, code: str, hold: dict,
@@ -1318,6 +1432,15 @@ async def _agent_run(redis: aioredis.Redis, kis,
             if code in held:
                 continue
             if risk.get("buy_lock") and not _paper_auto():
+                continue
+            if settings.agent_approval_mode:         # 승인 모드 — 자동체결 대신 제안+버튼
+                proposed = await _agent_propose_buy(redis, sender, row, risk, fx, now,
+                                                    (d.get("reason") or "").strip(), mv)
+                if proposed:
+                    acted.append(f"🟡 매수 제안 {row.get('name')}({code}) — {reason} "
+                                 "→ 텔레그램 승인 대기")
+                    touched.append((code, row.get("name")))
+                    buys_done += 1                   # 제안도 슬롯 소진(제안 폭주 방지)
                 continue
             ok, msg, note = await _agent_buy(redis, kis, row, risk, fx, now)
             if ok is None:

@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     agent_live_enabled: bool = False         # true라야 실계좌 주문(기본 모의 전용 잠금)
     agent_max_buys: int = 3                  # 1회 실행당 신규 매수 상한
     agent_check_interval_sec: float = 300.0  # 스케줄 확인 주기(초)
+    # 승인 모드: true면 에이전트가 매수를 '자동 체결'하지 않고, 분석 근거+진입/손절/목표를
+    # 담은 '매수 제안 알림 + 승인 버튼'을 보낸다. 사용자가 ✅ 승인해야 체결(손절 등록).
+    # 매도는 방어라 종전대로 자동. 완전위임이 부담스러운 사용자용(사람이 최종 방아쇠).
+    agent_approval_mode: bool = False
     # 플랜 매수 후보를 국내·미국 각각 최소 확보(한쪽 슬롯이 빈손이 안 되게)
     plan_kr_buys: int = 2                     # 플랜에 담을 국내 후보 수(스윙 상위)
     plan_us_buys: int = 2                     # 플랜에 담을 미국 후보 수(스윙 상위)
