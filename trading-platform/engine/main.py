@@ -56,6 +56,7 @@ from shared.redis_keys import (
     ENGINE_ALERTS_KEY,
     ENGINE_TRAIL_KEY,
     ENGINE_AUTO_KEY,
+    ENGINE_AGENT_SEEN_KEY,
     ENGINE_PILLAR_KEY,
     ENGINE_MANAGED_STOP_KEY,
     ENGINE_BUYLIST_KEY,
@@ -262,6 +263,25 @@ async def _auto_cooldown(redis: aioredis.Redis, code: str, now: float) -> bool:
         return False
     cd = settings.auto_trade_cooldown_sec if rec.get("ok") else settings.auto_retry_sec
     return now - (rec.get("ts") or 0) < cd
+
+
+async def _agent_seen_recently(redis: aioredis.Redis, code: str, now: float) -> bool:
+    """에이전트가 최근(propose_cooldown 이내) 판정/제안한 종목인가 — 중복 Claude 호출 억제.
+
+    승인 제안은 체결 전이라 매수 쿨다운(ENGINE_AUTO_KEY)이 안 잡혀 매 슬롯 재제안될
+    수 있다. 제안 시 이 표식을 남겨 같은 종목을 반복 제안(=반복 decide 호출)하지 않는다.
+    """
+    raw = await redis.hget(ENGINE_AGENT_SEEN_KEY, code)
+    if not raw:
+        return False
+    try:
+        return now - float(raw) < settings.agent_propose_cooldown_sec
+    except (TypeError, ValueError):
+        return False
+
+
+async def _agent_mark_seen(redis: aioredis.Redis, code: str, now: float) -> None:
+    await redis.hset(ENGINE_AGENT_SEEN_KEY, code, str(now))
 
 
 async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
@@ -1399,9 +1419,22 @@ async def _agent_run(redis: aioredis.Redis, kis,
     buys = [b for b in (plan.get("buys") or []) if market_of(b.get("code", "")) in markets]
     sells = [s for s in (plan.get("sells") or []) if market_of(s.get("code", "")) in markets]
     holdings = [p for p in positions if market_of(p.get("symbol", "")) in markets]
-    if not (buys or holdings):
-        logger.info("[agent/%s] %s 시장 후보·보유 없음 — 스킵", slot, markets)
+    # 토큰 절약: Claude 호출 전에 '실행 가능한' 후보만 남긴다 — 이미 보유/쿨다운/최근
+    # 판정한 종목은 어차피 못 사거나 중복이라, 프롬프트에서 빼고(토큰↓) 살 것도 팔 것도
+    # 없으면 decide() 호출 자체를 생략(호출 1회 절약). 판정 대상 없는 슬롯은 조용히 넘긴다.
+    now0 = time.time()
+    held0 = {p.get("symbol") for p in holdings if p.get("symbol")}
+    actionable = []
+    for b in buys:
+        c = b.get("code", "")
+        if (c and c not in held0 and not await _auto_cooldown(redis, c, now0)
+                and not await _agent_seen_recently(redis, c, now0)):
+            actionable.append(b)
+    if not (actionable or holdings):
+        logger.info("[agent/%s] %s 실행 가능한 후보 0·보유 0 — Claude 호출 생략(토큰 절약)",
+                    slot, markets)
         return
+    buys = actionable
     plan = {**plan, "buys": buys, "sells": sells}
     asset, _cash = await _trade_assets(redis, kis)
     ctx = build_context(plan, holdings, risk, asset, risk.get("cash_pct"),
@@ -1437,6 +1470,7 @@ async def _agent_run(redis: aioredis.Redis, kis,
                 proposed = await _agent_propose_buy(redis, sender, row, risk, fx, now,
                                                     (d.get("reason") or "").strip(), mv)
                 if proposed:
+                    await _agent_mark_seen(redis, code, now)   # 반복 제안·중복 호출 억제
                     acted.append(f"🟡 매수 제안 {row.get('name')}({code}) — {reason} "
                                  "→ 텔레그램 승인 대기")
                     touched.append((code, row.get("name")))
