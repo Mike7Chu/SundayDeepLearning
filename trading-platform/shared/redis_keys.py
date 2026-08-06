@@ -59,6 +59,8 @@ ENGINE_PILLAR_KEY = "engine:pillar"
 ENGINE_MANAGED_STOP_KEY = "engine:managed_stops"
 # 에이전트가 최근 판정/제안한 종목(hash{code: ts}) — 토큰 절약용 중복 호출 억제.
 ENGINE_AGENT_SEEN_KEY = "engine:agent_seen"
+# 빛의기둥 1차필터 통과 → 에이전트 Claude 검토 대기 종목(set{code}).
+ENGINE_PILLAR_REVIEW_KEY = "engine:pillar_review"
 # 오늘의 매매 플랜(스윙 설문 맞춤). json{style, buys:[...3], sells:[...3], ts}
 ENGINE_PLAN_KEY = "engine:plan"
 # 시황 국면(전략 라우터). json{regime,label,posture,strategies:[..],reasons,metrics,ts}

@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # 토큰 절약: 같은 후보를 이 기간 안엔 다시 제안/판정하지 않는다(중복 Claude 호출 방지).
     # 실행 가능한 후보(미보유·쿨다운밖·미제안)가 없고 보유도 없으면 decide() 자체를 생략.
     agent_propose_cooldown_sec: float = 21600.0   # 제안 재호출 억제(기본 6시간)
+    # 빛의기둥 → 에이전트 검토: 빛의기둥이 뜨면 싼 1차 필터(추세·거래대금·중복)를 거쳐
+    # 통과분만 Claude가 검토 → 매수 합당 판정이면 승인 제안 알림. 필터로 대부분 걸러
+    # Claude 호출은 소수만(토큰 절약). 기본 OFF(옵트인).
+    pillar_agent_review: bool = False
+    pillar_review_min_eok: float = 50.0           # 이 거래대금(억) 이상만 Claude 검토
+    pillar_review_max_per_cycle: int = 3          # 사이클당 Claude 검토 상한(토큰 바운드)
     # 플랜 매수 후보를 국내·미국 각각 최소 확보(한쪽 슬롯이 빈손이 안 되게)
     plan_kr_buys: int = 2                     # 플랜에 담을 국내 후보 수(스윙 상위)
     plan_us_buys: int = 2                     # 플랜에 담을 미국 후보 수(스윙 상위)

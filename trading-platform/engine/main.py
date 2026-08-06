@@ -21,7 +21,12 @@ import redis.asyncio as aioredis
 
 from api.services.stock_radar import supply_demand
 from api.services.stock_score import compute_score
-from api.services.stock_signal import light_pillar, pillar_guide, trade_levels
+from api.services.stock_signal import (
+    candle_trading_value,
+    light_pillar,
+    pillar_guide,
+    trade_levels,
+)
 from api.services.stock_value import load_quotes
 from collector.stock.kis import effective_watchlist, is_derivative_etf, is_kr_code
 from collector.stock.kis_ws import kr_movers, pick_subs
@@ -58,6 +63,7 @@ from shared.redis_keys import (
     ENGINE_AUTO_KEY,
     ENGINE_AGENT_SEEN_KEY,
     ENGINE_PILLAR_KEY,
+    ENGINE_PILLAR_REVIEW_KEY,
     ENGINE_MANAGED_STOP_KEY,
     ENGINE_BUYLIST_KEY,
     ENGINE_PEAK_KEY,
@@ -720,6 +726,7 @@ async def _cycle_loop(redis: aioredis.Redis, sender: TelegramSender,
             await _update_regime(redis, toss)
             await _holdings_alerts(redis, sender)
             await _pillar_scan(redis, sender)
+            await _pillar_review_consume(redis, toss, kis, sender)
             await _pipeline(redis, sender, risk, toss, kis)
             await _swing_plan(redis, toss, risk, kis, sender)
             await _forward_log(redis)
@@ -1264,7 +1271,97 @@ async def _pillar_scan(redis: aioredis.Redis, sender: TelegramSender) -> None:
             "고가 마감 장대양봉\n"
             + (guide + "\n" if guide else "")
             + "※ 테마 동반 여부 확인 · 판단 보조")
+        if settings.pillar_agent_review and lp["value_eok"] >= settings.pillar_review_min_eok:
+            await redis.sadd(ENGINE_PILLAR_REVIEW_KEY, code)   # 1차필터 통과 → Claude 검토 큐
         logger.info("[pillar] %s %.0f억 x%.1f", code, lp["value_eok"], lp["surge_x"])
+
+
+async def _pillar_review_consume(redis: aioredis.Redis, toss: TossClient, kis,
+                                 sender: TelegramSender) -> None:
+    """빛의기둥 1차필터 통과분을 에이전트(Claude)가 검토 → 합당하면 승인 제안.
+
+    토큰 절약 흐름: 빛의기둥 다수 중 거래대금 문턱을 넘긴 것만 큐에 쌓이고(1차 필터),
+    여기서 보유·쿨다운·최근검토·추세를 다시 걸러 남은 소수만 Claude에 넣는다. 사이클당
+    상한(pillar_review_max_per_cycle)으로 호출 수를 묶는다. BUY 판정만 승인 제안 발송.
+    """
+    if not settings.pillar_agent_review:
+        return
+    popped = await redis.spop(ENGINE_PILLAR_REVIEW_KEY, settings.pillar_review_max_per_cycle)
+    codes = [c for c in (popped if isinstance(popped, (list, set)) else [popped]) if c]
+    if not codes:
+        return
+    risk = await _json_get(redis, ENGINE_RISK_KEY)
+    regime = await _json_get(redis, ENGINE_REGIME_KEY)
+    if regime.get("regime") == "risk_off":            # 위험회피 국면 — 신규 검토 보류
+        logger.info("[pillar/검토] 위험회피 국면 — 검토 보류(%d건)", len(codes))
+        return
+    asset, _cash = await _trade_assets(redis, kis)
+    fx = await _fx_rate(redis)
+    now = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            held = {p.get("symbol") for p in await kis.fetch_positions(c) if p.get("symbol")}
+    except Exception:
+        held = set()
+    from research.analyst import Analyst
+    analyst = Analyst()
+    async with httpx.AsyncClient(timeout=15) as client:
+        for code in codes:
+            if not code or not code.isdigit():
+                continue
+            if (code in held or await _auto_cooldown(redis, code, now)
+                    or await _agent_seen_recently(redis, code, now)):
+                continue                              # 보유·쿨다운·최근검토 → Claude 건너뜀
+            candles: list = []
+            raw_c = await redis.get(stock_ohlcv_key(code))
+            if raw_c:
+                try:
+                    candles = json.loads(raw_c)
+                except (json.JSONDecodeError, TypeError):
+                    candles = []
+            if len(candles) < 60 and toss.enabled:    # 일봉 없으면 온디맨드(6h 캐시)
+                try:
+                    candles = await toss.fetch_daily_history(client, code)
+                    if candles:
+                        await redis.set(stock_ohlcv_key(code),
+                                        json.dumps(candles, ensure_ascii=False), ex=21600)
+                except Exception:
+                    continue
+            closes = [c["close"] for c in candles
+                      if isinstance(c, dict) and c.get("close")]
+            live = await _live_price(redis, code) or (closes[-1] if closes else None)
+            lv = trade_levels(closes, live, kr=True)
+            if not lv or not lv.get("trend_ok"):       # 하락추세 → 검토 안 함(1차 필터)
+                await _agent_mark_seen(redis, code, now)
+                continue
+            raw_q = await redis.hget(STOCK_QUOTE_KEY, code)
+            q = json.loads(raw_q) if raw_q else {}
+            val = candle_trading_value(candles[-1]) if candles else None
+            row = {"code": code, "name": q.get("name") or code, "price": live,
+                   "currency": "KRW", "entry": lv["entry"], "stop": lv["stop"],
+                   "target": lv["target"], "swing": round(val) if val else None,
+                   "strategy_label": "빛의기둥 수급",
+                   "reasons": ["빛의기둥 수급포착"
+                               + (f"·거래대금 {val:,.0f}억" if val else ""),
+                               "고가 마감 장대양봉·평소 대비 급증"]}
+            plan = {"buys": [row], "sells": [], "regime": regime, "style": "빛의기둥 검토"}
+            ctx = build_context(plan, [], risk, asset, risk.get("cash_pct"),
+                                regime=regime)
+            try:
+                result = await analyst.decide(ctx)
+            except Exception as exc:
+                logger.warning("[pillar/검토] %s decide 실패: %s", code, exc)
+                continue
+            await _agent_mark_seen(redis, code, now)   # 검토 완료 → 재검토 억제(토큰 절약)
+            dec = next((d for d in result.get("decisions", [])
+                        if d.get("code") == code), None)
+            if dec and dec.get("action") == "BUY":
+                await _agent_propose_buy(redis, sender, row, risk, fx, now,
+                                         (dec.get("reason") or "").strip(),
+                                         result.get("market_view", ""))
+                logger.info("[pillar/검토] %s 에이전트 BUY — 승인 제안 발송", code)
+            else:
+                logger.info("[pillar/검토] %s 에이전트 관망(제안 없음)", code)
 
 
 # ── 클로드 스윙 결정 에이전트(완전 위임 · 게이트는 집행 안전벽) ──────────────

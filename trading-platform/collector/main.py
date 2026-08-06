@@ -38,6 +38,7 @@ from shared.redis_keys import (
     DART_CORP_KEY,
     DAY_POS_KEY,
     ENGINE_PILLAR_KEY,
+    ENGINE_PILLAR_REVIEW_KEY,
     FX_USDKRW_KEY,
     MARKET_INDICATORS_KEY,
     MARKET_RANKINGS_KEY,
@@ -778,6 +779,8 @@ async def _pillar_confirm_alert(redis: aioredis.Redis, toss: TossClient,
             "고가 마감형 장대양봉\n"
             + (guide + "\n" if guide else "")
             + "※ 테마 동반 여부 확인 · 판단 보조")
+        if settings.pillar_agent_review and value_eok >= settings.pillar_review_min_eok:
+            await redis.sadd(ENGINE_PILLAR_REVIEW_KEY, code)   # 1차필터 통과 → Claude 검토 큐
         logger.info("[pillar/market] %s %.0f억 x%.1f", code, value_eok, value_eok / avg2)
     except Exception as exc:
         logger.debug("[pillar %s] 확정 실패: %s", code, exc)
