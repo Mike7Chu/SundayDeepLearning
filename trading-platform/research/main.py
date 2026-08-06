@@ -54,7 +54,7 @@ async def run_one(redis: aioredis.Redis, analyst: Analyst, sender: TelegramSende
     report = await analyst.analyze(data)
     await redis.hset(RESEARCH_KEY, code, json.dumps(report, ensure_ascii=False))
     if report.get("enabled"):
-        await sender.send_long(brief(report))   # 전문 발송(4096자 한도 분할)
+        await sender.send_long(brief(report), md=True)   # 전문 발송(마크다운 렌더)
     return report
 
 
@@ -117,12 +117,16 @@ async def run() -> None:
             logger.warning("[DATA_ERROR] %s 역방향 검증 실패: %s", code, exc)
 
     async def story_code(code: str) -> None:
-        """기업 스토리(다년치 공시 diff) 요청 처리 → research:story 저장."""
+        """기업 스토리(다년치 공시 diff) 요청 처리 → research:story 저장 + 텔레그램."""
         try:
             data = await gather(redis, code) or StockData(code=code)
             result = await analyst.analyze_story(data)
             await redis.hset(RESEARCH_STORY_KEY, code,
                              json.dumps(result, ensure_ascii=False))
+            body = (result.get("report") or "").strip()
+            if result.get("enabled") and body and not body.startswith("⚠️"):
+                await sender.send_long(                       # 전문 발송(마크다운 렌더)
+                    f"📖 기업 스토리 {data.name or ''}({code})\n{body}", md=True)
             logger.info("[story] %s 스토리 분석 완료", code)
         except Exception as exc:
             logger.warning("[DATA_ERROR] %s 스토리 분석 실패: %s", code, exc)
@@ -146,7 +150,7 @@ async def run() -> None:
             result = await analyst.analyze_coach(block)
             await redis.set(COACH_KEY, json.dumps(result, ensure_ascii=False))
             if result.get("enabled") and not result["report"].startswith("⚠️"):
-                await sender.send_long(result["report"])   # 전문 발송(잘림 없이 분할)
+                await sender.send_long(result["report"], md=True)   # 마크다운 렌더
             else:
                 await sender.send(("🧭 아침 점검 실패 — 원인:\n"
                                    + result.get("report", "")[:500]

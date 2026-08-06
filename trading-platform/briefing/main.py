@@ -131,7 +131,7 @@ async def run_once(redis: aioredis.Redis, sender: TelegramSender) -> bool:
                         market=ex["market"], plan=ex["plan"], risk=ex["risk"],
                         agent=ex["agent"], stats=ex["stats"], us=ex["us"],
                         radar=ex["radar"])
-    await sender.send_long(msg, buttons=dashboard_buttons())   # 길이 안전 + 열기 버튼
+    await sender.send_long(msg, buttons=dashboard_buttons(), md=True)  # 길이 안전+렌더+버튼
     logger.info("브리핑 발송(telegram=%s, %d종목)", sender.enabled, len(quotes))
     return True
 

@@ -200,7 +200,7 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
     elif cmd == "note_show":
         note = await redis.get(COACH_NOTE_KEY)
         if note:
-            await sender.send_long(f"📎 저장된 리서치 노트({len(note):,}자):\n{note}")
+            await sender.send_long(f"📎 저장된 리서치 노트({len(note):,}자):\n{note}", md=True)
         else:
             await sender.send("저장된 리서치 노트가 없어요 — '리포트 <본문>'으로 보내주세요.")
     elif cmd == "note_clear":

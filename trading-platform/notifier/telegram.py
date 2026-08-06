@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 import httpx
 
@@ -18,6 +19,89 @@ def esc(s) -> str:
     """HTML 파스모드용 이스케이프(& < > 만 — 텔레그램 HTML 규격). None→''."""
     return (str(s) if s is not None else "").replace("&", "&amp;") \
         .replace("<", "&lt;").replace(">", "&gt;")
+
+
+# ── 마크다운 → 텔레그램 HTML(부분집합) ───────────────────────────────
+# 텔레그램 HTML은 <b><i><u><s><code><pre><a><blockquote>만 지원 — 표·헤딩은
+# 없다. AI 리포트(리서치·스토리·코치)가 마크다운으로 오면 평문으론 지저분하니
+# 지원 태그로 변환하고, 표는 '키: 값'/'· 구분' 줄로, 헤딩은 굵게 풀어낸다.
+_MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*|__(.+?)__")
+_MD_CODE = re.compile(r"`([^`]+)`")
+_HR = re.compile(r"^\s*[-*_]{3,}\s*$")
+_HEAD = re.compile(r"^\s*(#{1,6})\s+(.*\S)\s*$")
+_BULLET = re.compile(r"^\s*[-*·•]\s+(.*)$")
+_SEPCELL = re.compile(r"^:?-{2,}:?$")
+_SECTION = re.compile(r"^\[[^\]]{1,40}\]$")     # 브리핑 등 '[제목]' 한 줄 → 굵게
+
+
+def _inline_md(escaped: str) -> str:
+    """이스케이프된 문자열에 인라인 마크다운(굵게·코드·링크)만 태그로 치환."""
+    escaped = _MD_LINK.sub(
+        lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>', escaped)
+    escaped = _MD_BOLD.sub(lambda m: f"<b>{m.group(1) or m.group(2)}</b>", escaped)
+    escaped = _MD_CODE.sub(r"<code>\1</code>", escaped)
+    return escaped
+
+
+def _tg_table(block: list[str]) -> list[str]:
+    """마크다운 표 블록 → 읽기 좋은 줄들. 2열이면 '키: 값', 그 이상은 '· 구분'."""
+    rows: list[list[str]] = []
+    for ln in block:
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        if cells and all(c == "" or _SEPCELL.match(c) for c in cells):
+            continue                                  # 구분선(---|---) 행은 건너뜀
+        rows.append(cells)
+    if not rows:
+        return []
+    header, body = rows[0], rows[1:]
+    ncol = max(len(r) for r in rows)
+    out = ["<b>" + " · ".join(_inline_md(esc(c)) for c in header) + "</b>"]
+    for r in body:
+        if ncol == 2:                                 # 2열 표 → '· 키: 값'
+            k = _inline_md(esc(r[0])) if r else ""
+            v = _inline_md(esc(r[1])) if len(r) > 1 else ""
+            out.append(f"• <b>{k}</b>: {v}")
+        else:
+            out.append("· " + " · ".join(_inline_md(esc(c)) for c in r))
+    return out
+
+
+def md_to_tg(text: str) -> str:
+    """마크다운 텍스트 → 텔레그램 HTML(parse_mode=HTML). 줄 경계 기준(분할 안전).
+
+    헤딩→굵게, 표→키:값/구분 줄, 불릿→•, 수평선→─, **굵게**/`코드`/[링크](url)
+    변환. 결과는 이미 이스케이프됨 — send(html=True)로 그대로 발송.
+    """
+    lines = (text or "").split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        if raw.lstrip().startswith("|") and "|" in raw.strip()[1:]:
+            block = []
+            while i < len(lines) and lines[i].lstrip().startswith("|"):
+                block.append(lines[i]); i += 1
+            out.extend(_tg_table(block))
+            continue
+        i += 1
+        stripped = raw.strip()
+        if not stripped:
+            out.append("")
+        elif _HR.match(raw):
+            out.append("──────────")
+        elif _HEAD.match(raw):
+            out.append("<b>" + _inline_md(esc(_HEAD.match(raw).group(2))) + "</b>")
+        elif _SECTION.match(stripped):
+            out.append("<b>" + esc(stripped) + "</b>")
+        elif stripped.startswith(">"):
+            out.append("<blockquote>"
+                       + _inline_md(esc(stripped[1:].strip())) + "</blockquote>")
+        elif _BULLET.match(raw):
+            out.append("• " + _inline_md(esc(_BULLET.match(raw).group(1))))
+        else:
+            out.append(_inline_md(esc(raw.rstrip())))
+    return "\n".join(out)
 
 
 def dashboard_buttons(path: str = "", label: str = "📊 대시보드 열기"):
@@ -160,11 +244,13 @@ class TelegramSender:
             pass
 
     async def send_long(self, text: str, limit: int = _CHUNK, *,
-                        buttons=None) -> bool:
+                        buttons=None, md: bool = False) -> bool:
         """4096자 한도를 넘는 리포트를 잘리지 않게 여러 메시지로 나눠 발송.
 
         2개 이상으로 나뉘면 (i/n) 머리표를 붙이고, 연속 발송 레이트리밋을
         피하려 조각 사이 잠깐 대기. buttons는 마지막 조각에만 붙인다.
+        md=True면 각 조각을 마크다운→텔레그램 HTML로 변환해 예쁘게 렌더한다
+        (분할은 원문 줄 경계 기준이라 태그가 조각을 가로지르지 않음).
         """
         parts = split_message(text, limit)
         if not parts:
@@ -173,7 +259,9 @@ class TelegramSender:
         ok = True
         for i, p in enumerate(parts, 1):
             head = f"({i}/{n})\n" if n > 1 else ""
-            ok = await self.send(head + p, buttons=buttons if i == n else None) and ok
+            body = md_to_tg(p) if md else p
+            ok = await self.send(head + body, buttons=buttons if i == n else None,
+                                 html=md) and ok
             if i < n:
                 await asyncio.sleep(0.5)
         return ok
