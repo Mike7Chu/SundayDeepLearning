@@ -108,9 +108,9 @@ async def research_story(code: str, force: bool = False) -> dict:
         report = await analyst.analyze_story(data)
         await redis.hset(RESEARCH_STORY_KEY, code, json.dumps(report, ensure_ascii=False))
         return report
-    if analyst.mode is None:
-        return {"enabled": False, "code": code,
-                "report": "AI 리서치 비활성 — 구독 CLI(RESEARCH_USE_CLI) 또는 API 키 필요."}
+    # 구독 CLI는 컨테이너(claude 바이너리 없음 → mode=None)에선 못 돈다 → 호스트 큐로.
+    # research_run과 동일 규율: 컨테이너 mode를 신뢰하지 말고 호스트 research가 처리하게 위임.
+    # (여기서 mode is None으로 막으면 CLI 사용자는 스토리를 영영 못 씀 — 실제 버그였음.)
     await redis.sadd(RESEARCH_STORY_REQ_KEY, code)
     return {"queued": True, "code": code,
             "report": "스토리 분석 요청됨(다년치 공시 비교 — 시간이 좀 걸립니다). 잠시 후 새로고침.",
