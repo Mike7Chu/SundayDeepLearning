@@ -825,6 +825,9 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
     if kis is not None and sender is not None:
         us_buys = [b for b in buys if b.get("currency") == "USD"]
         await _auto_buy_us(redis, kis, sender, risk, held, us_buys)
+        # 국장 스윙 자동매수(옵트인) — 미장 상시 집행의 국내판. 하루 1발 에이전트 공백 메움.
+        kr_buys = [b for b in buys if b.get("currency") != "USD"]
+        await _auto_buy_kr(redis, toss, kis, sender, risk, held, kr_buys)
 
 
 async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
@@ -896,6 +899,72 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
                           f"\n{b.get('name', '')}({code}) {qty:g}주 @${order_price:,.2f} "
                           f"(스윙 {b.get('swing')}점 · {note})\n{msg}\n"
                           f"손절 ${b.get('stop') or 0:,.2f} · 목표 ${b.get('target') or 0:,.2f}")
+
+
+async def _auto_buy_kr(redis: aioredis.Redis, toss: TossClient, kis,
+                       sender: TelegramSender, risk: dict, held: set,
+                       kr_buys: list[dict]) -> None:
+    """국장 스윙 자동매수(옵트인) — 스윙 상위 국내 후보를 매 플랜 사이클 눌림목에 주문.
+
+    미장 _auto_buy_us의 국내판. 국내 스윙 후보는 하루 1회 에이전트(AGENT_TIMES)에만
+    의존해, 그 시각을 놓치면 종일 매수 시도조차 없던 공백을 메운다. 2단계 가치
+    자동매수(_auto_buy)와는 후보군이 달라 별개 — 같은 종목은 쿨다운(7일)이 중복 차단.
+    조건: AUTO_TRADE_ENABLED + KR_SWING_AUTO_ENABLED + BUY_LOCK 아님 + 미보유 +
+    쿨다운 밖 + 수급 분산 아님 + 눌림목(추격 밴드 내). place_gated_order가 재검증.
+    """
+    if not (settings.auto_trade_enabled and settings.kr_swing_auto_enabled):
+        return
+    if risk.get("buy_lock") and not _paper_auto():   # 모의는 실계좌 잠금 우회
+        return
+    now = time.time()
+    max_order = settings.kis_max_order_krw
+    exp = await _exposure_frac(redis)                # 국면 비중 오버레이(매수 사이징 곱)
+    for b in kr_buys[:2]:                            # 상위 2개만(과도한 자동주문 억제)
+        code, entry = b["code"], b.get("entry")
+        if not entry or not code.isdigit() or code in held:
+            continue
+        if await _auto_cooldown(redis, code, now):   # 성공=7일 잠금 / 실패=짧게 재시도
+            continue
+        # 수급 확인 게이트: 외인·기관이 '분산(순매도)' 중이면 자동매수 보류(_auto_buy와 동일).
+        if toss.enabled:
+            try:
+                async with httpx.AsyncClient(timeout=12) as sdc:
+                    inv = await toss.fetch_investor_trading(sdc, code, count=5)
+                sd = supply_demand(inv)
+                if (sd.get("net_eok") or 0) <= -settings.auto_supply_block_eok:
+                    logger.info("[auto/kis-kr] %s 수급 분산(%.0f억) — 매수 보류", code,
+                                sd.get("net_eok") or 0)
+                    continue
+            except Exception:
+                pass                             # 수급 조회 실패는 게이트 통과(막지 않음)
+        # 하이브리드 진입 — 현재가가 추천가 대비 밴드 초과면 매수 안 함(눌림목 대기).
+        live = await _live_price(redis, code) or b.get("price")
+        dec = entry_decision(entry, live, settings.entry_chase_band_pct)
+        if dec is None:
+            logger.info("[auto/kis-kr] %s 과확장(현재 %s > 추천 %.0f) — 눌림목 대기",
+                        code, f"{live:.0f}" if live else "?", entry)
+            continue                              # 쿨다운 안 걸어 다음에 눌리면 매수
+        order_price, note = dec
+        budget = min(risk.get("per_stock_cap") or max_order, max_order) * exp
+        qty = int(budget // order_price)
+        qty = await _cap_by_cash(redis, code, qty, order_price)  # 원화 예수금 상한
+        if qty < 1:
+            continue
+        prev_failed = await _prev_failed(redis, code)
+        ok, msg = await place_gated_order(redis, side="BUY", code=code,
+                                          qty=qty, price=order_price, broker="kis",
+                                          kis=kis, toss=toss)
+        await redis.hset(ENGINE_AUTO_KEY, code, json.dumps(
+            {"ts": now, "ok": ok, "qty": qty, "price": order_price, "broker": "kis-kr"},
+            ensure_ascii=False))
+        logger.info("[auto/kis-kr] %s BUY x%d @%.0f → %s | %s", code, qty,
+                    order_price, ok, msg)
+        if not (ok or not prev_failed):           # 반복 거부는 조용히(첫 거부·성공만 알림)
+            continue
+        await sender.send(("🇰🇷 국장 스윙 자동매수 " + ("접수 ✅" if ok else "거부 🚫")) +
+                          f"\n{b.get('name', '')}({code}) {qty}주 @{order_price:,.0f}원 "
+                          f"(스윙 {b.get('swing')}점 · {b.get('strategy_label') or ''} · {note})\n{msg}\n"
+                          f"손절 {b.get('stop') or 0:,.0f} · 목표 {b.get('target') or 0:,.0f}")
 
 
 async def _day_trade_loop(redis: aioredis.Redis, kis, toss: TossClient,

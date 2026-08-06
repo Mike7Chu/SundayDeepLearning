@@ -133,6 +133,10 @@ class Settings(BaseSettings):
     kis_max_order_krw: float = 100_000.0        # 한투 주문당 안전 상한
     # 미장 자동매매(KIS 해외주식 주문 — 모의 지원): 기본 잠금. 국내(가치)와 별개 전략(모멘텀).
     us_auto_enabled: bool = False
+    # 국장 스윙 자동매매(옵트인): 스윙 플랜 국내 후보를 매 사이클 눌림목에 자동매수.
+    # 미장은 _auto_buy_us가 상시 집행하는데 국내 스윙은 하루 1회 에이전트(AGENT_TIMES)에만
+    # 의존했던 공백을 메운다. 2단계 가치 자동매수(_auto_buy)와 별개 — 쿨다운이 중복 매수 방지.
+    kr_swing_auto_enabled: bool = False
     # 거래소 오분류 교정 맵(모의 테스트에서 거부되면 .env로 추가): "PLTR:NASD,SNOW:NYSE"
     kis_us_exchange_map: str = ""
 
