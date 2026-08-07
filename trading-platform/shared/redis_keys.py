@@ -13,6 +13,9 @@ RESEARCH_KEY = "research:reports"
 RESEARCH_REQ_KEY = "research:requests"
 # 호스트 research 생존 신호(str epoch, TTL 180s) — 점검 요청 시 구동 여부 즉시 판별
 RESEARCH_HB_KEY = "research:heartbeat"
+# 단일 활성 락 — research 프로세스가 여럿(도커 컨테이너 + 호스트 래퍼)이어도
+# 락을 쥔 하나만 큐 처리·발송(중복 텔레그램 방지). value=프로세스 토큰, TTL 갱신.
+RESEARCH_LOCK_KEY = "research:active_lock"
 
 # 관심종목 오버라이드(대시보드 편집). value=json[{code,name}]. 없으면 config/stocks.yaml.
 WATCHLIST_KEY = "stock:watchlist"

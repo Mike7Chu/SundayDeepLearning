@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 
 import redis.asyncio as aioredis
 
@@ -24,6 +25,7 @@ from shared.redis_keys import (
     RESEARCH_INV_KEY,
     RESEARCH_INV_REQ_KEY,
     RESEARCH_KEY,
+    RESEARCH_LOCK_KEY,
     RESEARCH_REQ_KEY,
     RESEARCH_STORY_KEY,
     RESEARCH_STORY_REQ_KEY,
@@ -58,10 +60,29 @@ async def run_one(redis: aioredis.Redis, analyst: Analyst, sender: TelegramSende
     return report
 
 
+_LOCK_TTL = 900   # 활성 락 수명(초) — 단일 Claude 호출(수 분)을 넉넉히 덮는다
+
+
+async def acquire_active(redis: aioredis.Redis, token: str, ttl: int = _LOCK_TTL) -> bool:
+    """단일 활성 락 획득/갱신 — 락이 비었거나 내가 쥔 것이면 True(발송 담당).
+
+    도커 research 컨테이너 + 호스트 래퍼가 동시에 떠 있어도 락을 쥔 하나만
+    큐 처리·발송하므로 텔레그램이 2·3중으로 오지 않는다. 홀더가 죽으면 TTL 만료
+    후 대기 프로세스가 자동 승계.
+    """
+    if await redis.set(RESEARCH_LOCK_KEY, token, nx=True, ex=ttl):
+        return True
+    if await redis.get(RESEARCH_LOCK_KEY) == token:
+        await redis.expire(RESEARCH_LOCK_KEY, ttl)   # 내 락 갱신
+        return True
+    return False
+
+
 async def run() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     analyst = Analyst()
     sender = TelegramSender()
+    token = uuid.uuid4().hex          # 이 프로세스의 활성 락 토큰
     if not analyst.enabled:
         logger.info(
             "리서치 비활성 — 이 컨테이너는 호스트의 Claude Code 구독 로그인을 볼 수 없습니다. "
@@ -172,9 +193,12 @@ async def run() -> None:
             return 0.0
 
     async def heartbeat() -> None:
-        """생존 신호(TTL 180s) — 텔레그램 '점검'이 호스트 구동 여부를 즉시 판별."""
+        """생존 신호(TTL 180s) — 텔레그램 '점검'이 호스트 구동 여부를 즉시 판별.
+        긴 정기 패스(종목 사이마다 호출) 중에도 활성 락을 갱신해 락 만료를 막는다."""
         try:
             await redis.set(RESEARCH_HB_KEY, str(time.time()), ex=180)
+            if await redis.get(RESEARCH_LOCK_KEY) == token:
+                await redis.expire(RESEARCH_LOCK_KEY, _LOCK_TTL)
         except Exception:
             pass
 
@@ -184,8 +208,21 @@ async def run() -> None:
             await run_coach("요청")
 
     last_full = 0.0
+    waiting_logged = False
     try:
         while True:
+            # 단일 활성 락: 락을 못 쥐면(다른 research가 활성) 큐 처리·발송을 하지
+            # 않고 대기 — 도커+호스트 중복 실행 시 텔레그램 2·3중 발송을 원천 차단.
+            if not await acquire_active(redis, token):
+                if not waiting_logged:
+                    logger.warning("다른 research가 활성(락 보유) — 이 프로세스는 대기(발송 안 함). "
+                                   "도커 컨테이너+호스트가 함께 떠 있어도 하나만 발송합니다.")
+                    waiting_logged = True
+                await asyncio.sleep(15)
+                continue
+            if waiting_logged:
+                logger.info("활성 락 획득 — 이 프로세스가 발송 담당")
+                waiting_logged = False
             # 사이클 전체를 방어 — Redis 순단·일시 오류가 프로세스를 죽여
             # '아침 점검 무소식'이 되는 일을 막는다(다음 사이클 재시도).
             try:
@@ -234,6 +271,11 @@ async def run() -> None:
                 await asyncio.sleep(30)
             await asyncio.sleep(15)   # 요청 큐 폴링 주기
     finally:
+        try:                          # 종료 시 내 락 해제(대기 프로세스 즉시 승계)
+            if await redis.get(RESEARCH_LOCK_KEY) == token:
+                await redis.delete(RESEARCH_LOCK_KEY)
+        except Exception:
+            pass
         await redis.aclose()
 
 
