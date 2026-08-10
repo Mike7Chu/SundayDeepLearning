@@ -271,6 +271,19 @@ async def _auto_cooldown(redis: aioredis.Redis, code: str, now: float) -> bool:
     return now - (rec.get("ts") or 0) < cd
 
 
+async def _chase_band(redis: aioredis.Redis) -> float:
+    """진입 추격 허용 밴드(%) — 강세추세(공격) 국면만 넓혀 주도주 강세 진입 허용.
+
+    강세장에선 주도주가 SMA20(추천 눌림가)까지 잘 안 내려와 기본 4% 밴드론 늘
+    '과확장 대기'로 빠져 매수를 못 한다. bull_trend일 때만 밴드를 넓힌다(다른 국면은
+    추격 손실이 커 보수적 유지).
+    """
+    reg = await _json_get(redis, ENGINE_REGIME_KEY)
+    if reg.get("regime") == "bull_trend":
+        return settings.entry_chase_band_bull_pct
+    return settings.entry_chase_band_pct
+
+
 async def _agent_seen_recently(redis: aioredis.Redis, code: str, now: float) -> bool:
     """에이전트가 최근(propose_cooldown 이내) 판정/제안한 종목인가 — 중복 Claude 호출 억제.
 
@@ -334,7 +347,7 @@ async def _auto_buy(redis: aioredis.Redis, toss: TossClient, kis,
                 pass                             # 수급 조회 실패는 게이트 통과(막지 않음)
         # 하이브리드 진입 — 현재가가 추천가 대비 밴드 초과면 매수 안 함(눌림목 대기·유령주문 방지).
         live = await _live_price(redis, code) or r.get("price")
-        dec = entry_decision(entry, live, settings.entry_chase_band_pct)
+        dec = entry_decision(entry, live, await _chase_band(redis))
         if dec is None:
             logger.info("[auto/%s] %s 과확장(현재 %s > 추천 %.0f) — 눌림목 대기",
                         broker, code, f"{live:.0f}" if live else "?", entry)
@@ -932,7 +945,7 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
         if await _auto_cooldown(redis, code, now):   # 성공=7일 잠금 / 실패=짧게 재시도
             continue
         # 하이브리드 진입 — 현재가가 추천가 대비 밴드 초과면 매수 안 함(눌림목 대기).
-        dec = entry_decision(entry, b.get("price"), settings.entry_chase_band_pct)
+        dec = entry_decision(entry, b.get("price"), await _chase_band(redis))
         if dec is None:
             logger.info("[auto/kis-us] %s 과확장(현재 %s > 추천 %.2f) — 눌림목 대기",
                         code, b.get("price"), entry)
@@ -1018,7 +1031,7 @@ async def _auto_buy_kr(redis: aioredis.Redis, toss: TossClient, kis,
                 pass                             # 수급 조회 실패는 게이트 통과(막지 않음)
         # 하이브리드 진입 — 현재가가 추천가 대비 밴드 초과면 매수 안 함(눌림목 대기).
         live = await _live_price(redis, code) or b.get("price")
-        dec = entry_decision(entry, live, settings.entry_chase_band_pct)
+        dec = entry_decision(entry, live, await _chase_band(redis))
         if dec is None:
             logger.info("[auto/kis-kr] %s 과확장(현재 %s > 추천 %.0f) — 눌림목 대기",
                         code, f"{live:.0f}" if live else "?", entry)
@@ -1377,7 +1390,7 @@ async def _agent_buy(redis: aioredis.Redis, kis, row: dict, risk: dict,
     if await _auto_cooldown(redis, code, now):
         return None, "쿨다운", ""
     live = await _live_price(redis, code) or row.get("price")
-    dec = entry_decision(entry, live, settings.entry_chase_band_pct)
+    dec = entry_decision(entry, live, await _chase_band(redis))
     if dec is None:
         logger.info("[agent] %s 과확장(현재 %s>추천 %.2f) — 눌림목 대기", code, live, entry)
         return None, "과확장", ""
@@ -1420,7 +1433,7 @@ async def _agent_propose_buy(redis: aioredis.Redis, sender: TelegramSender, row:
         return False
     kr = code.isdigit()
     live = await _live_price(redis, code) or row.get("price")
-    dec = entry_decision(entry, live, settings.entry_chase_band_pct)
+    dec = entry_decision(entry, live, await _chase_band(redis))
     # 과확장이면 추천 진입가(눌림목)에 '지정가 대기' 제안 — 승인만 하면 눌릴 때 체결.
     order_price = dec[0] if dec else entry
     note = dec[1] if dec else "추천가 지정가(눌림 대기)"

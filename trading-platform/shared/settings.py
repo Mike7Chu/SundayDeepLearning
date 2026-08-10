@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     alert_cooldown_sec: float = 21600.0      # 보유 손절/익절 알림 종목당 최소 간격(스팸 억제, 6h)
     auto_retry_sec: float = 1800.0           # 자동매수 '실패' 후 재시도 대기(성공은 쿨다운 7일)
     entry_chase_band_pct: float = 4.0        # 추천가 대비 이 %내면 현재가 매수, 초과면 눌림목 대기(추격 방지)
+    # 강세추세(공격) 국면 전용 추격 밴드 — 주도주가 SMA20까지 잘 안 눌리므로 넓혀 강세 진입 허용.
+    # (다른 국면은 entry_chase_band_pct 유지 — 약세·횡보엔 추격 손실이 커 보수적으로.)
+    entry_chase_band_bull_pct: float = 10.0
     # 매매 비용(성적 순손익 계산 — 모의가 실전을 속이지 않게). 단위 %.
     kr_sell_tax_pct: float = 0.18            # 국내 증권거래세+농특세(매도만)
     us_sell_fee_pct: float = 0.001           # 미국 SEC/TAF 수수료(매도만, 미미)
