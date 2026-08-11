@@ -933,6 +933,11 @@ async def _auto_buy_us(redis: aioredis.Redis, kis, sender: TelegramSender,
         return
     if risk.get("buy_lock") and not _paper_auto():   # 모의는 실계좌 잠금 우회
         return
+    # 미장 개장(22:30~06:00 KST) 때만 주문 — 장전엔 KIS가 '장시작전'으로 거부만 하니
+    # 헛주문·혼란스러운 거부 알림을 막고, 개장 시 정상 재시도되게 한다.
+    now_hm = (datetime.utcnow() + timedelta(hours=9)).strftime("%H:%M")
+    if "US" not in tradeable_markets(now_hm):
+        return
     now = time.time()
     fx = await _fx_rate(redis)                        # USD→KRW (주문 한도 원화 환산용)
     max_order = settings.kis_max_order_krw
