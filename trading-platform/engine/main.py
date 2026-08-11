@@ -680,7 +680,89 @@ async def _managed_stop_alerts(redis: aioredis.Redis, sender: TelegramSender) ->
         logger.info("[agent/관리손절] %s %s live=%.2f", code, label, live)
 
 
-async def _guard_loop(redis: aioredis.Redis, sender: TelegramSender) -> None:
+async def _kis_exit_alerts(redis: aioredis.Redis, kis, sender: TelegramSender) -> None:
+    """KIS(모의) 계좌 보유 전부를 손절/목표 감시 → 도달 시 원탭 매도 알림.
+
+    보유 알림(_holdings_alerts)은 토스 실계좌만, 관리손절(_managed_stop_alerts)은
+    승인 버튼 매수만 본다. 자동매수(_auto_buy_us 등)로 들어온 KIS 포지션은 어디에도
+    안 잡혀 손절/목표가 방치됐다 → 여기서 KIS 계좌 전 종목을 exit_plan(트레일링
+    스탑+부분익절)으로 감시하고, 매도 승인 버튼과 함께 알린다. 승인매수로 별도
+    관리 중인(ENGINE_MANAGED_STOP_KEY) 종목은 중복 방지로 건너뛴다.
+    """
+    if not (kis and getattr(kis, "enabled", False)):
+        return
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            positions = await kis.fetch_positions(client)
+    except Exception as exc:
+        logger.debug("[kis-exit] 보유 조회 실패(무시): %s", exc)
+        return
+    managed = set(await redis.hkeys(ENGINE_MANAGED_STOP_KEY))
+    prev = await redis.hgetall(ENGINE_ALERTS_KEY)
+    trail_state = await redis.hgetall(ENGINE_TRAIL_KEY)
+    for pos in positions:
+        code = pos.get("symbol")
+        if not code or code in managed:            # 승인매수 관리 종목은 그쪽에서 처리
+            continue
+        cur = await _live_price(redis, code) or pos.get("price")
+        avg = pos.get("avg_price")
+        if avg is None and pos.get("pnl_pct") is not None and cur:   # 평단 없으면 손익률로 역산
+            avg = cur / (1 + pos["pnl_pct"] / 100.0)
+        if not code or not cur or not avg or avg <= 0:
+            continue
+        kr = code.isdigit()
+        dk = f"kis:{code}"                          # 토스 알림과 키 충돌 방지(네임스페이스)
+        try:
+            st = json.loads(trail_state[dk]) if dk in trail_state else {}
+        except (json.JSONDecodeError, TypeError):
+            st = {}
+        peak = max(st.get("peak") or 0.0, cur, avg)
+        ep = exit_plan(avg, cur, peak, await _closes(redis, code), kr=kr,
+                       trail_pct=settings.trail_stop_pct,
+                       half_taken=bool(st.get("half_taken")))
+        if not ep:
+            continue
+        await redis.hset(ENGINE_TRAIL_KEY, dk, json.dumps(
+            {"peak": ep["peak"], "half_taken": bool(st.get("half_taken")),
+             "ts": time.time()}))
+        if ep["action"] == "보유":
+            continue
+        stage = ep["stage"]
+        try:
+            last = json.loads(prev[dk]) if dk in prev else {}
+        except (json.JSONDecodeError, TypeError):
+            last = {}
+        since = time.time() - (last.get("ts") or 0)
+        if last.get("ts") and ((last.get("kind") == stage and since < 86400)
+                               or (last.get("kind") != stage and since < settings.alert_cooldown_sec)):
+            continue
+        f = (lambda v: f"{v:,.0f}원") if kr else (lambda v: f"${v:,.2f}")
+        icon = {"트레일링 스탑 도달": "📉", "목표 도달": "🎯",
+                "손절선 이탈": "🛑"}.get(stage, "🔔")
+        qty = int(pos.get("quantity") or 0)
+        name = pos.get("name") or code
+        buttons = None
+        tail = "\n※ 판단 보조 — 최종 결정은 직접"
+        if qty >= 1:                               # 원탭 매도(승인) 버튼
+            n = str(int(time.time() * 1000) % 1000000)
+            await redis.hset(TG_PENDING_KEY, n, json.dumps(
+                {"cmd": "order", "side": "SELL", "code": code, "qty": qty,
+                 "price": cur, "broker": "kis", "ts": time.time()}, ensure_ascii=False))
+            buttons = [[{"text": "✅ 매도 승인", "cb": f"cf:{n}"},
+                        {"text": "❌ 보유 유지", "cb": f"dr:{n}"}]]
+            tail = f"\n→ 매도할까요? {qty:g}주 @ {f(cur)} (승인 또는 '확인 {n}')"
+        await sender.send(
+            f"{icon} {ep['action']} — {esc(name)}(<code>{esc(code)}</code>) [모의]\n"
+            f"현재 <b>{esc(f(cur))}</b> · 평단 대비 <b>{ep['pnl_pct']:+.1f}%</b> · "
+            f"트레일링 스탑 {esc(f(ep['trail_stop']))}\n{esc(ep['reason'])}{tail}",
+            html=True, buttons=buttons)
+        await redis.hset(ENGINE_ALERTS_KEY, dk,
+                         json.dumps({"kind": stage, "ts": time.time()}))
+        logger.info("[kis-exit] %s %s (cur %.2f, stop %.2f)",
+                    code, stage, cur, ep["trail_stop"])
+
+
+async def _guard_loop(redis: aioredis.Redis, kis, sender: TelegramSender) -> None:
     """고속 가드 — 목표가/손절선 감시만 20초 주기(실시간 시세 대응).
 
     무거운 파이프라인(플랜·필터·리스크)은 _cycle_loop(10분)에 남기고,
@@ -690,8 +772,9 @@ async def _guard_loop(redis: aioredis.Redis, sender: TelegramSender) -> None:
     await asyncio.sleep(15)                    # 기동 직후 잔고 적재 여유
     while True:
         try:
-            await _holdings_alerts(redis, sender)
-            await _managed_stop_alerts(redis, sender)
+            await _holdings_alerts(redis, sender)          # 토스 실계좌
+            await _managed_stop_alerts(redis, sender)      # 승인매수 관리손절
+            await _kis_exit_alerts(redis, kis, sender)     # KIS 모의계좌 전 종목
             await _coach_watchdog(redis, sender)
         except Exception as exc:
             logger.warning("[DATA_ERROR] guard 실패: %s", exc)
@@ -1675,7 +1758,7 @@ async def run() -> None:
     try:
         await asyncio.gather(
             _cycle_loop(redis, sender, toss, kis),
-            _guard_loop(redis, sender),       # 목표/손절 실시간 감시(20초)
+            _guard_loop(redis, kis, sender),  # 목표/손절 실시간 감시(20초·토스+KIS)
             _day_trade_loop(redis, kis, toss, sender),   # 데이 스윙/초단타(옵트인)
             _agent_loop(redis, kis, sender),              # 클로드 스윙 결정(하루 N회·옵트인)
             command_loop(redis, toss, kis),   # 텔레그램 주문지시(확인 회신 필수)

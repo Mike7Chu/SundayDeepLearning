@@ -727,6 +727,7 @@ def _overseas_holdings(output1) -> list[dict]:
                     "name": o.get("ovrs_item_name") or sym,
                     "quantity": qty, "pnl_pct": _f(o.get("evlu_pfls_rt")),
                     "price": _f(o.get("now_pric2") or o.get("ovrs_now_pric1")),
+                    "avg_price": _f(o.get("pchs_avg_pric") or o.get("avg_unpr")),
                     "currency": "USD"})
     return out
 
@@ -745,7 +746,8 @@ def _domestic_holdings(output1) -> list[dict]:
             continue
         out.append({"symbol": code, "name": o.get("prdt_name") or code,
                     "quantity": qty, "pnl_pct": _f(o.get("evlu_pfls_rt")),
-                    "price": _f(o.get("prpr")), "currency": "KRW"})
+                    "price": _f(o.get("prpr")),
+                    "avg_price": _f(o.get("pchs_avg_pric")), "currency": "KRW"})
     return out
 
 

@@ -64,12 +64,13 @@ def test_parse_balance():
     # output1 종목별 보유 파싱(에이전트 매도 대상 — KIS 계좌)
     hb = parse_balance({"output2": [{"nass_amt": "1000000"}], "output1": [
         {"pdno": "005930", "prdt_name": "삼성전자", "hldg_qty": "10",
-         "evlu_pfls_rt": "5.2", "prpr": "80000"},
+         "evlu_pfls_rt": "5.2", "prpr": "80000", "pchs_avg_pric": "76000"},
         {"pdno": "000660", "prdt_name": "SK하이닉스", "hldg_qty": "0"}]})   # 0주 제외
     assert len(hb["holdings"]) == 1
     assert hb["holdings"][0] == {"symbol": "005930", "name": "삼성전자",
                                  "quantity": 10.0, "pnl_pct": 5.2,
-                                 "price": 80000.0, "currency": "KRW"}
+                                 "price": 80000.0, "avg_price": 76000.0,
+                                 "currency": "KRW"}
 
 
 def test_is_derivative_etf():
@@ -159,6 +160,7 @@ def test_parse_overseas_balance():
     # output1 미국 보유 파싱
     hb = parse_overseas_balance({"output2": [{"tot_asst_amt": "5000"}], "output1": [
         {"ovrs_pdno": "aapl", "ovrs_item_name": "Apple", "ovrs_cblc_qty": "3",
-         "evlu_pfls_rt": "-2.1", "now_pric2": "225.5"}]})
+         "evlu_pfls_rt": "-2.1", "now_pric2": "225.5", "pchs_avg_pric": "230.33"}]})
     assert hb["holdings"][0] == {"symbol": "AAPL", "name": "Apple", "quantity": 3.0,
-                                 "pnl_pct": -2.1, "price": 225.5, "currency": "USD"}
+                                 "pnl_pct": -2.1, "price": 225.5, "avg_price": 230.33,
+                                 "currency": "USD"}
