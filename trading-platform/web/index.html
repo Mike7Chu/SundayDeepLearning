@@ -531,7 +531,10 @@ async function renderHome(){
   const INVK=IND.investor&&IND.investor.kospi;
   const idxRow=(lab,d)=>d&&d.price!=null?`<div class="row"><span>${lab}</span><b class="num">${numC(d.price)} ${d.change_pct!=null?`<span class="${d.change_pct>=0?'pos':'neg'}">${d.change_pct>=0?'+':''}${numC(d.change_pct)}%</span>`:''}</b></div>`:'';
   const rkCard=(title,rows)=>(rows&&rows.length)?`<div class="card"><h3>${title}</h3>${rows.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.symbol}','${qesc(r.name||'')}')"><span>${r.name||r.symbol}</span><b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${numC(r.change_pct)}%</b></div>`).join("")}</div>`:'';
-  const movers=[...quotes].sort((a,b)=>Math.abs(b.change_pct||0)-Math.abs(a.change_pct||0)).slice(0,5);
+  // 등락 TOP은 '추적 종목' 기준 — 실시간 유니버스에 자동 편입된 이름 없는 전체시장
+  // 급등주(±상/하한가)는 위 '급등 TOP' 카드가 담당하므로 여기선 제외(undefined 방지).
+  const movers=[...quotes].filter(q=>q.code&&q.name)
+    .sort((a,b)=>Math.abs(b.change_pct||0)-Math.abs(a.change_pct||0)).slice(0,5);
   const topval=(v.rows||[]).filter(r=>r.magic_rank!=null).slice(0,4);
   const topdiv=(d.rows||[]).filter(r=>r.yield_pct).slice(0,4);
   $("homeGrid").innerHTML=`
@@ -561,7 +564,7 @@ async function renderHome(){
     </div>
     ${rkCard("🇰🇷 오늘 급등 TOP (전체 시장)",RK.kr_gainers)}
     ${rkCard("🇺🇸 미국 급등 TOP (1일)",RK.us_gainers)}
-    <div class="card"><h3>등락 TOP</h3>${movers.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name}</span>
+    <div class="card"><h3>등락 TOP</h3>${movers.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${qesc(r.name||r.code)}')"><span>${r.name||r.code}</span>
       <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</b></div>`).join("")||'<div class="empty">데이터 없음(KIS 키 필요)</div>'}</div>
     <div class="card"><h3>🎯 오늘의 매수 후보 (매력도)</h3>${buys.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name} <span class="badge">${r.verdict}</span></span><b class="num strong ${VC(r.score)}">${numC(r.score,0)}</b></div>`).join("")||'<div class="empty">후보 없음 (KIS 키 필요)</div>'}</div>
     ${autoStatusCard(eng)}
