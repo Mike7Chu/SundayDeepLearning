@@ -303,6 +303,7 @@
     <button data-tab="news"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-bell"/></svg>공시</button>
     <button data-tab="research"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-ai"/></svg>AI 분석</button>
     <button data-tab="journal"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-journal"/></svg>매매일지</button>
+    <button data-tab="backtest"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sig"/></svg>백테스트</button>
     <button data-tab="settings"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-set"/></svg>설정</button>
   </nav>
   <div class="side-foot">🍓 Raspberry Pi · 24h 가동</div>
@@ -334,6 +335,7 @@
   <div id="panel-news" class="panel"><div id="newsBox"><div class="skel" style="height:80px"></div><div class="skel" style="height:80px"></div></div></div>
   <div id="panel-research" class="panel"><div id="researchBox"><div class="skel" style="height:80px"></div><div class="skel" style="height:80px"></div></div></div>
   <div id="panel-journal" class="panel"><div id="journalBox"><div class="skel" style="height:80px"></div><div class="skel" style="height:180px"></div></div></div>
+  <div id="panel-backtest" class="panel"><div id="backtestBox"><div class="skel" style="height:60px"></div><div class="skel" style="height:200px"></div></div></div>
   <div id="panel-settings" class="panel"><div id="settingsBox"></div></div>
 </div>
 </div><!-- /.main -->
@@ -353,6 +355,7 @@
   <button data-tab="news"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-bell"/></svg>공시</button>
   <button data-tab="research"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-ai"/></svg>AI 분석</button>
   <button data-tab="journal"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-journal"/></svg>매매일지</button>
+  <button data-tab="backtest"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sig"/></svg>백테스트</button>
   <button data-tab="settings"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-set"/></svg>설정</button>
 </div>
 
@@ -484,8 +487,8 @@ function patchLive(code,q){
   });
 }
 
-const TABNAME={home:"홈",portfolio:"내 주식",signal:"살까 말까",stocks:"전체 종목",value:"저평가",dividend:"배당금",news:"공시",research:"AI 분석",journal:"매매일지",settings:"설정"};
-const MORE_TABS=["value","dividend","news","research","journal","settings"];   // 모바일 '더보기' 시트 소속
+const TABNAME={home:"홈",portfolio:"내 주식",signal:"살까 말까",stocks:"전체 종목",value:"저평가",dividend:"배당금",news:"공시",research:"AI 분석",journal:"매매일지",backtest:"백테스트",settings:"설정"};
+const MORE_TABS=["value","dividend","news","research","journal","backtest","settings"];   // 모바일 '더보기' 시트 소속
 function switchTab(t){
   activeTab=t;
   document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("active",b.dataset.tab===t));
@@ -510,6 +513,7 @@ async function render(){
     else if(activeTab==="news") await renderNews();
     else if(activeTab==="research") await renderResearch();
     else if(activeTab==="journal") await renderJournal();
+    else if(activeTab==="backtest") await renderBacktest();
     else if(activeTab==="settings") await renderSettings();
     for(const c in LIVE) patchLive(c,LIVE[c]);   // 방금 그린 셀에 최신 실시간가 덧칠
     setStatus("live",(es&&es.readyState===1)?"실시간":"자동갱신");
@@ -1025,6 +1029,51 @@ function statsCardHTML(s){
       <b class="sell">⚠️ 모의엔 이 비용이 없어요 — <u>net</u>이 실전 예상치. 거래가 잦을수록(초단타) 비용이 수익을 갉아먹습니다.</b></div></div>`;
 }
 
+let btCode=null;
+const BT_STRATS=[["strategy","우리 전략"],["rsi2","RSI2 평균회귀"],["rsi","RSI14 평균회귀"],["sma","SMA 크로스"],["momentum","모멘텀"]];
+function btMiniCard(label,d,best){
+  const pc=v=>((v||0)>=0?'pos':'neg');
+  const V=d.verdict||"", edge=V.includes("엣지 있음");
+  const badge=`<span class="badge ${edge?'pos':(V.includes('없음')?'sell':'')}">${escH(V||'신호 없음')}</span>`;
+  if(!d.trades){ return `<div class="card"><div class="arow" style="justify-content:space-between"><b>${escH(label)} ${best?'🏆':''}</b>${badge}</div>
+    <div class="num" style="margin-top:6px">이 기간 진입 신호 없음 · 단순보유 ${numC(d.buy_hold_pct)}%</div></div>`; }
+  const vs=(d.net_return_pct||0)-(d.buy_hold_pct||0);
+  const kv=(k,v,cls="")=>`<div style="min-width:76px"><div class="num">${k}</div><b class="${cls}">${v}</b></div>`;
+  return `<div class="card" ${best?'style="outline:1px solid var(--green)"':''}>
+    <div class="arow" style="justify-content:space-between;align-items:center"><b>${escH(label)} ${best?'🏆 최고 net':''}</b>${badge}</div>
+    <div class="arow" style="gap:14px;flex-wrap:wrap;margin-top:8px">
+      ${kv("전략 net",numC(d.net_return_pct)+"%",pc(d.net_return_pct)+" strong")}
+      ${kv("단순보유",numC(d.buy_hold_pct)+"%",pc(d.buy_hold_pct))}
+      ${kv("초과",(vs>=0?"+":"")+numC(vs)+"%",pc(vs))}
+      ${kv("승률",d.win_rate_pct+"%")}
+      ${kv("거래",d.trades+"회")}
+      ${kv("1회 기대값",numC(d.expectancy_pct)+"%",pc(d.expectancy_pct))}
+      ${kv("손익비",d.payoff!=null?d.payoff:"–")}
+      ${kv("평균보유",d.avg_hold_days+"일")}
+      ${kv("최대낙폭",numC(d.max_drawdown_pct)+"%","neg")}
+    </div>
+    <div class="num" style="margin-top:8px">gross ${numC(d.gross_return_pct)}% → <b>net ${numC(d.net_return_pct)}%</b> (왕복비용 ${numC(d.cost_drag_pct)}% 반영) · ${d.bars}봉</div>
+  </div>`;
+}
+async function renderBacktest(){
+  const box=$("backtestBox"); if(!box) return;
+  let rows=[]; try{ rows=((await jget("/stocks")).rows||[]).filter(r=>r.code&&r.name); }catch(e){}
+  if(!btCode && rows.length) btCode=rows[0].code;
+  const opts=rows.map(r=>`<option value="${r.code}" ${r.code===btCode?'selected':''}>${escH(r.name)} (${r.code})</option>`).join("");
+  const head=`<div class="card"><h3>🧪 전략 백테스트 <span class="badge">비용 반영 net</span>
+      <span class="badge" title="한 종목의 일봉으로 각 전략을 과거에 돌려봐요. 승률이 아니라 '왕복 수수료·세금·슬리피지를 뺀 net'과 '1회 기대값'이 +인지가 핵심. 룩어헤드(미래참조) 없음.">?</span></h3>
+    <div class="arow" style="gap:8px;flex-wrap:wrap">
+      <select id="btSel" style="min-width:220px" onchange="btCode=this.value;render()">${opts||'<option>관심종목 없음</option>'}</select>
+      <span class="num">종목을 고르면 전 전략을 한 번에 비교합니다.</span></div>
+    <div class="num" style="margin-top:8px">🏆 = net 최고 전략. <b class="sell">과거 성과는 미래를 보장하지 않습니다.</b> 승률↑라도 net·기대값이 −면 실전에선 손실이에요(빠른 매매일수록 비용이 관건).</div></div>`;
+  if(!btCode){ box.innerHTML=head+'<div class="empty">관심종목이 없어요 (KIS 키 필요)</div>'; return; }
+  box.innerHTML=head+'<div class="empty">백테스트 중… (전 전략 비교)</div>';
+  const res=await Promise.all(BT_STRATS.map(([s])=>
+    jget(`/stocks/backtest/${encodeURIComponent(btCode)}?strategy=${s}`).catch(()=>({strategy:s,error:'실패'}))));
+  const pairs=BT_STRATS.map(([s,l],i)=>[l,res[i]]);
+  const best=pairs.filter(([,d])=>d.trades).sort((a,b)=>(b[1].net_return_pct||-1e9)-(a[1].net_return_pct||-1e9))[0];
+  box.innerHTML=head+pairs.map(([l,d])=>btMiniCard(l,d,best&&d===best[1])).join("");
+}
 async function renderJournal(){
   const j=await jget("/journal"); const rows=j.rows||[];
   let statsCard=""; try{ statsCard=statsCardHTML(await jget("/stats")); }catch(e){}
@@ -1355,7 +1404,7 @@ async function mBacktest(code,strat){
   }catch(err){ e.innerHTML=`<div class="empty">실패: ${escH(err.message||'')}</div>`; }
 }
 function btTabs(code,cur){
-  return `<div class="arow" style="margin-bottom:6px">`+[["strategy","우리 전략"],["sma","SMA크로스"],["rsi","RSI"],["momentum","모멘텀"]]
+  return `<div class="arow" style="margin-bottom:6px">`+[["strategy","우리 전략"],["rsi2","RSI2"],["rsi","RSI14"],["sma","SMA크로스"],["momentum","모멘텀"]]
     .map(([s,l])=>`<button class="btn ${cur===s?'buy':''}" onclick="mBacktest('${qesc(code)}','${s}')">${l}</button>`).join(" ")+`</div>`;
 }
 function btCard(code,d){
