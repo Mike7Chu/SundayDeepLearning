@@ -20,7 +20,7 @@ def test_bull_trend_uptrend():
     closes = _trend(230)
     r = classify_regime(closes, foreign_net_eok=500)
     assert r["regime"] == "bull_trend"
-    assert r["strategies"] == ["S1", "S5", "S6"] and r["posture"] == "공격"
+    assert r["strategies"] == ["S1", "S5", "S6", "S7"] and r["posture"] == "공격"
     assert r["metrics"]["ma_rising"] is True and r["metrics"]["dist_ma_pct"] > 0
 
 
@@ -31,7 +31,7 @@ def test_bull_trend_high_vol_keeps_momentum_reduces_exposure():
     for i in range(210, 230):                          # 최근 20봉 큰 변동성 주입
         base[i] += 8 if i % 2 else -8
     r = classify_regime(base, foreign_net_eok=100)
-    assert r["regime"] == "bull_trend" and r["strategies"] == ["S1", "S5", "S6"]
+    assert r["regime"] == "bull_trend" and r["strategies"] == ["S1", "S5", "S6", "S7"]
     assert r["metrics"]["vol_high"] is True
     assert r["exposure_pct"] == 60                      # 고변동 → 풀노출 아님
 
@@ -51,7 +51,7 @@ def test_range_near_ma():
     r = classify_regime(closes)
     assert r["regime"] in ("range", "neutral")       # 근처·저변동 → 역발상/선별
     if r["regime"] == "range":
-        assert r["strategies"] == ["S4"]
+        assert r["strategies"] == ["S4", "S7"]
 
 
 def test_exposure_by_regime():

@@ -4,6 +4,7 @@ from __future__ import annotations
 from engine.strategies import (
     DEFAULT_ACTIVE, STRATEGY_FUNCS, run_strategies,
     s1_momentum, s2_quality_value, s3_defensive, s4_meanrev, s5_catalyst, s6_flow,
+    s7_rsi2,
 )
 
 
@@ -86,6 +87,24 @@ def test_s6_flow_needs_accumulation_and_trend():
     assert s6_flow({**q, "price": down[-1]}, _candles(down)) is None
 
 
+def test_s7_rsi2_uptrend_extreme_oversold():
+    # 장기 상승추세 뒤 급격한 2일 눌림 → RSI(2) 극단 과매도 → 진입
+    closes = [100 + i * 0.5 for i in range(115)] + [155, 151, 148]
+    q = {"code": "005930", "price": closes[-1]}
+    p = s7_rsi2(q, _candles(closes))
+    assert p and p["strategy"] == "S7" and p["score"] >= 55
+    assert p["entry"] and p["stop"] and p["target"]
+    assert p["stop"] < p["entry"] < p["target"]           # 손절<진입<목표(-5%/rr)
+    # 상승추세여도 과매도 아니면(계속 상승) 부적합
+    assert s7_rsi2({"code": "005930", "price": 100 + 119 * 0.5},
+                   _candles([100 + i * 0.5 for i in range(120)])) is None
+    # 하락추세(200/100일선 아래)면 부적합 — 물타기 금지
+    down = [200 - i for i in range(120)]
+    assert s7_rsi2({"code": "005930", "price": down[-1]}, _candles(down)) is None
+    # 봉 부족(100 미만)이면 None
+    assert s7_rsi2(q, _candles(closes[:80])) is None
+
+
 def test_run_strategies_picks_best_of_active():
     closes = [100 + i for i in range(80)]
     q = {"code": "005930", "price": closes[-1], "high_52w": closes[-1],
@@ -98,5 +117,5 @@ def test_run_strategies_picks_best_of_active():
     assert run_strategies(["S4"], q, _candles(closes)) is None
     # active 비면 DEFAULT_ACTIVE 사용
     assert run_strategies([], q, _candles(closes)) is not None
-    assert set(STRATEGY_FUNCS) == {"S1", "S2", "S3", "S4", "S5", "S6"}
+    assert set(STRATEGY_FUNCS) == {"S1", "S2", "S3", "S4", "S5", "S6", "S7"}
     assert DEFAULT_ACTIVE == ["S1", "S2"]

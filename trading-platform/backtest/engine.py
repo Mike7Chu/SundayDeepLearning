@@ -45,10 +45,30 @@ def positions_momentum(closes, lookback=60):
     return pos
 
 
+def positions_rsi2(closes, low=10, high=70):
+    """Connors RSI(2): 장기 상승추세(200일선 위, 데이터 부족 시 100일선) + RSI2<low 매수,
+    RSI2>high 매도(1=보유). 고승률·단기 평균회귀 — S7 전략의 백테스트 벤치마크."""
+    pos, holding = [], 0
+    for i in range(len(closes)):
+        window = closes[: i + 1]
+        r = rsi(window, 2)
+        ma = sma(window, 200) if len(window) >= 200 else sma(window, 100)
+        up = ma is not None and closes[i] > ma
+        if r is not None:
+            if holding:
+                if r > high:
+                    holding = 0                 # 과매도 해소 → 청산
+            elif up and r < low:
+                holding = 1                     # 상승추세 눌림 극단 과매도 → 진입
+        pos.append(holding)
+    return pos
+
+
 STRATEGIES = {
     "strategy": "추세 눌림목(우리 전략)",   # 기본 — 아래 level 시뮬
     "sma": positions_sma_cross,
     "rsi": positions_rsi_meanrev,
+    "rsi2": positions_rsi2,
     "momentum": positions_momentum,
 }
 

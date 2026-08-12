@@ -18,6 +18,7 @@ from __future__ import annotations
 STRATEGY_LABELS = {
     "S1": "추세 모멘텀", "S2": "퀄리티-밸류", "S3": "저변동 방어",
     "S4": "단기 평균회귀", "S5": "실적 서프라이즈(PEAD)", "S6": "수급 모멘텀",
+    "S7": "RSI2 평균회귀",
 }
 
 
@@ -92,10 +93,12 @@ def classify_regime(index_closes: list[float], *,
         regime, label, posture, strat = "risk_off", "위험 회피", "방어", ["S3"]
         exposure = 20
     elif uptrend and not breadth_weak:
-        regime, label, posture, strat = "bull_trend", "강세 추세", "공격", ["S1", "S5", "S6"]
+        # 강세추세: 모멘텀(S1/S5/S6) + RSI2 눌림 매수(S7) — 상승장 눌림목 고승률·빠른 회전.
+        regime, label, posture, strat = "bull_trend", "강세 추세", "공격", ["S1", "S5", "S6", "S7"]
         exposure = 60 if vol_hi else 100          # 추세는 타되 변동성 크면 비중 축소
     elif abs(dist) < 0.03 and not vol_hi:
-        regime, label, posture, strat = "range", "횡보 레인지", "역발상", ["S4"]
+        # 횡보: 단기 평균회귀(S4) + RSI2 극단 과매도 반등(S7).
+        regime, label, posture, strat = "range", "횡보 레인지", "역발상", ["S4", "S7"]
         exposure = 40
     else:
         regime, label, posture, strat = "neutral", "중립·순환", "선별", ["S2", "S6"]

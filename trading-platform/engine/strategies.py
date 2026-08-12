@@ -23,6 +23,7 @@ from api.services.stock_signal import (
 STRATEGY_LABELS = {
     "S1": "추세 모멘텀", "S2": "퀄리티-밸류", "S3": "저변동 방어",
     "S4": "단기 평균회귀", "S5": "실적 서프라이즈(PEAD)", "S6": "수급 모멘텀",
+    "S7": "RSI2 평균회귀",
 }
 
 
@@ -264,8 +265,37 @@ def s6_flow(q: dict, candles: list) -> dict | None:
             "reasons": reasons, **_levels(q, price, cs)}
 
 
+# ── S7 RSI2 평균회귀 (Connors) ─────────────────────────────────────────────
+def s7_rsi2(q: dict, candles: list) -> dict | None:
+    """Larry Connors RSI(2) 단기 평균회귀 — 장기 상승추세 종목의 극단 과매도 눌림 매수.
+
+    연구 기반(주식·ETF 백테스트 승률 ~75%): ①장기 상승추세(200일선 위, 데이터 부족
+    시 100일선) ②RSI(2) < 10 극단 과매도 → 보통 1~3일 내 반등을 노린다. 고승률·소폭·
+    빠른 회전이라 손절(-5%)·비용 관리가 생명. 추세선 대비 과도 이탈(폭락)은 제외(떨어지는
+    칼 방지). 최종 심판은 비용 반영 net(백테스트 strategy='rsi2'로 검증).
+    """
+    cs, *_ = _series(candles)
+    if len(cs) < 100:                                 # 장기 추세 필터에 필요한 최소 봉
+        return None
+    price = q.get("price") or cs[-1]
+    trend_ma = sma(cs, 200) if len(cs) >= 200 else sma(cs, 100)
+    ma_lbl = "200일선" if len(cs) >= 200 else "100일선"
+    if not (trend_ma and price > trend_ma):           # 상승추세만(하락장 물타기 금지)
+        return None
+    r2 = rsi(cs, 2)
+    if r2 is None or r2 > 10:                          # 극단 단기 과매도만
+        return None
+    if price < trend_ma * 0.90:                        # 추세선 -10%↓ 이탈(붕괴) 제외
+        return None
+    score = min(100.0, 58 + (10 - r2) * 3)             # 깊을수록 가점(r2 0→88 · 10→58)
+    reasons = [f"RSI(2) {r2:.0f} 극단 과매도", f"{ma_lbl} 위 상승추세 눌림"]
+    return {"strategy": "S7", "label": STRATEGY_LABELS["S7"], "score": round(score, 1),
+            "reasons": reasons, **_levels(q, price, cs, stop_pct=5.0, rr=1.5)}
+
+
 STRATEGY_FUNCS = {"S1": s1_momentum, "S2": s2_quality_value, "S3": s3_defensive,
-                  "S4": s4_meanrev, "S5": s5_catalyst, "S6": s6_flow}
+                  "S4": s4_meanrev, "S5": s5_catalyst, "S6": s6_flow,
+                  "S7": s7_rsi2}
 
 # 국면 미상/폴백: 강세·중립 성격의 두 축을 기본 활성(억지 매매 금지는 각 전략 임계로 보장).
 DEFAULT_ACTIVE = ["S1", "S2"]
