@@ -280,8 +280,10 @@ async def run() -> None:
                     await coach_if_requested()
                     await tenbagger_code(cmd)
                     await asyncio.sleep(2)
-                # 2) 정기 전체 분석 — 최근 리포트가 있는 종목은 건너뜀(재시작해도 재분석 안 함)
-                if time.time() - last_full >= 3600:   # 1시간마다 점검(신규/만료분만 분석)
+                # 2) 정기 전체 분석 — 옵트인(기본 OFF·수동 전용). 온디맨드(🧠/텔레그램)는
+                #    위 (1)에서 항상 처리되므로, 자동 패스만 끄면 토큰이 안 나간다.
+                if (settings.research_auto_pass_enabled
+                        and time.time() - last_full >= 3600):   # 신규/만료분만 분석
                     for item in await effective_watchlist(redis):
                         await heartbeat()
                         await coach_if_requested()

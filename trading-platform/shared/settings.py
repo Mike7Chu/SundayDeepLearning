@@ -160,6 +160,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     research_model: str = "claude-opus-4-8"
     research_interval_sec: float = 604800.0  # 관심종목 정기 분석 주기(기본 1주 — 토큰 절약)
+    # 관심종목 정기 AI 리서치 '자동 패스' — 기본 OFF(수동 전용). 켜면 호스트가 주기적으로
+    # 전 관심종목을 자동 분석(토큰 소모). 꺼도 대시보드 🧠 '다시 분석'·텔레그램 온디맨드는 동작.
+    research_auto_pass_enabled: bool = False
     # 구독(무과금) 경로: API 키 대신 Claude Code CLI(헤드리스) 사용. 키 없을 때만 적용.
     research_use_cli: bool = False           # True+claude 바이너리 존재 시 구독 CLI로 분석
     research_cli_bin: str = "claude"         # Claude Code 실행 파일명/경로
