@@ -13,6 +13,20 @@ import httpx
 
 _UA = {"User-Agent": "Mozilla/5.0 (compatible; StockLab/1.0)"}
 
+# 신뢰 재무 매체(뱃지·정렬 보조) — 통신사·주요 경제지. 소문자 부분일치로 판정.
+TRUSTED_SOURCES = [
+    "reuters", "bloomberg", "wall street journal", "wsj", "financial times",
+    "cnbc", "barron", "marketwatch", "the economist", "associated press", "ap news",
+    "yonhap", "연합뉴스", "한국경제", "매일경제", "서울경제", "이데일리", "머니투데이",
+    "조선비즈", "인포맥스", "파이낸셜뉴스", "the wall street journal",
+]
+
+
+def is_trusted(source: str) -> bool:
+    """출처가 주요 통신사·경제지인가(부분일치·대소문자 무시)."""
+    s = (source or "").lower()
+    return any(t in s for t in TRUSTED_SOURCES)
+
 
 def google_news_url(query: str, kr: bool = True) -> str:
     """구글 뉴스 RSS 검색 URL. kr=True면 한국어/한국판, False면 영어/미국판."""
@@ -86,12 +100,11 @@ async def translate_ko(text: str, timeout: float = 8.0) -> str | None:
 async def crawl_stock_news(query: str, kr: bool = True, cap: int = 8) -> list[dict]:
     """종목 뉴스 수집 + 해외면 한국어 번역 병기. 반환 각 항목에 title_ko(있으면)."""
     rows = await fetch_news(query, kr=kr, cap=cap)
-    if not kr:                       # 미국·해외 = 영문 → 한국어 번역 병기
-        for row in rows:
-            ko = await translate_ko(row.get("title", ""))
-            row["title_ko"] = ko
-            row["lang"] = "en"
-    else:
-        for row in rows:
-            row["lang"] = "ko"
+    for row in rows:
+        row["trusted"] = is_trusted(row.get("source", ""))   # 주요 매체 뱃지
+        row["lang"] = "ko" if kr else "en"
+        if not kr:                    # 미국·해외 = 영문 → 한국어 번역 병기
+            row["title_ko"] = await translate_ko(row.get("title", ""))
+    # 신뢰 매체를 앞으로(안정 정렬 — 각 그룹 내 최신순 유지). 로이터·블룸버그 등이 위로.
+    rows.sort(key=lambda r: 0 if r.get("trusted") else 1)
     return rows

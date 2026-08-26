@@ -1404,7 +1404,8 @@ async function mNews(code,isUS){
     if(!rows.length){ b.innerHTML='<div class="empty">관련 뉴스를 못 찾았어요 (RSS 차단·네트워크일 수 있어요). 잠시 후 다시 시도해 주세요.</div>'; return; }
     b.innerHTML=rows.map(r=>{
       const tko=(r.title_ko&&r.title_ko!==r.title)?`<div>${escH(r.title_ko)}</div><div class="num" style="opacity:.65">${escH(r.title)}</div>`:`<div>${escH(r.title)}</div>`;
-      const meta=`<div class="num" style="opacity:.75">${escH(r.source||'')}${r.published?' · '+escH(r.published):''}</div>`;
+      const src=(r.trusted?'<span class="badge pos" style="margin-right:4px">주요</span>':'')+escH(r.source||'');
+      const meta=`<div class="num" style="opacity:.75">${src}${r.published?' · '+escH(r.published):''}</div>`;
       return `<div class="row" style="display:block;padding:7px 0"><a class="clk" href="${escH(r.url||'#')}" target="_blank" rel="noopener">${tko}</a>${meta}</div>`;
     }).join("")+`<div class="num" style="margin-top:6px;opacity:.7">구글 뉴스 RSS · 30분 캐시${isUS?' · 해외 헤드라인 한국어 자동번역(참고용)':''}</div>`;
   }catch(e){ b.innerHTML='<div class="empty">뉴스 실패: '+escH(e.message||'')+'</div>'; }
