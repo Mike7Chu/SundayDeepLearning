@@ -250,6 +250,29 @@ def krx_tick(p: float) -> float:
     return round(p / t) * t
 
 
+def support_resistance(closes: list[float], live_price: float | None = None,
+                       window: int = 120, band_pct: float = 1.0) -> dict | None:
+    """지지/저항 '구간'(순수 함수) — 최근 window일 저점/고점 근방 밴드.
+
+    지지 = 최근 저점 ±band%, 저항 = 최근 고점 ±band%. 초보용 '쉬운 차트 근거'에
+    현재가가 어느 구간 사이에 있는지 보여주기 위함(HONG STOCK 벤치마크 R3).
+    반환 {support:[lo,hi], resistance:[lo,hi], pos} — pos=0(저점)~1(고점).
+    """
+    xs = [c for c in closes if c]
+    if len(xs) < 20:
+        return None
+    w = xs[-window:] if len(xs) >= window else xs
+    lo, hi = min(w), max(w)
+    if hi <= lo:
+        return None
+    price = live_price or xs[-1]
+    b = band_pct / 100.0
+    pos = max(0.0, min(1.0, (price - lo) / (hi - lo)))
+    return {"support": [round(lo * (1 - b), 2), round(lo * (1 + b), 2)],
+            "resistance": [round(hi * (1 - b), 2), round(hi * (1 + b), 2)],
+            "pos": round(pos, 2)}
+
+
 def trade_levels(closes: list[float], live_price: float | None = None,
                  kr: bool = True) -> dict | None:
     """매매 가격 가이드(순수 함수): 추천 매수가·손절가·목표가.

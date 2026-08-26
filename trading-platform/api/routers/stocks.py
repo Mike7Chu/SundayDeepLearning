@@ -20,6 +20,7 @@ from api.services.stock_signal import (
     evaluate_signals,
     light_pillar,
     signals_for,
+    support_resistance,
     trade_levels,
 )
 from api.services.cache import get_or_compute, get_or_swr
@@ -515,6 +516,7 @@ async def stock_detail(code: str) -> dict:
         sig["adx"] = adx(candles)   # 추세 강도(고가·저가 필요 — 캔들 원본 기준)
     score = compute_score(quote, closes)
     levels = trade_levels(closes, quote.get("price"), kr=kr)
+    sr = support_resistance(closes, quote.get("price"))   # 지지/저항 구간(쉬운 차트 근거)
     pillar = light_pillar(candles) if kr else None   # 수급 기준(억원)은 국내 전용
     # 배당: 저장분 → 없으면 DART 온디맨드(국내만 — 미국은 DART 미커버)
     div = None
@@ -574,6 +576,6 @@ async def stock_detail(code: str) -> dict:
             else "미국 FCF는 AI 리서치(웹검색)에서 제공")}
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
-            "levels": levels, "pillar": pillar, "earnings_flash": flash,
+            "levels": levels, "sr": sr, "pillar": pillar, "earnings_flash": flash,
             "supply": supply, "reverse_dcf": rdcf, "price_ts": quote.get("ts"),
             "in_watchlist": any(w.get("code") == code for w in wl)}

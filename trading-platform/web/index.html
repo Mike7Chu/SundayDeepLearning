@@ -1295,6 +1295,21 @@ function paintModal(code,name,d){
       `외국인 ${SD.foreign_eok>=0?'+':''}${numC(SD.foreign_eok,0)}억 · 기관 ${SD.inst_eok>=0?'+':''}${numC(SD.inst_eok,0)}억 · ${SD.net_eok>=20?'매집(상승 선행)':SD.net_eok<=-20?'분산(주의)':'중립'}`):'';
     const sgH=S?`<div class="cgrid">${kv("흐름",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"위 종합점수의 '추세'와 같은 기준")}${kv("추세 힘(MACD)",macdTxt,HELP.macd)}${kv("추세 강도(ADX)",adxTxt,HELP.adx)}${kv("평균선",smaTxt,HELP.sma)}${kv("3개월 추세",numC(S.momentum_pct)+"%",HELP.momentum)}${sdCard}${pillarCard}</div>`:`<div class="empty">주가 흐름 ${collectHint}</div>`;
     const L=d.levels;
+    // 쉬운 차트 근거(HONG STOCK 벤치마크 R3) — 추세·거래량·지지/저항 구간을 평문으로.
+    const SR=d.sr;
+    const volTxt=(P&&P.value_eok!=null&&P.surge_x)?`평소의 ${numC(P.surge_x,1)}배 (${numC(P.value_eok,0)}억)`
+      :(S&&S.momentum_pct!=null?'추세 참고':'–');
+    const posOne=!SR?'':(SR.pos<=0.35?'지지 구간 근처 — 반등 시 매수·이탈 시 손절'
+      :SR.pos>=0.7?'저항 구간 근처 — 돌파 확인 전 추격 주의':'지지·저항 사이 — 방향 확인 필요');
+    const band=a=>`${MN(a[0])}~${MN(a[1])}`;
+    const easyH=(S||SR)?`<div class="card" style="margin-bottom:10px;border-left:3px solid var(--green)">
+      <b>🟢 쉬운 차트 근거</b>
+      <div class="cgrid" style="margin-top:6px">
+        ${kv("추세",`<span class="${trTxt[1]}">${trTxt[0]}</span>`,"이동평균·모멘텀 종합(위 '추세' 축과 같은 기준)")}
+        ${kv("거래량",volTxt,"평소 대비 오늘 거래 활발도 — 낮으면 신뢰 약함")}
+        ${SR?kv("지지 구간",`<span class="pos">${band(SR.support)}</span>`,"최근 저점권 — 여기서 반등을 노림"):""}
+        ${SR?kv("저항 구간",`<span class="neg">${band(SR.resistance)}</span>`,"최근 고점권 — 돌파해야 추가 상승"):""}</div>
+      ${posOne?`<div class="num" style="margin-top:6px">${posOne}</div>`:""}</div>`:'';
     const lvH=L?`<div class="cgrid">
       ${kv("추천 매수가",`<span class="pos">${MN(L.entry)}</span>`,`${L.entry_basis} 기준 · 추격 매수 방지`)}
       ${kv("손절가",`<span class="neg">${MN(L.stop)}</span>`,`매수가 대비 ${numC(L.stop_pct,1)}% · 지지선 붕괴 시 탈출`)}
@@ -1340,6 +1355,7 @@ function paintModal(code,name,d){
       ${noDataWarn}${staleWarn}
       <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}
       <div class="modal-sec">회사 가치·실적</div>${flashH}${fund}${rdcfH}
+      ${easyH}
       <div class="modal-sec">주가 흐름</div>${sgH}
       <div class="modal-sec">매매 가격 가이드</div>${lvH}
       <div class="modal-sec">배당금</div>${dvH}
