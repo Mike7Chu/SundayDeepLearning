@@ -1326,6 +1326,13 @@ function paintModal(code,name,d){
         ${SR?kv("지지 구간",`<span class="pos">${band(SR.support)}</span>`,"최근 저점권 — 여기서 반등을 노림"):""}
         ${SR?kv("저항 구간",`<span class="neg">${band(SR.resistance)}</span>`,"최근 고점권 — 돌파해야 추가 상승"):""}</div>
       ${posOne?`<div class="num" style="margin-top:6px">${posOne}</div>`:""}</div>`:'';
+    // 뉴스·이슈 감성(HONG STOCK 벤치마크 R4) — 규칙기반(토큰 0), 보조 지표.
+    const NS=d.news_sent;
+    const nsClr=NS?(NS.score>=0.25?'pos':NS.score<=-0.25?'neg':''):'';
+    const newsH=NS?`<div class="card" style="margin-bottom:10px">
+      <b>📰 뉴스·이슈 감성</b> <span class="badge ${nsClr}">${escH(NS.label)}</span>
+      <div class="num" style="margin:4px 0">최근 공시 ${NS.n}건 · 호재 키워드 ${NS.pos} · 악재 ${NS.neg} <span style="opacity:.7">(규칙기반·참고용)</span></div>
+      ${(NS.samples||[]).map(s=>`<div class="num" style="opacity:.85">· ${escH(s.title)} <span class="${s.tone==='호재'?'pos':s.tone==='악재'?'neg':''}">[${s.tone}]</span></div>`).join("")}</div>`:'';
     const lvH=L?`<div class="cgrid">
       ${kv("추천 매수가",`<span class="pos">${MN(L.entry)}</span>`,`${L.entry_basis} 기준 · 추격 매수 방지`)}
       ${kv("손절가",`<span class="neg">${MN(L.stop)}</span>`,`매수가 대비 ${numC(L.stop_pct,1)}% · 지지선 붕괴 시 탈출`)}
@@ -1371,7 +1378,7 @@ function paintModal(code,name,d){
       ${noDataWarn}${staleWarn}
       <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}
       <div class="modal-sec">회사 가치·실적</div>${flashH}${fund}${rdcfH}
-      ${easyH}
+      ${easyH}${newsH}
       <div class="modal-sec">주가 흐름</div>${sgH}
       <div class="modal-sec">매매 가격 가이드</div>${lvH}
       <div class="modal-sec">배당금</div>${dvH}

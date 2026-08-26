@@ -15,6 +15,7 @@ from api.redis_client import get_redis
 from collector.news.dart import DartClient
 from collector.stock.toss import TossClient, candle_metrics
 from api.services.stock_dividend import compute_dividend, dividend_view
+from api.services.news_sentiment import news_sentiment
 from api.services.stock_signal import (
     adx,
     evaluate_signals,
@@ -517,6 +518,19 @@ async def stock_detail(code: str) -> dict:
     score = compute_score(quote, closes)
     levels = trade_levels(closes, quote.get("price"), kr=kr)
     sr = support_resistance(closes, quote.get("price"))   # 지지/저항 구간(쉬운 차트 근거)
+    news_sent = None                                       # 뉴스·이슈 감성(규칙기반·토큰 0)
+    if kr:
+        titles = []
+        for v in await redis.lrange(DART_RECENT_KEY, 0, 200):
+            try:
+                it = _json.loads(v)
+            except (ValueError, TypeError):
+                continue
+            if it.get("stock_code") == code:
+                titles.append(it.get("report_nm") or it.get("title") or "")
+            if len(titles) >= 25:
+                break
+        news_sent = news_sentiment(titles)
     pillar = light_pillar(candles) if kr else None   # 수급 기준(억원)은 국내 전용
     # 배당: 저장분 → 없으면 DART 온디맨드(국내만 — 미국은 DART 미커버)
     div = None
@@ -576,6 +590,7 @@ async def stock_detail(code: str) -> dict:
             else "미국 FCF는 AI 리서치(웹검색)에서 제공")}
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
-            "levels": levels, "sr": sr, "pillar": pillar, "earnings_flash": flash,
+            "levels": levels, "sr": sr, "news_sent": news_sent,
+            "pillar": pillar, "earnings_flash": flash,
             "supply": supply, "reverse_dcf": rdcf, "price_ts": quote.get("ts"),
             "in_watchlist": any(w.get("code") == code for w in wl)}
