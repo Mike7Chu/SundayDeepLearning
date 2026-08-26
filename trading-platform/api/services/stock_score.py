@@ -185,6 +185,19 @@ def compute_score(quote: dict, closes: list[float] | None = None) -> dict:
     tm, tr = _timing_axis(quote, closes, sig)
     total = round(v + ql + gr + mo + tm, 1)
     reasons = vr + qr + grr + mr + tr
+    # 축별 분해(설명가능성) — 총점을 어느 축이 얼마나 채웠나 + 각 축의 근거를 별도 노출.
+    axes = [
+        {"key": "value", "label": "가치", "score": v, "max": 30, "reasons": vr,
+         "desc": "이익·자산 대비 싼가(이익수익률·ROE·PBR·안전마진)"},
+        {"key": "quality", "label": "품질", "score": ql, "max": 20, "reasons": qr,
+         "desc": "돈 잘 버는 튼튼한 회사인가(흑자·ROE·저PER/PBR)"},
+        {"key": "growth", "label": "성장", "score": gr, "max": 15, "reasons": grr,
+         "desc": "이익이 크는가(순이익 YoY·잠정실적)"},
+        {"key": "momentum", "label": "추세", "score": mo, "max": 25, "reasons": mr,
+         "desc": "오르는 흐름인가(정배열·SMA60·모멘텀)"},
+        {"key": "timing", "label": "타이밍", "score": tm, "max": 10, "reasons": tr,
+         "desc": "지금 살 때인가(MACD·52주 위치)"},
+    ]
     # 신뢰도(Confidence): 점수를 구성한 데이터가 얼마나 채워졌나(0~100).
     # 낮으면 '점수가 낮다'가 아니라 '판단 근거가 부족하다'는 뜻 — 별도 축으로 노출.
     has_fund = quote.get("eps") is not None and quote.get("bps") is not None
@@ -198,6 +211,7 @@ def compute_score(quote: dict, closes: list[float] | None = None) -> dict:
         "code": quote.get("code"), "name": quote.get("name"), "price": quote.get("price"),
         "score": total, "verdict": _verdict(total), "confidence": confidence,
         "value": v, "quality": ql, "growth": gr, "momentum": mo, "timing": tm,
+        "axes": axes,
         "margin_pct": margin_of_safety(quote.get("price"), quote.get("eps"), quote.get("bps")),
         "graham": graham_number(quote.get("eps"), quote.get("bps")),
         "ni_growth_pct": quote.get("ni_growth_pct"),

@@ -1261,6 +1261,12 @@ function paintModal(code,name,d){
     const collectHint='일시 수집 실패 — 팝업을 다시 열어보세요';   // 어떤 종목이든 온디맨드 수집
     const SC=d.score||{};
     const bar=(lab,val,max)=>`<div class="row"><span style="width:56px">${lab}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:${Math.max(0,Math.min(100,(val||0)/max*100))}%"></i></div><b class="num">${numC(val,0)}/${max}</b></div>`;
+    // 축별 분해(설명가능성) — 각 축 바 + 실제 반영 근거를 함께(HONG STOCK 벤치마크 R2).
+    const axBar=ax=>{const pct=Math.max(0,Math.min(100,(ax.score||0)/ax.max*100));
+      const rs=(ax.reasons||[]).join(" · ")||'<span style="opacity:.45">반영 근거 없음</span>';
+      return `<div title="${qesc(ax.desc||'')}"><div class="row" style="margin:0"><span style="width:52px">${escH(ax.label)}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:${pct}%"></i></div><b class="num">${numC(ax.score,1)}/${ax.max}</b></div><div class="num" style="margin:0 0 5px 52px;opacity:.82">${rs}</div></div>`;};
+    const axesH=(SC.axes&&SC.axes.length)?SC.axes.map(axBar).join("")
+      :`${bar("가치",SC.value,30)}${bar("품질",SC.quality,20)}${bar("성장",SC.growth,15)}${bar("추세",SC.momentum,25)}${bar("타이밍",SC.timing,10)}`;
     const growCaveat=(SC.margin_pct!=null&&SC.margin_pct<0&&(SC.ni_growth_pct||0)>=15)?' <span class="num">(이익이 크게 느는 성장주는 가치 기준으로 비싸 보일 수 있어요)</span>':'';
     const marginTxt=SC.margin_pct==null?"":(SC.margin_pct>0?`<b class="pos">적정가보다 ${numC(SC.margin_pct,0)}% 싸요</b>`:`<b class="neg">그레이엄 가치 기준 ${numC(-SC.margin_pct,0)}% 비싸요</b>${growCaveat}`);
     const usScoreNote=US?`<div class="num" style="margin-top:6px">🇺🇸 미국 종목은 가치·품질(EPS/BPS) 데이터가 없어 점수는 <b>성장(SEC 분기실적)·추세·타이밍만</b> 반영돼요 — 낮게 나와도 회사가 나쁘다는 뜻이 아니에요. 참고용으로만 보세요.</div>`:"";
@@ -1269,8 +1275,8 @@ function paintModal(code,name,d){
         ${SC.confidence!=null?`<span class="badge ${SC.confidence>=80?'pos':SC.confidence>=50?'':'sell'}" style="margin-left:8px">신뢰도 ${numC(SC.confidence,0)}%</span>`:''}</div>
       ${SC.confidence!=null&&SC.confidence<80?`<div class="num" style="margin:2px 0">신뢰도 = 판단에 쓰인 데이터 완전성(재무·실적·차트). 낮으면 점수가 나쁜 게 아니라 <b>근거가 부족</b>하다는 뜻이에요.</div>`:''}
       <div class="num" style="margin:2px 0 8px">${HELP.score}. ${marginTxt}</div>
-      ${bar("가치",SC.value,30)}${bar("품질",SC.quality,20)}${bar("성장",SC.growth,15)}${bar("추세",SC.momentum,25)}${bar("타이밍",SC.timing,10)}
-      <div class="num" style="margin-top:6px">싼가·튼튼한가·크는가·오르는가·살 때인가를 종합. ${(SC.reasons||[]).join(" · ")}</div>
+      <div class="num" style="margin:6px 0 4px">각 축을 눌러보지 않아도 근거가 바로 아래 보여요 — 싼가·튼튼한가·크는가·오르는가·살 때인가.</div>
+      ${axesH}
       ${SC.has_chart?"":'<div class="num" style="opacity:.7">※ 차트 미수집 — 관심종목 추가하면 추세·타이밍도 반영돼요</div>'}${usScoreNote}</div>`:'';
     // 주가흐름은 위 종합점수의 '추세' 축과 같은 기준으로 표시(판정 이중화 방지).
     const align=(S&&S.sma20!=null&&S.sma60!=null)?(S.sma20>S.sma60?'정배열(상승 배열)':'역배열(하락 배열)'):'–';
