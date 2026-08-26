@@ -574,7 +574,9 @@ async function renderHome(){
     ${rkCard("🇺🇸 미국 급등 TOP (1일)",RK.us_gainers)}
     <div class="card"><h3>등락 TOP</h3>${movers.map(r=>`<div class="row clk" onclick="openStock('${r.code}','${qesc(r.name||r.code)}')"><span>${r.name||r.code}</span>
       <b class="${(r.change_pct||0)>=0?'pos':'neg'}">${(r.change_pct||0)>=0?'+':''}${(r.change_pct||0).toFixed(2)}%</b></div>`).join("")||'<div class="empty">데이터 없음(KIS 키 필요)</div>'}</div>
-    <div class="card"><h3>🎯 오늘의 매수 후보 (매력도)</h3>${buys.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name} <span class="badge">${r.verdict}</span></span><b class="num strong ${VC(r.score)}">${numC(r.score,0)}</b></div>`).join("")||'<div class="empty">후보 없음 (KIS 키 필요)</div>'}</div>
+    <div class="card"><h3>📊 분석 점수 TOP <span class="badge">관심도 순위</span></h3>
+      <div class="num" style="margin:-2px 0 6px">‘분석 점수’는 지금 살까가 아니라 <b>얼마나 매력적인가</b>의 순위예요. 실제 매수 타이밍은 아래 <b>매매 플랜</b>·자동매매가 판단합니다.</div>
+      ${buys.slice(0,5).map(r=>`<div class="row clk" onclick="openStock('${r.code}','${r.name}')"><span>${r.name} <span class="badge ${r.score>=75?'buy':r.score>=60?'':'num'}">${r.verdict}</span></span><b class="num strong ${VC(r.score)}">${numC(r.score,0)}점</b></div>`).join("")||'<div class="empty">후보 없음 (KIS 키 필요)</div>'}</div>
     ${autoStatusCard(eng)}
     ${eng&&eng.enabled?`<div class="card"><h3>🛡️ 리스크 실드 ${eng.risk.buy_lock?'<span class="badge sell">매수 잠금</span>':'<span class="badge pos">정상</span>'}</h3>
       <div class="row"><span>최고점 대비(MDD)</span><b class="${(eng.risk.mdd_pct||0)>=10?'neg':'num'}">${eng.risk.mdd_pct!=null?'-'+numC(eng.risk.mdd_pct,1)+'%':'–'} <span class="num">(한도 -${numC(eng.rules.mdd_limit_pct,0)}%)</span></b></div>
