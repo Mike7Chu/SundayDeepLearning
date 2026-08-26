@@ -250,6 +250,30 @@ def krx_tick(p: float) -> float:
     return round(p / t) * t
 
 
+def entry_timing(entry: float | None, price: float | None, sr: dict | None = None,
+                 trend_ok: bool | None = None, band_pct: float = 4.0) -> dict | None:
+    """진입 타이밍 판정(순수 함수) — 매력도(점수)와 별개로 '지금 이 가격에 살까'.
+
+    매매 플랜·자동매매의 눌림목/과확장 규율과 같은 기준. 매력도가 높아도 현재가가
+    추천가(눌림목) 대비 과확장이면 '눌림 대기'를 알려, "적극매수인데 왜 안 사?" 혼란을
+    없앤다. 반환 {status, label, tone, over_pct} 또는 None.
+    """
+    if not entry or not price or price <= 0:
+        return None
+    over = round((price - entry) / entry * 100, 1)
+    if trend_ok is False:
+        st, label, tone = "downtrend", "하락 추세 — 매수 보류 권장", "neg"
+    elif over > band_pct:
+        st, label, tone = "chase", f"과확장(추천가 +{over:.1f}%) — 눌림목 대기", "neg"
+    elif sr and sr.get("pos") is not None and sr["pos"] <= 0.30:
+        st, label, tone = "support", "지지 구간 근처 — 반등 확인 후 진입", "num"
+    elif over < -band_pct:
+        st, label, tone = "below", f"추천가 아래({over:.1f}%) — 지지 확인 시 유리", "pos"
+    else:
+        st, label, tone = "ok", "진입 가능 구간(추천가 근처)", "pos"
+    return {"status": st, "label": label, "tone": tone, "over_pct": over}
+
+
 def support_resistance(closes: list[float], live_price: float | None = None,
                        window: int = 120, band_pct: float = 1.0) -> dict | None:
     """지지/저항 '구간'(순수 함수) — 최근 window일 저점/고점 근방 밴드.

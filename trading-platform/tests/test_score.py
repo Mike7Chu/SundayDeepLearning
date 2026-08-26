@@ -37,7 +37,7 @@ def test_compute_score_quality_value_stock():
     assert out["value"] > 20            # 가치 축 우수
     assert out["quality"] > 15          # 품질 축 우수
     assert out["momentum"] > 0          # 추세 반영
-    assert out["verdict"] in ("적극 매수 검토", "분할매수 구간", "관찰", "관망")
+    assert out["verdict"] in ("매력 최상위", "매력 양호", "관찰", "관망")
     assert out["margin_pct"] is not None
 
 

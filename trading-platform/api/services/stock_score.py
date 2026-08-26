@@ -162,10 +162,12 @@ def _timing_axis(q: dict, closes: list[float], sig: dict) -> tuple[float, list[s
 
 
 def _verdict(score: float) -> str:
+    # '매력도' 라벨 — 회사의 정적 매력(싼가·튼튼·크는가·오르는가)일 뿐, '지금 사라'는
+    # 진입 타이밍(눌림목·과확장·지지/저항)과 별개. '매수' 단어가 혼란을 줘 재프레이밍.
     if score >= 75:
-        return "적극 매수 검토"
+        return "매력 최상위"
     if score >= 60:
-        return "분할매수 구간"
+        return "매력 양호"
     if score >= 45:
         return "관찰"
     return "관망"

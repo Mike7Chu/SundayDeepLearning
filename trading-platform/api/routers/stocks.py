@@ -19,6 +19,7 @@ from api.services.news_sentiment import news_sentiment
 from collector.news.crawl import crawl_stock_news
 from api.services.stock_signal import (
     adx,
+    entry_timing,
     evaluate_signals,
     light_pillar,
     signals_for,
@@ -556,6 +557,9 @@ async def stock_detail(code: str) -> dict:
     score = compute_score(quote, closes)
     levels = trade_levels(closes, quote.get("price"), kr=kr)
     sr = support_resistance(closes, quote.get("price"))   # 지지/저항 구간(쉬운 차트 근거)
+    timing = entry_timing(                                 # 진입 타이밍(매력도와 별개)
+        (levels or {}).get("entry"), quote.get("price"), sr,
+        (levels or {}).get("trend_ok"))
     news_sent = None                                       # 뉴스·이슈 감성(규칙기반·토큰 0)
     if kr:
         titles = []
@@ -628,7 +632,7 @@ async def stock_detail(code: str) -> dict:
             else "미국 FCF는 AI 리서치(웹검색)에서 제공")}
     wl = await effective_watchlist(redis)
     return {"quote": quote, "signal": sig, "dividend": div, "score": score,
-            "levels": levels, "sr": sr, "news_sent": news_sent,
+            "levels": levels, "sr": sr, "timing": timing, "news_sent": news_sent,
             "pillar": pillar, "earnings_flash": flash,
             "supply": supply, "reverse_dcf": rdcf, "price_ts": quote.get("ts"),
             "in_watchlist": any(w.get("code") == code for w in wl)}

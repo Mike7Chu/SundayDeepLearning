@@ -1286,8 +1286,13 @@ function paintModal(code,name,d){
     const growCaveat=(SC.margin_pct!=null&&SC.margin_pct<0&&(SC.ni_growth_pct||0)>=15)?' <span class="num">(이익이 크게 느는 성장주는 가치 기준으로 비싸 보일 수 있어요)</span>':'';
     const marginTxt=SC.margin_pct==null?"":(SC.margin_pct>0?`<b class="pos">적정가보다 ${numC(SC.margin_pct,0)}% 싸요</b>`:`<b class="neg">그레이엄 가치 기준 ${numC(-SC.margin_pct,0)}% 비싸요</b>${growCaveat}`);
     const usScoreNote=US?`<div class="num" style="margin-top:6px">🇺🇸 미국 종목은 가치·품질(EPS/BPS) 데이터가 없어 점수는 <b>성장(SEC 분기실적)·추세·타이밍만</b> 반영돼요 — 낮게 나와도 회사가 나쁘다는 뜻이 아니에요. 참고용으로만 보세요.</div>`:"";
+    // 진입 타이밍(매력도와 별개) — '적극매수인데 왜 안 사?' 혼란 해소.
+    const TM=d.timing;
+    const tmH=TM?`<div class="card" style="margin-bottom:10px;border-left:3px solid var(--${TM.tone==='pos'?'green':TM.tone==='neg'?'up':'accent'},#888)">
+      <b>🎯 지금 진입 타이밍</b> <span class="badge ${TM.tone}">${escH(TM.label)}</span>
+      <div class="num" style="margin-top:4px">위 <b>매력도</b>는 '이 회사가 얼마나 좋은가'(정적 평가)예요. 지금 <b>이 가격에 살까</b>는 이 타이밍이 기준 — 매매 플랜·자동매매도 같은 규율(눌림목/과확장)을 씁니다. <b>매력 높음 ≠ 지금 매수</b>.</div></div>`:'';
     const scoreH=SC.score!=null?`<div class="card" style="margin-bottom:10px">
-      <div class="kpi ${VC(SC.score)}">${numC(SC.score,0)}<span class="u">점 / 100 · ${SC.verdict||''}</span>
+      <div class="kpi ${VC(SC.score)}">${numC(SC.score,0)}<span class="u">점 / 100 · 매력도 ${SC.verdict||''}</span>
         ${SC.confidence!=null?`<span class="badge ${SC.confidence>=80?'pos':SC.confidence>=50?'':'sell'}" style="margin-left:8px">신뢰도 ${numC(SC.confidence,0)}%</span>`:''}</div>
       ${SC.confidence!=null&&SC.confidence<80?`<div class="num" style="margin:2px 0">신뢰도 = 판단에 쓰인 데이터 완전성(재무·실적·차트). 낮으면 점수가 나쁜 게 아니라 <b>근거가 부족</b>하다는 뜻이에요.</div>`:''}
       <div class="num" style="margin:2px 0 8px">${HELP.score}. ${marginTxt}</div>
@@ -1376,7 +1381,7 @@ function paintModal(code,name,d){
         ${US?'<div class="num" style="margin-top:4px">QQQ·SPY·JEPI 등 주요 ETF는 유니버스에 넣어뒀어요 — collector가 지원 여부를 확인해 채웁니다. 그래도 비면 토스 미지원이에요.</div>':''}</div>`:'';
     $("mBody").innerHTML=`<div class="arow" style="margin-bottom:8px">${wbtn}${freshBadge(pts)}</div>
       ${noDataWarn}${staleWarn}
-      <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}
+      <div class="modal-sec">이 주식, 살 만한가요?</div>${scoreH}${tmH}
       <div class="modal-sec">회사 가치·실적</div>${flashH}${fund}${rdcfH}
       ${easyH}${newsH}
       <div class="modal-sec">주가 흐름</div>${sgH}
