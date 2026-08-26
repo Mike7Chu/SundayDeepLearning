@@ -1382,6 +1382,8 @@ function paintModal(code,name,d){
       <div class="modal-sec">주가 흐름</div>${sgH}
       <div class="modal-sec">매매 가격 가이드</div>${lvH}
       <div class="modal-sec">배당금</div>${dvH}
+      <div class="modal-sec">뉴스 ${US?'<span class="badge">해외 — 한국어 번역</span>':'<span class="badge">구글 뉴스</span>'}</div>
+      <div id="mNewsBox"><button class="btn" onclick="mNews('${qesc(code)}',${US?1:0})">📰 뉴스 불러오기</button></div>
       <div class="modal-sec">더 알아보기</div>
       <div class="arow"><button class="btn" onclick="mChart('${qesc(code)}','${US?'USD':'KRW'}')">📊 차트(TradingView)</button>
         <button class="btn" onclick="mBacktest('${qesc(code)}')">📈 과거 성과</button>
@@ -1393,6 +1395,20 @@ function paintModal(code,name,d){
 // 로그인을 요구하므로 우리가 수집한 일봉으로 Lightweight Charts(TradingView 제작) 자체 렌더.
 let krChartMode='line';   // 국내 차트 표시 모드: 'line'(꺾은선) | 'candle'(봉차트)
 function setKrChart(mode,code){ krChartMode=mode; const e=$("mExtra"); if(e) mChartKR(e,code); }
+async function mNews(code,isUS){
+  const b=$("mNewsBox"); if(!b) return;
+  b.innerHTML='<div class="empty">📰 뉴스 불러오는 중… (구글 뉴스'+(isUS?' + 한국어 번역':'')+')</div>';
+  try{
+    const d=await jget(`/stocks/${encodeURIComponent(code)}/news`);
+    const rows=d.rows||[];
+    if(!rows.length){ b.innerHTML='<div class="empty">관련 뉴스를 못 찾았어요 (RSS 차단·네트워크일 수 있어요). 잠시 후 다시 시도해 주세요.</div>'; return; }
+    b.innerHTML=rows.map(r=>{
+      const tko=(r.title_ko&&r.title_ko!==r.title)?`<div>${escH(r.title_ko)}</div><div class="num" style="opacity:.65">${escH(r.title)}</div>`:`<div>${escH(r.title)}</div>`;
+      const meta=`<div class="num" style="opacity:.75">${escH(r.source||'')}${r.published?' · '+escH(r.published):''}</div>`;
+      return `<div class="row" style="display:block;padding:7px 0"><a class="clk" href="${escH(r.url||'#')}" target="_blank" rel="noopener">${tko}</a>${meta}</div>`;
+    }).join("")+`<div class="num" style="margin-top:6px;opacity:.7">구글 뉴스 RSS · 30분 캐시${isUS?' · 해외 헤드라인 한국어 자동번역(참고용)':''}</div>`;
+  }catch(e){ b.innerHTML='<div class="empty">뉴스 실패: '+escH(e.message||'')+'</div>'; }
+}
 function mChart(code,cur){
   const e=$("mExtra"); if(!e) return;
   if(/^\d{6}$/.test(code)) return mChartKR(e,code);

@@ -16,6 +16,7 @@ from collector.news.dart import DartClient
 from collector.stock.toss import TossClient, candle_metrics
 from api.services.stock_dividend import compute_dividend, dividend_view
 from api.services.news_sentiment import news_sentiment
+from collector.news.crawl import crawl_stock_news
 from api.services.stock_signal import (
     adx,
     evaluate_signals,
@@ -297,6 +298,43 @@ async def stock_candles(code: str, limit: int = 180) -> dict:
                    "low": c.get("low"), "open": c.get("open"), "volume": c.get("volume")}
     out = sorted(seen.values(), key=lambda r: r["time"])   # 오름차순·time 유일(차트 요구)
     return {"code": code, "candles": out}
+
+
+@router.get("/stocks/{code}/news")
+async def stock_news(code: str, force: bool = False, limit: int = 8) -> dict:
+    """종목 일반 뉴스 크롤링(구글 뉴스 RSS) — 해외(미국)는 한국어 번역 병기. 30분 캐시.
+
+    국내=회사명으로 검색(한국어판), 미국=티커로 검색(영어판→번역). DART 공시와 별개.
+    온디맨드+캐시라 평소 부하 없음(토큰 0 — 번역은 무키 엔드포인트).
+    """
+    redis = get_redis()
+    kr = code.isdigit()
+    ckey = f"news:crawl:{code}"
+    if not force:
+        cached = await redis.get(ckey)
+        if cached:
+            try:
+                return json.loads(cached)
+            except (json.JSONDecodeError, TypeError):
+                pass
+    name = ""
+    for key in (STOCK_QUOTE_KEY, STOCK_MARKET_KEY):
+        raw_q = await redis.hget(key, code)
+        if raw_q:
+            try:
+                name = json.loads(raw_q).get("name") or ""
+            except (json.JSONDecodeError, TypeError):
+                name = ""
+            if name:
+                break
+    if not name and kr:
+        name = next((w.get("name", "") for w in await effective_watchlist(redis)
+                     if w.get("code") == code), "")
+    query = name if (kr and name) else (code if kr else f"{code} stock")
+    rows = await crawl_stock_news(query, kr=kr, cap=min(max(limit, 1), 12))
+    out = {"code": code, "query": query, "kr": kr, "rows": rows, "ts": _time.time()}
+    await redis.set(ckey, json.dumps(out, ensure_ascii=False), ex=1800)
+    return out
 
 
 def _norm_day(v) -> str:
