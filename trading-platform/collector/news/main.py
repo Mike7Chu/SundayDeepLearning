@@ -9,16 +9,21 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 import httpx
 import redis.asyncio as aioredis
 
+from collector.news.crawl import crawl_stock_news
 from collector.news.dart import DartClient, find_earnings_flash, format_disclosure
 from collector.stock.kis import effective_watchlist
+from api.services.news_sentiment import news_sentiment
 from notifier.telegram import TelegramSender
 from shared.redis_keys import (
     DART_RECENT_KEY,
     DART_SEEN_KEY,
+    ENGINE_PLAN_KEY,
+    NEWS_SENT_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
     TOSS_HOLDINGS_KEY,
@@ -78,16 +83,90 @@ async def _handle_flash(redis: aioredis.Redis, dart: DartClient,
                 fig.get("rev_yoy"), fig.get("op_yoy"), fig.get("ni_yoy"))
 
 
-async def run() -> None:
-    dart = DartClient()
-    if not dart.enabled:
-        logger.info("DART 미설정 → 공시 수집 비활성 (.env DART_API_KEY)")
-        # 그냥 return하면 컨테이너가 exit 0 → restart 정책이 재기동 반복(크래시 루프처럼 보임).
-        # idle로 살아있게 영구 대기.
-        await asyncio.Event().wait()
+async def _stock_name(redis: aioredis.Redis, code: str) -> str:
+    for key in (STOCK_QUOTE_KEY, STOCK_MARKET_KEY):
+        raw = await redis.hget(key, code)
+        if raw:
+            try:
+                nm = json.loads(raw).get("name")
+            except (json.JSONDecodeError, TypeError):
+                nm = None
+            if nm:
+                return nm
+    return ""
+
+
+async def _news_sentiment_pass(redis: aioredis.Redis) -> None:
+    """stage1(1차분류)+관심종목의 DART 제목 + 구글뉴스 헤드라인 → 규칙기반 감성 저장.
+
+    점수 '뉴스' 축(±5)이 이걸 읽어 평가에 반영. 국내(6자리)만, 상한·간격으로 부하 억제.
+    """
+    codes: list[str] = []
+    try:
+        raw_plan = await redis.get(ENGINE_PLAN_KEY)
+        if raw_plan:
+            codes += (json.loads(raw_plan).get("stage1_codes") or [])
+    except (json.JSONDecodeError, TypeError):
+        pass
+    for w in await effective_watchlist(redis):
+        if w.get("code"):
+            codes.append(w["code"])
+    seen: set[str] = set()
+    uniq = [c for c in codes if str(c).isdigit() and not (c in seen or seen.add(c))]
+    uniq = uniq[:settings.news_sent_max]
+    if not uniq:
         return
+    dart_titles: dict[str, list[str]] = {}
+    for v in await redis.lrange(DART_RECENT_KEY, 0, 300):
+        try:
+            it = json.loads(v)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        sc = it.get("stock_code")
+        if sc:
+            dart_titles.setdefault(sc, []).append(it.get("report_nm") or "")
+    done = 0
+    for code in uniq:
+        titles = list(dart_titles.get(code, []))
+        name = await _stock_name(redis, code)
+        try:
+            news = await crawl_stock_news(name or code, kr=True, cap=8)
+            titles += [n.get("title") or "" for n in news]
+        except Exception:
+            pass
+        sent = news_sentiment(titles)
+        if sent:
+            await redis.hset(NEWS_SENT_KEY, code,
+                             json.dumps({**sent, "ts": time.time()}, ensure_ascii=False))
+            done += 1
+        await asyncio.sleep(1)          # 크롤 간격 — 구글 뉴스 rate-limit 방지
+    logger.info("[news-sent] 감성 갱신 %d종목", done)
+
+
+async def _news_sentiment_loop(redis: aioredis.Redis) -> None:
+    if not settings.news_sent_enabled:
+        return
+    await asyncio.sleep(20)             # 기동 직후 여유(플랜·시세 적재 대기)
+    while True:
+        try:
+            await _news_sentiment_pass(redis)
+        except Exception as exc:
+            logger.warning("[news-sent] 패스 실패: %s", exc)
+        await asyncio.sleep(settings.news_sent_interval_sec)
+
+
+async def run() -> None:
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     sender = TelegramSender()
+    news_task = asyncio.create_task(_news_sentiment_loop(redis))   # DART와 독립 병행
+    dart = DartClient()
+    if not dart.enabled:
+        logger.info("DART 미설정 → 공시 수집 비활성 (.env DART_API_KEY). 뉴스 감성만 구동.")
+        try:
+            await news_task            # 뉴스 감성은 계속(DART 없어도)
+        finally:
+            await redis.aclose()
+        return
     logger.info("dart start (interval=%ss, watch_all=%s, telegram=%s)",
                 settings.dart_interval_sec, settings.dart_watch_all, sender.enabled)
     try:

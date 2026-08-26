@@ -173,11 +173,28 @@ def _verdict(score: float) -> str:
     return "관망"
 
 
-def compute_score(quote: dict, closes: list[float] | None = None) -> dict:
-    """merged quote(+일봉 종가) → 투자 매력도 0~100 + 판정 + 축별 근거.
+def _news_axis(news: dict | None) -> tuple[float, list[str]]:
+    """뉴스 가감 ±5점 — 감성 스코어(-1~+1)×5. 뉴스 없으면 0(중립·가감 없음).
 
-    가치30 + 품질20 + 성장15 + 추세25 + 타이밍10. 성장 축이 트레일링 가치
-    지표의 사이클 함정(이익 급증기에 '비싸 보임')을 보정한다.
+    호재/악재 뉴스가 매력도에 소폭 반영되게 한다(HONG STOCK 벤치마크·사용자 요청).
+    과도 반영을 막으려 ±5로 제한 — 핵심은 재무·추세, 뉴스는 보조 신호.
+    """
+    if not news or news.get("n") in (None, 0) or news.get("score") is None:
+        return 0.0, []
+    s = max(-1.0, min(1.0, news["score"]))
+    adj = round(s * 5, 1)
+    reasons = []
+    if abs(adj) >= 1:
+        reasons.append(f"뉴스 {news.get('label', '')} {adj:+.0f}점(공시 {news.get('n')}건)")
+    return adj, reasons
+
+
+def compute_score(quote: dict, closes: list[float] | None = None,
+                  news: dict | None = None) -> dict:
+    """merged quote(+일봉 종가, +뉴스 감성) → 투자 매력도 0~100 + 판정 + 축별 근거.
+
+    가치30 + 품질20 + 성장15 + 추세25 + 타이밍10 (=100) ± 뉴스 5. 성장 축이
+    트레일링 가치 지표의 사이클 함정을 보정하고, 뉴스는 소폭 가감(보조).
     """
     closes = closes or []
     v, vr = _value_axis(quote)
@@ -185,8 +202,9 @@ def compute_score(quote: dict, closes: list[float] | None = None) -> dict:
     gr, grr = _growth_axis(quote)
     mo, mr, sig = _momentum_axis(closes)
     tm, tr = _timing_axis(quote, closes, sig)
-    total = round(v + ql + gr + mo + tm, 1)
-    reasons = vr + qr + grr + mr + tr
+    nw, nwr = _news_axis(news)
+    total = round(min(100.0, max(0.0, v + ql + gr + mo + tm + nw)), 1)
+    reasons = vr + qr + grr + mr + tr + nwr
     # 축별 분해(설명가능성) — 총점을 어느 축이 얼마나 채웠나 + 각 축의 근거를 별도 노출.
     axes = [
         {"key": "value", "label": "가치", "score": v, "max": 30, "reasons": vr,
@@ -199,6 +217,8 @@ def compute_score(quote: dict, closes: list[float] | None = None) -> dict:
          "desc": "오르는 흐름인가(정배열·SMA60·모멘텀)"},
         {"key": "timing", "label": "타이밍", "score": tm, "max": 10, "reasons": tr,
          "desc": "지금 살 때인가(MACD·52주 위치)"},
+        {"key": "news", "label": "뉴스", "score": round(5 + nw, 1), "max": 10,
+         "reasons": nwr, "desc": "최근 공시·뉴스 감성(±5 가감 · 5=중립)"},
     ]
     # 신뢰도(Confidence): 점수를 구성한 데이터가 얼마나 채워졌나(0~100).
     # 낮으면 '점수가 낮다'가 아니라 '판단 근거가 부족하다'는 뜻 — 별도 축으로 노출.
@@ -213,7 +233,7 @@ def compute_score(quote: dict, closes: list[float] | None = None) -> dict:
         "code": quote.get("code"), "name": quote.get("name"), "price": quote.get("price"),
         "score": total, "verdict": _verdict(total), "confidence": confidence,
         "value": v, "quality": ql, "growth": gr, "momentum": mo, "timing": tm,
-        "axes": axes,
+        "news_adj": nw, "news_sent": news, "axes": axes,
         "margin_pct": margin_of_safety(quote.get("price"), quote.get("eps"), quote.get("bps")),
         "graham": graham_number(quote.get("eps"), quote.get("bps")),
         "ni_growth_pct": quote.get("ni_growth_pct"),

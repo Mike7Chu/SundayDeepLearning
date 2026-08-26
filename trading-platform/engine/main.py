@@ -987,10 +987,11 @@ async def _swing_plan(redis: aioredis.Redis, toss: TossClient, risk: dict,
     # 종목선정 퍼널(홈 시각화·HONG STOCK 벤치마크 R1): 전체 시장 → 1차선별 → 정밀평가 → 최종후보.
     funnel = {"market": len(quotes), "stage1": len(stage1),
               "evaluated": n_all, "candidates": len(plan_buys)}
+    stage1_codes = [q["code"] for q in stage1 if q.get("code")]   # 뉴스 크롤 대상(1차분류)
     await redis.set(ENGINE_PLAN_KEY, json.dumps(
         {"style": "실적+추세 스윙 · 중립 리스크 · 국내 전체+미국",
          "buys": plan_buys, "sells": sells[:3], "regime": regime,
-         "funnel": funnel, "ts": time.time()},
+         "funnel": funnel, "stage1_codes": stage1_codes, "ts": time.time()},
         ensure_ascii=False))
     buys_kr = sum(1 for b in buys if b.get("currency") != "USD")
     logger.info("[plan] 매수 후보 %d(국내 %d·미국 %d, 검증 %d) · 매도 점검 %d "

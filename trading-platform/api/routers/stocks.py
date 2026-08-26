@@ -42,6 +42,7 @@ from shared.redis_keys import (
     DART_CORP_KEY,
     DART_RECENT_KEY,
     MARKET_INDICATORS_KEY,
+    NEWS_SENT_KEY,
     MARKET_RANKINGS_KEY,
     STOCK_DIVIDEND_KEY,
     STOCK_MARKET_KEY,
@@ -221,7 +222,15 @@ async def _score_build(limit: int) -> dict:
                                  if isinstance(x, dict) and x.get("close")]
             except (ValueError, TypeError):
                 pass
-    rows = [compute_score(q, closes_map.get(q["code"], [])) for q in quotes]
+    ns_raw = await get_redis().hgetall(NEWS_SENT_KEY)   # 뉴스 감성(백그라운드 패스)
+    news_map = {}
+    for c, v in ns_raw.items():
+        try:
+            news_map[c] = json.loads(v)
+        except (json.JSONDecodeError, TypeError):
+            continue
+    rows = [compute_score(q, closes_map.get(q["code"], []), news_map.get(q["code"]))
+            for q in quotes]
     rows.sort(key=lambda r: r["score"], reverse=True)
     return {"rows": rows[:limit], "total": len(rows)}
 
@@ -554,25 +563,33 @@ async def stock_detail(code: str) -> dict:
            if len(closes) >= 20 else None)
     if sig is not None:
         sig["adx"] = adx(candles)   # 추세 강도(고가·저가 필요 — 캔들 원본 기준)
-    score = compute_score(quote, closes)
+    # 뉴스·이슈 감성(규칙기반·토큰 0) — 백그라운드 패스 저장분 우선, 없으면 DART 즉석 계산.
+    news_sent = None
+    if kr:
+        stored = await redis.hget(NEWS_SENT_KEY, code)
+        if stored:
+            try:
+                news_sent = _json.loads(stored)
+            except (ValueError, TypeError):
+                news_sent = None
+        if not news_sent:
+            titles = []
+            for v in await redis.lrange(DART_RECENT_KEY, 0, 200):
+                try:
+                    it = _json.loads(v)
+                except (ValueError, TypeError):
+                    continue
+                if it.get("stock_code") == code:
+                    titles.append(it.get("report_nm") or it.get("title") or "")
+                if len(titles) >= 25:
+                    break
+            news_sent = news_sentiment(titles)
+    score = compute_score(quote, closes, news_sent)       # 뉴스 축(±5) 반영
     levels = trade_levels(closes, quote.get("price"), kr=kr)
     sr = support_resistance(closes, quote.get("price"))   # 지지/저항 구간(쉬운 차트 근거)
     timing = entry_timing(                                 # 진입 타이밍(매력도와 별개)
         (levels or {}).get("entry"), quote.get("price"), sr,
         (levels or {}).get("trend_ok"))
-    news_sent = None                                       # 뉴스·이슈 감성(규칙기반·토큰 0)
-    if kr:
-        titles = []
-        for v in await redis.lrange(DART_RECENT_KEY, 0, 200):
-            try:
-                it = _json.loads(v)
-            except (ValueError, TypeError):
-                continue
-            if it.get("stock_code") == code:
-                titles.append(it.get("report_nm") or it.get("title") or "")
-            if len(titles) >= 25:
-                break
-        news_sent = news_sentiment(titles)
     pillar = light_pillar(candles) if kr else None   # 수급 기준(억원)은 국내 전용
     # 배당: 저장분 → 없으면 DART 온디맨드(국내만 — 미국은 DART 미커버)
     div = None

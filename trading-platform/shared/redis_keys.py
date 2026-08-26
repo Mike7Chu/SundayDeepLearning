@@ -28,6 +28,9 @@ WATCHLIST_KEY = "stock:watchlist"
 STOCK_UNIVERSE_KEY = "stock:universe"   # value=json[{code,name,market}]
 STOCK_MARKET_KEY = "stock:market"       # field=code, value=json(quote+밸류에이션)
 
+# 종목별 뉴스 감성(hash{code: json{score,label,pos,neg,n,ts}}) — DART+구글뉴스 결합,
+# 규칙기반(토큰 0). 백그라운드 패스가 stage1 후보·관심종목을 채운다 → 점수 뉴스 축.
+NEWS_SENT_KEY = "news:sentiment"
 # DART 공시. dart:recent=list(json 최근공시), dart:seen=set(접수번호 rcept_no)
 DART_RECENT_KEY = "dart:recent"
 DART_SEEN_KEY = "dart:seen"
