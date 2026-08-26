@@ -559,6 +559,7 @@ async function renderHome(){
       ${roadmapLine(rm)}
     </div>
     ${coachCardHTML(co)}
+    ${funnelCardHTML(pl)}
     ${planCardHTML(pl)}
     ${calCardHTML(cal)}
     <div class="card"><h3>시장 온도</h3>
@@ -645,6 +646,19 @@ function calCardHTML(cal){
     ${secs}${dup?`<div class="num" style="margin-top:6px">⚠️ 중복 반영 의심: ${dup} (|r|&gt;0.7 = 두 축이 같은 정보)</div>`:''}</div>`;
 }
 
+function funnelCardHTML(pl){
+  const f=(pl||{}).funnel; if(!f) return "";
+  const step=(lab,val,cls,arrow)=>`<div style="display:flex;align-items:center;gap:8px">
+    <div style="text-align:center;padding:10px 12px;border-radius:12px;background:${cls};min-width:74px">
+      <div class="num" style="opacity:.85">${lab}</div><b style="font-size:19px">${numC(val,0)}</b></div>
+    ${arrow?'<span style="opacity:.5">›</span>':''}</div>`;
+  const g1="rgba(43,217,160,.10)", g2="rgba(43,217,160,.18)", g3="rgba(43,217,160,.30)", g4="var(--green)";
+  return `<div class="card"><h3>오늘의 종목선정 과정 <span class="badge">퍼널</span></h3>
+    <div class="num" style="margin:-2px 0 8px">전체 시장에서 단계별로 좁혀 최종 후보를 뽑는 과정이에요.</div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;overflow-x:auto">
+      ${step("전체 시장",f.market,g1,1)}${step("1차 선별",f.stage1,g2,1)}${step("정밀 평가",f.evaluated,g3,1)}${step("최종 후보",f.candidates,g4,0)}
+    </div></div>`;
+}
 function planCardHTML(pl){
   pl=pl||{};
   const buys=pl.buys||[], sells=pl.sells||[], rg=pl.regime||{};
