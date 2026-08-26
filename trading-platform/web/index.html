@@ -304,6 +304,7 @@
     <button data-tab="research"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-ai"/></svg>AI 분석</button>
     <button data-tab="journal"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-journal"/></svg>매매일지</button>
     <button data-tab="backtest"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sig"/></svg>백테스트</button>
+    <button data-tab="tenbagger"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-gem"/></svg>텐베거</button>
     <button data-tab="settings"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-set"/></svg>설정</button>
   </nav>
   <div class="side-foot">🍓 Raspberry Pi · 24h 가동</div>
@@ -336,6 +337,7 @@
   <div id="panel-research" class="panel"><div id="researchBox"><div class="skel" style="height:80px"></div><div class="skel" style="height:80px"></div></div></div>
   <div id="panel-journal" class="panel"><div id="journalBox"><div class="skel" style="height:80px"></div><div class="skel" style="height:180px"></div></div></div>
   <div id="panel-backtest" class="panel"><div id="backtestBox"><div class="skel" style="height:60px"></div><div class="skel" style="height:200px"></div></div></div>
+  <div id="panel-tenbagger" class="panel"><div id="tenbaggerBox"><div class="skel" style="height:60px"></div><div class="skel" style="height:200px"></div></div></div>
   <div id="panel-settings" class="panel"><div id="settingsBox"></div></div>
 </div>
 </div><!-- /.main -->
@@ -356,6 +358,7 @@
   <button data-tab="research"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-ai"/></svg>AI 분석</button>
   <button data-tab="journal"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-journal"/></svg>매매일지</button>
   <button data-tab="backtest"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sig"/></svg>백테스트</button>
+  <button data-tab="tenbagger"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-gem"/></svg>텐베거</button>
   <button data-tab="settings"><svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-set"/></svg>설정</button>
 </div>
 
@@ -487,8 +490,8 @@ function patchLive(code,q){
   });
 }
 
-const TABNAME={home:"홈",portfolio:"내 주식",signal:"살까 말까",stocks:"전체 종목",value:"저평가",dividend:"배당금",news:"공시",research:"AI 분석",journal:"매매일지",backtest:"백테스트",settings:"설정"};
-const MORE_TABS=["value","dividend","news","research","journal","backtest","settings"];   // 모바일 '더보기' 시트 소속
+const TABNAME={home:"홈",portfolio:"내 주식",signal:"살까 말까",stocks:"전체 종목",value:"저평가",dividend:"배당금",news:"공시",research:"AI 분석",journal:"매매일지",backtest:"백테스트",tenbagger:"텐베거",settings:"설정"};
+const MORE_TABS=["value","dividend","news","research","journal","backtest","tenbagger","settings"];   // 모바일 '더보기' 시트 소속
 function switchTab(t){
   activeTab=t;
   document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("active",b.dataset.tab===t));
@@ -514,6 +517,7 @@ async function render(){
     else if(activeTab==="research") await renderResearch();
     else if(activeTab==="journal") await renderJournal();
     else if(activeTab==="backtest") await renderBacktest();
+    else if(activeTab==="tenbagger") await renderTenbagger();
     else if(activeTab==="settings") await renderSettings();
     for(const c in LIVE) patchLive(c,LIVE[c]);   // 방금 그린 셀에 최신 실시간가 덧칠
     setStatus("live",(es&&es.readyState===1)?"실시간":"자동갱신");
@@ -1029,6 +1033,48 @@ function statsCardHTML(s){
       <b class="sell">⚠️ 모의엔 이 비용이 없어요 — <u>net</u>이 실전 예상치. 거래가 잦을수록(초단타) 비용이 수익을 갉아먹습니다.</b></div></div>`;
 }
 
+let tbSlot="탐색";
+const TB_CMDS=[["탐색","🔍 탐색"],["신규발굴","🆕 신규발굴"],["오늘점검","🔄 오늘 점검"],["가격만","💲 가격만"]];
+async function renderTenbagger(){
+  const box=$("tenbaggerBox"); if(!box) return;
+  let list={rows:[]}; try{ list=await jget("/tenbagger"); }catch(e){}
+  const rows=list.rows||[];
+  let cur=rows.find(r=>r.slot===tbSlot); if(!cur&&rows.length){ cur=rows[0]; tbSlot=cur.slot; }
+  const btns=TB_CMDS.map(([c,l])=>`<button class="btn ${tbSlot===c?'buy':''}" onclick="tbRun('${c}')">${l}</button>`).join(" ");
+  const dive=`<input id="tbDive" placeholder="RKLB" style="width:88px" maxlength="8"><button class="btn" onclick="tbDive()">🔬 딥다이브</button>`;
+  const saved=rows.map(r=>`<button class="btn ${r.slot===tbSlot?'buy':''}" onclick="tbShow('${qesc(r.slot)}')">${escH(r.slot)} <span class="num">${r.ts?new Date(r.ts*1000).toLocaleDateString('ko-KR'):''}</span></button>`).join(" ");
+  box.innerHTML=`<div class="card"><h3>🚀 텐베거 디텍터 <span class="badge">5~10년 10배 발굴</span>
+      <span class="badge" title="미래 산업의 구조 변화를 조기 감지해 5~10년 10배 가능성 있는 기업을 발굴. 시총 역산·경쟁분석·Kill Thesis까지. 웹검색 심층 리서치라 수 분 걸려요.">?</span></h3>
+    <div class="arow" style="flex-wrap:wrap;gap:8px">${btns} ${dive}</div>
+    ${list.enabled===false?'<div class="num" style="margin-top:6px" ><span class="sell">AI 리서치 비활성</span> — 구독 CLI(RESEARCH_USE_CLI) 또는 API 키 필요</div>':''}
+    <div class="num" style="margin-top:8px">탐색·신규발굴·딥다이브는 12h 캐시(🔄 다시로 갱신), 오늘점검·가격만은 항상 최신. <b class="sell">투자 판단 보조 · 수익 보장 아님.</b></div>
+    ${saved?`<div class="arow" style="flex-wrap:wrap;gap:6px;margin-top:8px">${saved}</div>`:''}</div>
+    <div id="tbResult">${cur&&cur.report?`<div class="md">${mdHTML(cur.report)}</div>`:'<div class="empty">위 버튼으로 발굴을 시작하세요 (첫 실행은 수 분).</div>'}</div>`;
+}
+function tbShow(slot){ tbSlot=slot; render(); }
+function tbDive(){ const t=(($("tbDive")||{}).value||"").trim().toUpperCase(); if(t) tbRun("딥다이브 "+t); }
+async function tbRun(command, force){
+  tbSlot=command;
+  const rz=$("tbResult"); if(rz) rz.innerHTML='<div class="empty">🚀 발굴 중… (전 시장 심층 리서치 · 수 분 소요)</div>';
+  try{
+    const r=await (await fetch(`/tenbagger?command=${encodeURIComponent(command)}${force?'&force=true':''}`,{method:"POST"})).json();
+    if(!rz) return;
+    if(r.enabled===false){ rz.innerHTML=`<div class="empty">${escH(r.report)}</div>`; return; }
+    if(r.queued){ rz.innerHTML=`<div class="num" style="margin:4px 0">${escH(r.report)}</div>`+(r.prev?`<div class="md">${mdHTML(r.prev)}</div>`:''); tbPoll(command, r.prev_ts||0, 0); return; }
+    const again=`<a class="clk" onclick="tbRun('${qesc(command)}',true)">🔄 다시</a>`;
+    rz.innerHTML=`<div class="num" style="margin:4px 0">${r.cached?'📌 저장분':'방금 분석'} · ${again}</div><div class="md">${mdHTML(r.report)}</div>`+(r.disclaimer?`<div class="rdisc">${escH(r.disclaimer)}</div>`:'');
+  }catch(e){ if(rz) rz.innerHTML=`<div class="empty">실패: ${escH(e.message||'')}</div>`; }
+}
+async function tbPoll(command, prevTs, tries){
+  if(tries>60){ const rz=$("tbResult"); if(rz) rz.innerHTML='<div class="empty">아직 결과가 없어요 — 호스트 research 구동 확인(run-research-host.sh)</div>'; return; }
+  await new Promise(r=>setTimeout(r,6000));
+  if(activeTab!=="tenbagger") return;                 // 탭 떠나면 폴링 중단
+  const d=await jget("/tenbagger").catch(()=>null);
+  const row=d&&(d.rows||[]).find(x=>x.slot===command);
+  const rz=$("tbResult"); if(!rz) return;
+  if(row&&row.report&&row.ts&&(!prevTs||row.ts>prevTs)) rz.innerHTML=`<div class="md">${mdHTML(row.report)}</div>`;
+  else tbPoll(command, prevTs, tries+1);
+}
 let btCode=null;
 const BT_STRATS=[["strategy","우리 전략"],["rsi2","RSI2 평균회귀"],["rsi","RSI14 평균회귀"],["sma","SMA 크로스"],["momentum","모멘텀"]];
 function btMiniCard(label,d,best){

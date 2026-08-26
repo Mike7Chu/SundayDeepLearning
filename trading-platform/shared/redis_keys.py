@@ -12,6 +12,10 @@ RESEARCH_KEY = "research:reports"
 # 온디맨드 분석 요청 큐(set of 종목코드). 컨테이너 API가 넣고 호스트 research가 처리.
 RESEARCH_REQ_KEY = "research:requests"
 # 호스트 research 생존 신호(str epoch, TTL 180s) — 점검 요청 시 구동 여부 즉시 판별
+# TENBAGGER DETECTOR(5~10년 10배 성장주 발굴) — 리포트 저장(hash{slot: json}) + 요청 큐(set).
+# slot 예: "탐색"·"신규발굴"·"오늘점검"·"가격만"·"딥다이브:RKLB".
+TENBAGGER_KEY = "research:tenbagger"
+TENBAGGER_REQ_KEY = "research:tenbagger_requests"
 RESEARCH_HB_KEY = "research:heartbeat"
 # 단일 활성 락 — research 프로세스가 여럿(도커 컨테이너 + 호스트 래퍼)이어도
 # 락을 쥔 하나만 큐 처리·발송(중복 텔레그램 방지). value=프로세스 토큰, TTL 갱신.

@@ -121,6 +121,16 @@ def test_parse_command_orders():
     assert parse_command("/start") == {"cmd": "도움말"}
 
 
+def test_parse_command_tenbagger():
+    assert parse_command("텐베거") == {"cmd": "tenbagger", "command": "탐색"}
+    assert parse_command("텐베거 신규발굴") == {"cmd": "tenbagger", "command": "신규발굴"}
+    assert parse_command("텐베거 오늘점검") == {"cmd": "tenbagger", "command": "오늘점검"}
+    assert parse_command("딥다이브 rklb") == {"cmd": "tenbagger", "command": "딥다이브 RKLB"}
+    assert parse_command("딥다이브 005930") == {"cmd": "tenbagger", "command": "딥다이브 005930"}
+    # '오늘점검' 단독은 여전히 코치 점검(텐베거와 충돌 없음)
+    assert parse_command("오늘점검") == {"cmd": "점검"}
+
+
 def test_parse_command_rejects_malformed():
     assert parse_command("매수 삼성전자 10") is None      # 코드는 6자리 숫자/미국 티커만
     assert parse_command("매수 005930") is None            # 수량 누락

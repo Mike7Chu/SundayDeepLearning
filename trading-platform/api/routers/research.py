@@ -21,6 +21,8 @@ from shared.redis_keys import (
     RESEARCH_REQ_KEY,
     RESEARCH_STORY_KEY,
     RESEARCH_STORY_REQ_KEY,
+    TENBAGGER_KEY,
+    TENBAGGER_REQ_KEY,
 )
 
 router = APIRouter()
@@ -142,3 +144,43 @@ async def research_story_get(code: str) -> dict:
     if not raw:
         raise HTTPException(status_code=404, detail="스토리 리포트 없음 — POST .../story로 생성")
     return json.loads(raw)
+
+
+@router.get("/tenbagger")
+async def tenbagger_list() -> dict:
+    """TENBAGGER DETECTOR 저장 리포트 목록(최신순). enabled로 활성 여부 표시."""
+    raw = await get_redis().hgetall(TENBAGGER_KEY)
+    rows = []
+    for slot, v in raw.items():
+        try:
+            r = json.loads(v)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        rows.append({"slot": slot, "ts": r.get("ts"), "command": r.get("command"),
+                     "enabled": r.get("enabled", False), "report": r.get("report")})
+    rows.sort(key=lambda x: x.get("ts") or 0, reverse=True)
+    return {"enabled": Analyst().enabled, "rows": rows}
+
+
+@router.post("/tenbagger")
+async def tenbagger_run(command: str = "탐색", force: bool = False) -> dict:
+    """텐베거 발굴 실행. 탐색/신규발굴/딥다이브는 12h 캐시(force로 재실행), 오늘점검/
+    가격만은 항상 최신 실행. 웹검색 필수 — API 모드 즉시, 구독 CLI는 호스트 큐로."""
+    redis = get_redis()
+    command = (command or "탐색").strip()
+    slot = command
+    raw = await redis.hget(TENBAGGER_KEY, slot)
+    prev = json.loads(raw) if raw else None
+    cacheable = command in ("탐색", "신규발굴") or command.startswith("딥다이브")
+    if (cacheable and not force and prev and prev.get("report")
+            and time.time() - (prev.get("ts") or 0) < 43200):     # 12h 캐시
+        return {**prev, "cached": True}
+    analyst = Analyst()
+    if analyst.mode == "api":
+        result = await analyst.analyze_tenbagger(command)
+        await redis.hset(TENBAGGER_KEY, slot, json.dumps(result, ensure_ascii=False))
+        return result
+    await redis.sadd(TENBAGGER_REQ_KEY, command)
+    return {"queued": True, "command": command, "slot": slot,
+            "report": "🚀 텐베거 발굴 요청됨(전 시장 심층 리서치 — 수 분 소요). 잠시 후 새로고침.",
+            "prev": (prev or {}).get("report"), "prev_ts": (prev or {}).get("ts")}

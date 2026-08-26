@@ -29,6 +29,8 @@ from shared.redis_keys import (
     RESEARCH_REQ_KEY,
     RESEARCH_STORY_KEY,
     RESEARCH_STORY_REQ_KEY,
+    TENBAGGER_KEY,
+    TENBAGGER_REQ_KEY,
 )
 from shared.settings import settings
 
@@ -152,6 +154,21 @@ async def run() -> None:
         except Exception as exc:
             logger.warning("[DATA_ERROR] %s 스토리 분석 실패: %s", code, exc)
 
+    async def tenbagger_code(command: str) -> None:
+        """TENBAGGER 발굴 요청 처리 → research:tenbagger 저장 + 텔레그램 전문 발송."""
+        try:
+            result = await analyst.analyze_tenbagger(command)
+            slot = command.strip() or "탐색"
+            await redis.hset(TENBAGGER_KEY, slot,
+                             json.dumps(result, ensure_ascii=False))
+            body = (result.get("report") or "").strip()
+            if result.get("enabled") and body and not body.startswith("⚠️"):
+                await sender.send_long(               # 마크다운 렌더 발송
+                    f"🚀 텐베거 디텍터 — {slot}\n{body}", md=True)
+            logger.info("[tenbagger] '%s' 완료", command)
+        except Exception as exc:
+            logger.warning("[DATA_ERROR] tenbagger '%s' 실패: %s", command, exc)
+
     coach_fail_ts = 0.0   # 정기 점검 실패 시 30분 쿨다운(15초 루프의 재시도 스팸 방지)
 
     async def run_coach(reason: str) -> None:
@@ -255,6 +272,13 @@ async def run() -> None:
                     await heartbeat()
                     await coach_if_requested()
                     await story_code(code)
+                    await asyncio.sleep(2)
+                # 1c) 텐베거 발굴 요청(🚀 전 시장 심층 리서치 — 무거워서 온디맨드 전용)
+                tbs = await redis.spop(TENBAGGER_REQ_KEY, 2)
+                for cmd in (tbs or []):
+                    await heartbeat()
+                    await coach_if_requested()
+                    await tenbagger_code(cmd)
                     await asyncio.sleep(2)
                 # 2) 정기 전체 분석 — 최근 리포트가 있는 종목은 건너뜀(재시작해도 재분석 안 함)
                 if time.time() - last_full >= 3600:   # 1시간마다 점검(신규/만료분만 분석)

@@ -42,6 +42,7 @@ from shared.redis_keys import (
     RESEARCH_HB_KEY,
     STOCK_MARKET_KEY,
     STOCK_QUOTE_KEY,
+    TENBAGGER_REQ_KEY,
     TG_OFFSET_KEY,
     TG_PENDING_KEY,
     TOSS_ACCOUNT_KEY,
@@ -56,6 +57,7 @@ _HELP = ("명령: 잔고 · 상태 · 후보 · 플랜 · 진단 · 점검 · �
          "진단  ← 오늘 자동매매가 왜 사고팔았나/안 했나(국면·후보·에이전트·초단타)\n"
          "플랜  ← 오늘의 매매 플랜(매수 후보 3 + 매도 점검 3, 스윙 맞춤)\n"
          "점검  ← AI 아침 점검(보유 종목 판정)을 지금 바로 요청\n"
+         "텐베거 [신규발굴/오늘점검/가격만] · 딥다이브 TICKER  ← 5~10년 10배 성장주 발굴\n"
          "리포트 <본문 붙여넣기>  ← 증권사 데일리(SK증권 등)를 저장 — 다음 점검에\n"
          "  최우선 반영(여러 번 보내면 이어짐 · '리포트'=확인 · '리포트삭제'=초기화)\n"
          "매수 코드 수량 [가격] / 매도 코드 수량 [가격]  ← 기본 브로커(한투)\n"
@@ -89,6 +91,12 @@ def parse_command(text: str) -> dict | None:
         body = t[len("리포트"):].strip()
         if body:
             return {"cmd": "note_add", "text": body}
+    # 텐베거 디텍터: '텐베거 [탐색|신규발굴|오늘점검|가격만]' / '딥다이브 TICKER'
+    if t == "텐베거" or t.startswith("텐베거 ") or t.startswith("텐베거\n"):
+        return {"cmd": "tenbagger", "command": t[len("텐베거"):].strip() or "탐색"}
+    m = re.fullmatch(r"딥다이브\s+([A-Za-z]{1,6}(?:\.[A-Za-z]{1,2})?|\d{6})", t)
+    if m:
+        return {"cmd": "tenbagger", "command": "딥다이브 " + m.group(1).upper()}
     # 코드: 국내 6자리 또는 미국 티커(NVDA, BRK.B). 가격: 미국은 소수점(달러) 허용.
     m = re.fullmatch(r"(한투|토스)?(매수|매도)\s+(\d{6}|[A-Za-z]{1,6}(?:\.[A-Za-z]{1,2})?)"
                      r"\s+(\d+(?:\.\d+)?)(?:\s+(\d+(?:\.\d+)?))?", t)
@@ -297,6 +305,16 @@ async def _handle(redis: aioredis.Redis, toss: TossClient, kis,
             f"예상 금액 <b>{esc(est)}</b>\n→ 버튼을 누르거나 2분 내 '확인 {n}' 회신",
             buttons=[[{"text": "✅ 확인 주문", "cb": f"cf:{n}"},
                       {"text": "❌ 취소", "cb": f"dr:{n}"}]], html=True)
+    elif cmd == "tenbagger":
+        hb = await redis.get(RESEARCH_HB_KEY)
+        if not hb:
+            await sender.send("🚫 텐베거를 처리할 호스트 research가 응답 없음 — Pi에서 재시작:\n"
+                              "pkill -f run-research-host; pkill -f research.main\n"
+                              "nohup bash deploy/run-research-host.sh >/tmp/research.log 2>&1 &")
+            return
+        await redis.sadd(TENBAGGER_REQ_KEY, p["command"])
+        await sender.send(f"🚀 텐베거 '{esc(p['command'])}' 요청됨 — 전 시장 심층 리서치(수 분 소요). "
+                          "완료되면 리포트가 도착해요.", html=True)
     elif cmd == "confirm":
         await sender.send(await _execute_pending(redis, toss, kis, p["n"]))
     elif cmd == "cancel":
