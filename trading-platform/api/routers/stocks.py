@@ -202,10 +202,9 @@ async def stocks_score(limit: int = 200) -> dict:
 async def _score_build(limit: int) -> dict:
     redis = get_redis()
     quotes = [q for q in await load_quotes(redis) if q.get("price") and q.get("code")]
-    # 미국(재무 미확보): 가치·품질·성장 축이 0이라 점수가 '회피'로 왜곡 → 랭킹 제외.
-    # (개별 조회는 상세 모달에서 추세·타이밍 참고용으로 표시. KIS 해외 재무 연동 시 포함 예정)
-    quotes = [q for q in quotes
-              if not (q.get("currency") == "USD" and q.get("eps") is None)]
+    # 미국주식도 포함 — compute_score가 데이터 있는 축(추세·타이밍)만으로 100점 환산해
+    # 공정 점수를 내므로(재무 결측 종목이 '회피'로 왜곡되던 문제 해소) 국장·미장 통합 랭킹.
+    # 신뢰도(confidence)로 근거 충실도만 별도 표기.
     codes = [q["code"] for q in quotes]
     closes_map: dict[str, list] = {}
     if codes:

@@ -560,7 +560,7 @@ async function renderHome(){
     </div>
     ${coachCardHTML(co)}
     ${funnelCardHTML(pl)}
-    ${planCardHTML(pl)}
+    ${planCardHTML(pl, Object.fromEntries(scores.map(r=>[r.code,r])))}
     ${calCardHTML(cal)}
     <div class="card"><h3>시장 온도</h3>
       ${idxRow("코스피",IND.kospi)}${idxRow("코스닥",IND.kosdaq)}
@@ -659,8 +659,8 @@ function funnelCardHTML(pl){
       ${step("전체 시장",f.market,g1,1)}${step("1차 선별",f.stage1,g2,1)}${step("정밀 평가",f.evaluated,g3,1)}${step("최종 후보",f.candidates,g4,0)}
     </div></div>`;
 }
-function planCardHTML(pl){
-  pl=pl||{};
+function planCardHTML(pl,scMap){
+  pl=pl||{}; scMap=scMap||{};
   const buys=pl.buys||[], sells=pl.sells||[], rg=pl.regime||{};
   const rgOn=rg.regime&&rg.regime!=="unknown";
   if(!buys.length&&!sells.length&&!rgOn) return '';
@@ -669,8 +669,12 @@ function planCardHTML(pl){
   const rgBadge=rgOn?`<span class="badge">🧭 ${rg.label} · ${rg.posture||''}${rg.exposure_pct!=null?` · 비중 ${rg.exposure_pct}%`:''} · ${(rg.strategy_labels||rg.strategies||[]).join("/")}</span>`:'';
   const rgLine=rgOn?`<div class="num ${rgTone}" style="margin:2px 0 8px">${(rg.reasons||[]).slice(0,3).join(" · ")}</div>`:'';
   const buyRows=buys.map((b,i)=>{const us=b.currency==="USD";
+    // 표시 점수 = 상세 모달·분석 점수 TOP와 동일한 '매력도'(compute_score) — 같은 종목이
+    // 어느 화면에서든 같은 숫자가 보이도록 통합. 전략 점수(swing)는 참고 배지로 이동.
+    const sc=scMap[b.code]; const av=sc?sc.score:null;
+    const scHTML=av!=null?`<b class="num strong ${VC(av)}">${numC(av,0)}점</b>`:`<b class="buy">${numC(b.swing,0)}점</b>`;
     return `<div class="card" style="margin-top:8px"><div class="row clk" onclick="openStock('${b.code}','${qesc(b.name||'')}')">
-      <span><b>${i+1}. ${b.name||b.code}</b> <span class="num">${b.code}</span>${b.strategy_label?` <span class="badge">${b.strategy_label}</span>`:''}</span><b class="buy">${numC(b.swing,0)}점</b></div>
+      <span><b>${i+1}. ${b.name||b.code}</b> <span class="num">${b.code}</span>${sc?` <span class="badge ${av>=75?'buy':av>=60?'':'num'}">${sc.verdict}</span>`:''}${b.strategy_label?` <span class="badge" title="이 후보를 고른 전략·전략점수">${b.strategy_label} ${numC(b.swing,0)}</span>`:''}</span>${scHTML}</div>
       <div class="num" style="margin:4px 0">${(b.reasons||[]).join(" · ")}</div>
       <div class="row"><span>매수 <b class="pos">${mn(b.entry,us)}</b> · 손절 <b class="neg">${mn(b.stop,us)}</b> · 목표 <b class="buy">${mn(b.target,us)}</b></span>
       <span>${b.qty?`제안 ${numC(b.qty,0)}주`:''}</span></div></div>`;}).join("");
@@ -1279,13 +1283,16 @@ function paintModal(code,name,d){
     const bar=(lab,val,max)=>`<div class="row"><span style="width:56px">${lab}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:${Math.max(0,Math.min(100,(val||0)/max*100))}%"></i></div><b class="num">${numC(val,0)}/${max}</b></div>`;
     // 축별 분해(설명가능성) — 각 축 바 + 실제 반영 근거를 함께(HONG STOCK 벤치마크 R2).
     const axBar=ax=>{const pct=Math.max(0,Math.min(100,(ax.score||0)/ax.max*100));
+      // applied=false → 이 종목엔 데이터가 없어 점수 환산에서 제외된 축(예: 미국주식 가치·품질).
+      // 0/30으로 오해되지 않게 '해당없음'으로 흐리게 표기 — 감점이 아니라 미집계.
+      if(ax.applied===false) return `<div title="${qesc(ax.desc||'')}" style="opacity:.4"><div class="row" style="margin:0"><span style="width:52px">${escH(ax.label)}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:0%"></i></div><b class="num">해당없음</b></div><div class="num" style="margin:0 0 5px 52px">데이터 미제공 — 점수 환산에서 제외</div></div>`;
       const rs=(ax.reasons||[]).join(" · ")||'<span style="opacity:.45">반영 근거 없음</span>';
       return `<div title="${qesc(ax.desc||'')}"><div class="row" style="margin:0"><span style="width:52px">${escH(ax.label)}</span><div class="prog" style="flex:1;margin:0 8px"><i style="width:${pct}%"></i></div><b class="num">${numC(ax.score,1)}/${ax.max}</b></div><div class="num" style="margin:0 0 5px 52px;opacity:.82">${rs}</div></div>`;};
     const axesH=(SC.axes&&SC.axes.length)?SC.axes.map(axBar).join("")
       :`${bar("가치",SC.value,30)}${bar("품질",SC.quality,20)}${bar("성장",SC.growth,15)}${bar("추세",SC.momentum,25)}${bar("타이밍",SC.timing,10)}`;
     const growCaveat=(SC.margin_pct!=null&&SC.margin_pct<0&&(SC.ni_growth_pct||0)>=15)?' <span class="num">(이익이 크게 느는 성장주는 가치 기준으로 비싸 보일 수 있어요)</span>':'';
     const marginTxt=SC.margin_pct==null?"":(SC.margin_pct>0?`<b class="pos">적정가보다 ${numC(SC.margin_pct,0)}% 싸요</b>`:`<b class="neg">그레이엄 가치 기준 ${numC(-SC.margin_pct,0)}% 비싸요</b>${growCaveat}`);
-    const usScoreNote=US?`<div class="num" style="margin-top:6px">🇺🇸 미국 종목은 가치·품질(EPS/BPS) 데이터가 없어 점수는 <b>성장(SEC 분기실적)·추세·타이밍만</b> 반영돼요 — 낮게 나와도 회사가 나쁘다는 뜻이 아니에요. 참고용으로만 보세요.</div>`:"";
+    const usScoreNote=US?`<div class="num" style="margin-top:6px">🇺🇸 미국 종목은 가치·품질(EPS/BPS) 데이터가 없어 <b>있는 축(성장·추세·타이밍)만으로 100점 환산</b>해요 — 국내와 같은 잣대라 점수는 공정하지만, 근거가 적어 <b>신뢰도</b>가 낮게 표시됩니다.</div>`:"";
     // 진입 타이밍(매력도와 별개) — '적극매수인데 왜 안 사?' 혼란 해소.
     const TM=d.timing;
     const tmH=TM?`<div class="card" style="margin-bottom:10px;border-left:3px solid var(--${TM.tone==='pos'?'green':TM.tone==='neg'?'up':'accent'},#888)">
