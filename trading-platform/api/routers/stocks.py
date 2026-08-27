@@ -36,7 +36,7 @@ from api.services.stock_radar import (
 )
 from api.services.stock_value import load_quotes, value_screener
 from backtest.engine import STRATEGIES, backtest
-from collector.stock.kis import effective_watchlist, is_kr_code
+from collector.stock.kis import KISClient, effective_watchlist, is_kr_code
 from fastapi import HTTPException
 from shared.redis_keys import (
     DART_CORP_KEY,
@@ -377,20 +377,32 @@ def _norm_day(v) -> str:
 
 _toss = TossClient()
 _dart = DartClient()
+_kis = KISClient()
 
 
 async def _ondemand_candles(redis, code: str) -> list[dict]:
-    """미수집 종목의 일봉을 토스에서 즉시 수집(6h 캐시) — 관심종목 아니어도 분석 가능."""
-    if not _toss.enabled:
-        return []
-    try:
-        async with httpx.AsyncClient(timeout=20) as tc:
-            candles = await _toss.fetch_daily_history(tc, code)
-        if candles:
-            await redis.set(stock_ohlcv_key(code), _json.dumps(candles), ex=21600)
-        return candles or []
-    except Exception:
-        return []
+    """미수집 종목의 일봉을 즉시 수집(6h 캐시) — 관심종목 아니어도 분석 가능.
+
+    토스 우선, 실패/빈 응답이면 국내는 KIS로 폴백(KIS가 관심종목 일봉의 정식 소스라
+    비관심 소형주에서 토스가 빈손일 때도 추세·타이밍 축이 채워진다). 소스 하나가 죽어도
+    다른 하나로 화면이 뜨도록 이중화 — '주가 흐름 일시 수집 실패'를 줄인다.
+    """
+    candles: list[dict] = []
+    if _toss.enabled:
+        try:
+            async with httpx.AsyncClient(timeout=12) as tc:
+                candles = await _toss.fetch_daily_history(tc, code)
+        except Exception:
+            candles = []
+    if len(candles) < 20 and is_kr_code(code) and _kis.enabled:
+        try:
+            async with httpx.AsyncClient(timeout=12) as kc:
+                candles = await _kis.fetch_daily(kc, code, days=180)
+        except Exception:
+            pass
+    if candles:
+        await redis.set(stock_ohlcv_key(code), _json.dumps(candles), ex=21600)
+    return candles or []
 
 
 async def _ondemand_financials(redis, code: str, year: int) -> dict:

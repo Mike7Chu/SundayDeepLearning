@@ -215,7 +215,13 @@ def compute_score(quote: dict, closes: list[float] | None = None,
     got = sum(s for s, m, ok in parts if ok)
     cap = sum(m for s, m, ok in parts if ok)
     base = (got / cap * 100.0) if cap else 0.0
-    total = round(min(100.0, max(0.0, base + nw)), 1)
+    # 상한 = 증거 비례. 데이터가 적을수록(cap↓) '매력 최상위 100'을 주장할 수 없게 제한.
+    # 특히 차트(추세·타이밍)가 없으면 '지금 사도 되는 흐름인가'를 확인 못 하므로 상한을 크게
+    # 낮춘다 — 재무만으로 싸 보이는 종목(가치 트랩·비유동 소형주)이 100점으로 뜨던 문제 차단.
+    ceiling = 60.0 + 40.0 * (cap / 100.0)
+    if not has_chart:
+        ceiling = min(ceiling, 55.0)
+    total = round(max(0.0, min(base + nw, ceiling, 100.0)), 1)
     reasons = vr + qr + grr + mr + tr + nwr
     # 축별 분해(설명가능성) — applied=이 종목에 데이터가 있어 점수에 반영됐는가.
     axes = [
