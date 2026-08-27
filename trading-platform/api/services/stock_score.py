@@ -203,31 +203,39 @@ def compute_score(quote: dict, closes: list[float] | None = None,
     mo, mr, sig = _momentum_axis(closes)
     tm, tr = _timing_axis(quote, closes, sig)
     nw, nwr = _news_axis(news)
-    total = round(min(100.0, max(0.0, v + ql + gr + mo + tm + nw)), 1)
-    reasons = vr + qr + grr + mr + tr + nwr
-    # 축별 분해(설명가능성) — 총점을 어느 축이 얼마나 채웠나 + 각 축의 근거를 별도 노출.
-    axes = [
-        {"key": "value", "label": "가치", "score": v, "max": 30, "reasons": vr,
-         "desc": "이익·자산 대비 싼가(이익수익률·ROE·PBR·안전마진)"},
-        {"key": "quality", "label": "품질", "score": ql, "max": 20, "reasons": qr,
-         "desc": "돈 잘 버는 튼튼한 회사인가(흑자·ROE·저PER/PBR)"},
-        {"key": "growth", "label": "성장", "score": gr, "max": 15, "reasons": grr,
-         "desc": "이익이 크는가(순이익 YoY·잠정실적)"},
-        {"key": "momentum", "label": "추세", "score": mo, "max": 25, "reasons": mr,
-         "desc": "오르는 흐름인가(정배열·SMA60·모멘텀)"},
-        {"key": "timing", "label": "타이밍", "score": tm, "max": 10, "reasons": tr,
-         "desc": "지금 살 때인가(MACD·52주 위치)"},
-        {"key": "news", "label": "뉴스", "score": round(5 + nw, 1), "max": 10,
-         "reasons": nwr, "desc": "최근 공시·뉴스 감성(±5 가감 · 5=중립)"},
-    ]
-    # 신뢰도(Confidence): 점수를 구성한 데이터가 얼마나 채워졌나(0~100).
-    # 낮으면 '점수가 낮다'가 아니라 '판단 근거가 부족하다'는 뜻 — 별도 축으로 노출.
     has_fund = quote.get("eps") is not None and quote.get("bps") is not None
     has_growth = any(quote.get(k) is not None for k in
                      ("flash_ni_yoy", "flash_op_yoy", "ni_growth_q_pct",
                       "ni_growth_pct"))
-    checks = [has_fund, has_fund, has_growth,          # 가치·품질(재무)·성장
-              len(closes) >= 60, len(closes) >= 20]    # 추세·타이밍(차트)
+    has_chart = len(closes) >= 20
+    # 데이터 있는 축만으로 100점 환산 — 재무 결측(미국주식 등)이 구조적으로 저평가되지
+    # 않게(가치·품질이 0이라 최대 50점에 갇히던 문제). 전 데이터 있는 국내는 종전과 동일.
+    parts = [(v, 30, has_fund), (ql, 20, has_fund), (gr, 15, has_growth),
+             (mo, 25, has_chart), (tm, 10, has_chart)]
+    got = sum(s for s, m, ok in parts if ok)
+    cap = sum(m for s, m, ok in parts if ok)
+    base = (got / cap * 100.0) if cap else 0.0
+    total = round(min(100.0, max(0.0, base + nw)), 1)
+    reasons = vr + qr + grr + mr + tr + nwr
+    # 축별 분해(설명가능성) — applied=이 종목에 데이터가 있어 점수에 반영됐는가.
+    axes = [
+        {"key": "value", "label": "가치", "score": v, "max": 30, "reasons": vr,
+         "applied": has_fund, "desc": "이익·자산 대비 싼가(이익수익률·ROE·PBR·안전마진)"},
+        {"key": "quality", "label": "품질", "score": ql, "max": 20, "reasons": qr,
+         "applied": has_fund, "desc": "돈 잘 버는 튼튼한 회사인가(흑자·ROE·저PER/PBR)"},
+        {"key": "growth", "label": "성장", "score": gr, "max": 15, "reasons": grr,
+         "applied": has_growth, "desc": "이익이 크는가(순이익 YoY·잠정실적)"},
+        {"key": "momentum", "label": "추세", "score": mo, "max": 25, "reasons": mr,
+         "applied": has_chart, "desc": "오르는 흐름인가(정배열·SMA60·모멘텀)"},
+        {"key": "timing", "label": "타이밍", "score": tm, "max": 10, "reasons": tr,
+         "applied": has_chart, "desc": "지금 살 때인가(MACD·52주 위치)"},
+        {"key": "news", "label": "뉴스", "score": round(5 + nw, 1), "max": 10,
+         "reasons": nwr, "applied": bool(news and news.get("n")),
+         "desc": "최근 공시·뉴스 감성(±5 가감 · 5=중립)"},
+    ]
+    # 신뢰도: 점수를 구성한 데이터가 얼마나 채워졌나(0~100). 낮으면 '점수가 낮다'가 아니라
+    # '판단 근거가 부족'(예: 미국주식은 재무 결측 → 신뢰도 낮게, 점수는 있는 축으로 환산).
+    checks = [has_fund, has_fund, has_growth, len(closes) >= 60, has_chart]
     confidence = round(100 * sum(checks) / len(checks))
     return {
         "code": quote.get("code"), "name": quote.get("name"), "price": quote.get("price"),
